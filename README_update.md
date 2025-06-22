@@ -1,24 +1,39 @@
 # Semantic JSON Tree Consistency Evaluation
 
-A sophisticated framework for evaluating structural and semantic consistency between JSON objects using tree edit distance algorithms with semantic understanding.
+An advanced framework for evaluating structural and semantic consistency between JSON objects using tree edit distance algorithms with semantic understanding.
 
 ## Overview
 
-The Semantic JSON Tree Consistency Evaluation framework provides advanced tools for comparing JSON structures beyond simple string matching. It converts JSON objects into tree representations and calculates edit distances between them, taking into account both structural similarities and semantic meaning.
+The Semantic JSON Tree Consistency Evaluation framework provides sophisticated tools for comparing JSON structures beyond simple string matching. It converts JSON objects into tree representations and calculates edit distances between them, taking into account both structural similarities and semantic meaning.
 
-This framework is particularly useful for:
-- Evaluating consistency of LLM-generated JSON outputs
-- Comparing JSON structures with different naming conventions
-- Measuring similarity between complex nested JSON objects
-- Analyzing structural patterns across multiple JSON documents
-
-## Key Features
+Key capabilities include:
 
 - **Semantic Understanding**: Recognizes when fields have different names but similar meanings
 - **Tree-Based Comparison**: Uses tree edit distance algorithms for accurate structural comparison
 - **Enhanced String Comparison**: Intelligently handles long text values by breaking them into meaningful chunks
 - **Comprehensive Metrics**: Provides detailed consistency metrics including statistical measures
 - **Customizable Costs**: Allows fine-tuning of edit operation costs for different scenarios
+
+## Key Features
+
+### Semantic Similarity
+
+- **Embedding-Based Comparison**: Uses sentence embeddings to detect semantic similarity between keys and values
+- **Key Mapping**: Finds optimal mapping between differently named but semantically similar keys
+- **Customizable Thresholds**: Adjustable semantic similarity thresholds for different use cases
+
+### Advanced String Comparison
+
+- **Content-Aware Chunking**: Intelligently splits long text based on content type (code, natural language)
+- **Optimal Chunk Matching**: Uses Hungarian algorithm to find best matches between text chunks
+- **Structure Recognition**: Detects and preserves structure in code blocks and formatted text
+
+### Comprehensive Consistency Metrics
+
+- **Basic Metrics**: Mean similarity, standard deviation, min/max values
+- **Statistical Measures**: Quartiles, entropy, Gini coefficient
+- **Outlier Detection**: Identifies anomalous pairs with Z-scores
+- **Detailed Analysis**: Operation counts, frequently edited paths, most different pairs
 
 ## Installation
 
@@ -122,34 +137,7 @@ if consistency_report['outliers']:
         print(f"Pair {outlier['pair']} with similarity {outlier['similarity']:.4f} (Z-score: {outlier['z_score']:.2f})")
 ```
 
-## Semantic Similarity Features
-
-### Key Mapping with Semantic Understanding
-
-The framework can recognize when keys have different names but similar meanings:
-
-```python
-# Example with semantically similar keys
-json1 = {"user_info": {"user_name": "John", "user_age": 30}}
-json2 = {"profile": {"name": "John", "age": 30}}
-
-# With semantic similarity enabled
-result_semantic = evaluate_semantic_json_consistency(
-    [json1, json2],
-    use_semantic_similarity=True
-)
-
-# Without semantic similarity
-result_standard = evaluate_semantic_json_consistency(
-    [json1, json2],
-    use_semantic_similarity=False
-)
-
-print(f"Semantic similarity: {result_semantic['consistency_metrics']['mean_similarity']:.4f}")
-print(f"Standard similarity: {result_standard['consistency_metrics']['mean_similarity']:.4f}")
-```
-
-### Enhanced String Comparison for Long Text
+### Handling Long Text Values
 
 The framework intelligently handles long text values by:
 
@@ -209,21 +197,6 @@ The framework provides comprehensive metrics for evaluating consistency:
 - **outliers**: List of outlier pairs with similarity values and Z-scores
 - **most_different_pairs**: Pairs with lowest similarity scores and their edit operations
 
-## Tree Edit Distance Algorithm
-
-The framework uses the Tree Edit Distance algorithm to compare JSON structures:
-
-1. **Tree Conversion**: JSON objects are converted to tree structures with typed nodes
-2. **Edit Operations**: Three basic operations are defined - insert, delete, and update
-3. **Cost Functions**: Custom cost functions determine the cost of each operation
-4. **Optimal Edit Script**: The algorithm finds the minimum-cost sequence of operations
-5. **Similarity Score**: Final similarity is calculated as 1 - (normalized distance)
-
-For optimal matching between trees, the framework uses:
-- **Zhang-Shasha Algorithm**: An efficient algorithm for tree edit distance calculation
-- **Hungarian Algorithm**: For optimal bipartite matching in array comparison
-- **Semantic Matching**: For finding corresponding keys with different names
-
 ## Requirements
 
 - Python 3.8+
@@ -233,76 +206,37 @@ For optimal matching between trees, the framework uses:
   - sentence-transformers
   - zss (optional, for Zhang-Shasha algorithm)
 
-## Examples
+## Integration with Field-Aware Consistency Evaluation
 
-### Comparing Product Data with Different Schemas
-
-```python
-# Product data with different schemas
-product1 = {
-    "product_id": "P12345",
-    "product_name": "Wireless Headphones",
-    "product_price": 99.99,
-    "product_category": "Electronics",
-    "product_specifications": {
-        "color": "Black",
-        "weight": "250g",
-        "battery_life": "20 hours"
-    }
-}
-
-product2 = {
-    "id": "P12345",
-    "title": "Wireless Headphones",
-    "price": 99.99,
-    "category": "Electronics",
-    "specs": {
-        "color": "Black",
-        "weight": "250g",
-        "battery": "20 hours"
-    }
-}
-
-# Compare with semantic understanding
-evaluator = SemanticJsonTreeConsistencyEvaluator(use_semantic_similarity=True)
-similarity, operations = evaluator.calculate_tree_edit_distance(product1, product2)
-
-print(f"Semantic similarity: {similarity:.4f}")
-print("Key edit operations:")
-for op in operations[:3]:
-    print(f"- {op['operation']} at {op['path']}")
-```
-
-### Analyzing Multiple LLM Outputs
+The Semantic JSON Tree Consistency framework can be integrated with the Field-Aware Consistency Evaluation framework for comprehensive evaluation of LLM outputs:
 
 ```python
-# Multiple JSON outputs from an LLM
-llm_outputs = [output1, output2, output3, output4, output5]
+from semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
+from src.consistency_eval import FieldAwareConsistencyCalculator
 
-# Evaluate consistency
-consistency_report = evaluator.evaluate_structural_consistency(llm_outputs)
+# Initialize both evaluators
+tree_evaluator = SemanticJsonTreeConsistencyEvaluator(
+    use_semantic_similarity=True,
+    semantic_threshold=0.7
+)
 
-# Print key metrics
-print(f"Overall consistency: {consistency_report['consistency_metrics']['mean_similarity']:.4f}")
-print(f"Consistency coefficient: {consistency_report['consistency_metrics']['consistency_coefficient']:.4f}")
+field_evaluator = FieldAwareConsistencyCalculator(
+    bedrock_client=bedrock_client,
+    eval_fields=["reason", "position", "modified_version"],
+    result_field_name="corrections"
+)
 
-# Identify problematic areas
-if consistency_report['frequently_edited_paths']:
-    print("\nMost frequently edited paths:")
-    for item in consistency_report['frequently_edited_paths'][:3]:
-        print(f"- {item['path']}: {item['edit_count']} edits")
+# Use tree evaluator for structural consistency
+structural_report = tree_evaluator.evaluate_structural_consistency(json_outputs)
+
+# Use field evaluator for field-specific consistency
+field_report, metrics = field_evaluator.calculate_prompt_consistency(responses)
+
+# Combine insights from both approaches
+combined_analysis = {
+    "structural_consistency": structural_report["consistency_metrics"]["mean_similarity"],
+    "field_consistency": field_report["consistency_score"]["overall"],
+    "structural_std_dev": structural_report["consistency_metrics"]["std_deviation"],
+    "outliers_detected": len(structural_report["outliers"]) > 0
+}
 ```
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
