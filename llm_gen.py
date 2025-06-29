@@ -72,6 +72,8 @@ def _single_inference(client, model_id, messages, system_prompts=None, max_token
         
         # Parse the response with safer error handling
         try:
+            if response_text.startswith("```json"):
+                response_text = response_text[7:-3]  # Remove backticks and 'json'
             if isinstance(response_text, str):
                 parsed_response = ast.literal_eval(response_text)  # Convert string to dict if necessary
             elif isinstance(response_text, bytes):
@@ -138,7 +140,7 @@ def run_inference(client, model_id, messages, system_prompts=None, max_tokens=80
         messages: List of messages to send
         system_prompts: Optional system prompts
         max_tokens: Maximum tokens to generate
-        temperature: Temperature for sampling
+        temperature: Temperature for sampling (higher = more random outputs)
         top_p: Top-p for sampling
         top_k: Top-k for sampling
         run_num: Number of inference runs to perform
@@ -199,9 +201,13 @@ if __name__ == "__main__":
     parser.add_argument("--data-dir", type=str, required=True, help="The directory containing the data files.")
     parser.add_argument("--max-workers", type=int, default=None, help="Maximum number of parallel workers for inference. Default is auto-determined based on CPU count.")
     parser.add_argument("--run-num", type=int, default=5, help="Number of inference runs to perform.")
+    parser.add_argument("--temperature", type=float, default=0.1, help="Temperature for sampling (0.1-2.0). Higher values produce more random outputs.")
+    parser.add_argument("--top-p", type=float, default=0.9, help="Top-p (nucleus) sampling parameter.")
+    parser.add_argument("--top-k", type=int, default=200, help="Top-k sampling parameter.")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging.")
     parser.add_argument("--output-dir", type=str, default=".", help="Directory to save evaluation results.")
     parser.add_argument("--schema-only", action="store_true", help="Only evaluate schema consistency without saving full responses.")
+    parser.add_argument("--sample-limit", type=int, default=None, help="Limit the number of samples to process.")
     args = parser.parse_args()
     
     # Create a client with appropriate configuration
@@ -225,6 +231,9 @@ if __name__ == "__main__":
         logging.getLogger('urllib3').setLevel(logging.WARNING)
 
     print(f"Starting parallel inference with {args.run_num} runs using ThreadPoolExecutor")
+    print(f"Model: {model_id}")
+    print(f"Temperature: {args.temperature}")
+    print(f"Top-p: {args.top_p}, Top-k: {args.top_k}")
     
     # List dataset
     dataset_dict = read_sharegpt(args.data_dir)
@@ -234,15 +243,21 @@ if __name__ == "__main__":
     
     # Create timestamped output directory for this run
     run_timestamp = time.strftime('%Y%m%d_%H%M%S')
-    run_output_dir = os.path.join(args.output_dir, f"llm_gen_results_{run_timestamp}")
+    temp_str = f"temp_{args.temperature:.2f}".replace('.', '_')
+    model_name = model_id.split('/')[-1].split(':')[0]
+    run_output_dir = os.path.join(args.output_dir, f"llm_gen_results_{model_name}_{temp_str}_{run_timestamp}")
     os.makedirs(run_output_dir, exist_ok=True)
     
     print(f"Results will be saved to: {run_output_dir}")
     
-    for sample_idx, item in enumerate(dataset_dict[:2]):
+    # Determine how many samples to process
+    sample_limit = args.sample_limit if args.sample_limit is not None else 2
+    samples_to_process = dataset_dict[:sample_limit]
+    
+    for sample_idx, item in enumerate(samples_to_process):
         sample_id = f"sample_{sample_idx:03d}"
         print(f"\n{'='*60}")
-        print(f"PROCESSING SAMPLE {sample_idx + 1}/{min(len(dataset_dict), 2)}: {sample_id}")
+        print(f"PROCESSING SAMPLE {sample_idx + 1}/{len(samples_to_process)}: {sample_id}")
         print(f"{'='*60}")
         
         system_prompt = item['conversations'][0]['value']
@@ -268,9 +283,9 @@ if __name__ == "__main__":
             messages=[message],
             system_prompts=system_prompt,
             max_tokens=8000,
-            temperature=0.1,
-            top_p=0.9,
-            top_k=200,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            top_k=args.top_k,
             run_num=args.run_num,
             max_workers=args.max_workers
         )
@@ -279,3 +294,44 @@ if __name__ == "__main__":
         
         schema_list = [extract_schema(response) for response in responses]
         print(f"schema_list: {schema_list}")
+        
+        # Save the responses and metadata
+        sample_results = {
+            "sample_id": sample_id,
+            "prompt": user_prompt,
+            "system_prompt": system_prompt,
+            "ground_truth": gt_dict,
+            "responses": responses,
+            "schemas": schema_list,
+            "metadata": {
+                "model_id": model_id,
+                "temperature": args.temperature,
+                "top_p": args.top_p,
+                "top_k": args.top_k,
+                "run_num": args.run_num
+            }
+        }
+        
+        all_sample_results.append(sample_results)
+        
+        # Save individual sample results
+        sample_output_path = os.path.join(run_output_dir, f"{sample_id}.json")
+        with open(sample_output_path, 'w') as f:
+            json.dump(sample_results, f, indent=2)
+        print(f"Saved results for {sample_id} to {sample_output_path}")
+    
+    # Save all results in a single file
+    all_results_path = os.path.join(run_output_dir, "all_results.json")
+    with open(all_results_path, 'w') as f:
+        json.dump({
+            "metadata": {
+                "model_id": model_id,
+                "temperature": args.temperature,
+                "top_p": args.top_p,
+                "top_k": args.top_k,
+                "run_num": args.run_num,
+                "timestamp": run_timestamp
+            },
+            "results": all_sample_results
+        }, f, indent=2)
+    print(f"\nAll results saved to {all_results_path}")

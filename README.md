@@ -293,6 +293,69 @@ if consistency_report['frequently_edited_paths']:
         print(f"- {item['path']}: {item['edit_count']} edits")
 ```
 
+## Command-line Tools
+
+### Model Comparison
+
+The `run_model_comparison.py` script allows you to compare the consistency of JSON outputs across different LLM models at a fixed temperature.
+
+```bash
+python run_model_comparison.py --data-dir <data_directory> --output-dir <output_directory> [options]
+```
+
+#### Options:
+- `--data-dir`: Directory containing the data files (required)
+- `--output-dir`: Directory to save results (default: "./model_comparison")
+- `--temperature`: Fixed temperature to use for all models (default: 0.7)
+- `--run-num`: Number of runs per model (default: 10)
+- `--sample-limit`: Number of samples to process (default: 5)
+
+#### Example:
+```bash
+python run_model_comparison.py --data-dir ./sharegpt_data --output-dir ./model_comparison --temperature 0.5 --run-num 5 --sample-limit 3
+```
+
+#### Output:
+- Generates JSON outputs for each model
+- Evaluates consistency using semantic tree comparison
+- Creates visualizations comparing models:
+  - Mean consistency scores
+  - Consistency coefficient
+  - Semantic improvement
+  - Standard deviation
+  - Empty response rates
+  - Consistency vs. empty response correlation
+
+### Temperature Experiment
+
+The `run_temperature_experiment.py` script evaluates how temperature settings affect the consistency of JSON outputs for a single model.
+
+```bash
+python run_temperature_experiment.py --data-dir <data_directory> --output-dir <output_directory> [options]
+```
+
+#### Options:
+- `--data-dir`: Directory containing the data files (required)
+- `--output-dir`: Directory to save results (default: "./temperature_experiment")
+- `--model-id`: Model ID to use (default: "us.anthropic.claude-3-5-sonnet-20241022-v2:0")
+- `--run-num`: Number of runs per temperature (default: 10)
+- `--sample-limit`: Number of samples to process (default: 5)
+
+#### Example:
+```bash
+python run_temperature_experiment.py --data-dir ./sharegpt_data --output-dir ./temperature_results --model-id us.amazon.nova-pro-v1:0 --run-num 5
+```
+
+#### Output:
+- Generates JSON outputs at different temperatures (0.1, 0.3, 0.5, 0.7, 1.0)
+- Evaluates consistency using semantic tree comparison
+- Creates visualizations showing temperature effects:
+  - Mean consistency vs. temperature
+  - Consistency coefficient vs. temperature
+  - Standard deviation vs. temperature
+  - Min-max range vs. temperature
+  - Empty response rate vs. temperature
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
