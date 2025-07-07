@@ -92,7 +92,9 @@ class SemanticJsonTreeConsistencyEvaluator:
                  key_semantic_weight: float = 0.7,
                  exact_match_weight: float = 0.3,
                  string_method: str = 'levenshtein',
-                 number_tolerance: float = 0.01):
+                 number_tolerance: float = 0.01,
+                 use_hungarian: bool = True,
+                 long_string_method: str = 'hungarian'):
         """
         Initialize the evaluator with semantic capabilities.
         
@@ -109,6 +111,8 @@ class SemanticJsonTreeConsistencyEvaluator:
             exact_match_weight: Weight for exact key matching
             string_method: Method for string comparison ('levenshtein', 'semantic', 'exact', 'jaccard')
             number_tolerance: Relative tolerance for number comparison
+            use_hungarian: Whether to use Hungarian algorithm for array matching and long string comparison
+            long_string_method: Method for long string comparison ('hungarian', 'bertscore', 'cosine', 'direct')
         """
         self.schema_aware = schema_aware
         self.array_order_matters = array_order_matters
@@ -123,6 +127,21 @@ class SemanticJsonTreeConsistencyEvaluator:
         self.exact_match_weight = exact_match_weight
         self.string_method = string_method
         self.number_tolerance = number_tolerance
+        
+        # Hungarian algorithm parameters
+        self.use_hungarian = use_hungarian
+        self.long_string_method = long_string_method
+        
+        # Import BERTScore if needed
+        self.bert_score_available = False
+        if self.long_string_method == 'bertscore':
+            try:
+                from bert_score import score as bert_score
+                self.bert_score = bert_score
+                self.bert_score_available = True
+            except ImportError:
+                warnings.warn("BERTScore not available. Falling back to cosine similarity.")
+                self.long_string_method = 'cosine'
         
         # Normalize key weights
         key_total = self.key_semantic_weight + self.exact_match_weight
@@ -463,7 +482,14 @@ class SemanticJsonTreeConsistencyEvaluator:
         return self._compare_strings_simple(str1, str2)
     
     def _compare_long_strings(self, str1: str, str2: str) -> float:
-        """Compare long strings by breaking them into chunks and finding optimal matches."""
+        """Compare long strings using the specified method.
+        
+        Available methods:
+        - 'hungarian': Break into chunks and use Hungarian algorithm for optimal matching
+        - 'bertscore': Use BERTScore for semantic similarity
+        - 'cosine': Use cosine similarity between embeddings
+        - 'direct': Use direct string comparison without chunking
+        """
         # For moderately sized text, consider direct comparison first
         if len(str1) < 200 and len(str2) < 200:
             # For shorter texts, direct comparison might be more accurate
@@ -472,6 +498,45 @@ class SemanticJsonTreeConsistencyEvaluator:
             if direct_sim > 0.8:
                 return direct_sim
         
+        # Use the specified method for long string comparison
+        if self.long_string_method == 'direct':
+            return self._compare_strings_simple(str1, str2)
+        
+        elif self.long_string_method == 'bertscore' and self.bert_score_available:
+            # Use BERTScore for semantic similarity
+            try:
+                P, R, F1 = self.bert_score([str1], [str2], lang="en")
+                return float(F1.item())
+            except Exception as e:
+                warnings.warn(f"Error using BERTScore: {e}. Falling back to cosine similarity.")
+                # Fall back to cosine similarity
+                return self._compare_long_strings_cosine(str1, str2)
+        
+        elif self.long_string_method == 'cosine' or (self.long_string_method == 'bertscore' and not self.bert_score_available):
+            # Use cosine similarity between embeddings
+            return self._compare_long_strings_cosine(str1, str2)
+        
+        else:  # Default to Hungarian algorithm
+            return self._compare_long_strings_hungarian(str1, str2)
+    
+    def _compare_long_strings_cosine(self, str1: str, str2: str) -> float:
+        """Compare long strings using cosine similarity between embeddings."""
+        if not self.use_semantic_similarity or not self.embedding_model:
+            return self._compare_strings_simple(str1, str2)
+        
+        # Get embeddings for the entire strings
+        emb1 = self._get_embedding(str1)
+        emb2 = self._get_embedding(str2)
+        
+        if emb1 is None or emb2 is None:
+            return self._compare_strings_simple(str1, str2)
+        
+        # Calculate cosine similarity
+        similarity = np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2))
+        return float(similarity)
+    
+    def _compare_long_strings_hungarian(self, str1: str, str2: str) -> float:
+        """Compare long strings by breaking them into chunks and using Hungarian algorithm for optimal matching."""
         # Split into chunks (sentences or paragraphs)
         chunks1 = self._split_into_chunks(str1)
         chunks2 = self._split_into_chunks(str2)
@@ -488,22 +553,33 @@ class SemanticJsonTreeConsistencyEvaluator:
                 # Use appropriate method for chunk comparison
                 similarity_matrix[i, j] = self._compare_strings_simple(chunk1, chunk2)
         
-        # Use Hungarian algorithm to find optimal matching between chunks
-        row_ind, col_ind = linear_sum_assignment(-similarity_matrix)  # Negate for max similarity
-        
-        # Calculate total similarity of matched chunks
-        matched_similarities = [similarity_matrix[i, j] for i, j in zip(row_ind, col_ind)]
-        
-        # Calculate average similarity of matched chunks
-        avg_similarity = sum(matched_similarities) / len(matched_similarities) if matched_similarities else 0.0
-        
-        # Calculate coverage (what percentage of chunks are matched well)
-        good_matches = sum(1 for sim in matched_similarities if sim > 0.7)
-        coverage = good_matches / max(len(chunks1), len(chunks2))
-        
-        # Combine similarity and coverage
-        # Weight similarity more heavily but ensure coverage affects the score
-        chunk_sim = 0.7 * avg_similarity + 0.3 * coverage
+        if self.use_hungarian:
+            # Use Hungarian algorithm to find optimal matching between chunks
+            row_ind, col_ind = linear_sum_assignment(-similarity_matrix)  # Negate for max similarity
+            
+            # Calculate total similarity of matched chunks
+            matched_similarities = [similarity_matrix[i, j] for i, j in zip(row_ind, col_ind)]
+            
+            # Calculate average similarity of matched chunks
+            avg_similarity = sum(matched_similarities) / len(matched_similarities) if matched_similarities else 0.0
+            
+            # Calculate coverage (what percentage of chunks are matched well)
+            good_matches = sum(1 for sim in matched_similarities if sim > 0.7)
+            coverage = good_matches / max(len(chunks1), len(chunks2))
+            
+            # Combine similarity and coverage
+            # Weight similarity more heavily but ensure coverage affects the score
+            chunk_sim = 0.7 * avg_similarity + 0.3 * coverage
+        else:
+            # Without Hungarian algorithm, use average of best matches for each chunk in chunks1
+            best_matches = []
+            for i in range(len(chunks1)):
+                if len(chunks2) > 0:
+                    best_match = max(similarity_matrix[i, :])  # Best match for this chunk
+                    best_matches.append(best_match)
+            
+            # Calculate average similarity
+            chunk_sim = sum(best_matches) / len(best_matches) if best_matches else 0.0
         
         # For better results, compare with direct similarity and take the higher value
         # This handles cases where chunking might not be beneficial
@@ -714,27 +790,56 @@ class SemanticJsonTreeConsistencyEvaluator:
         max_cost = np.max(cost_matrix) if np.max(cost_matrix) > 0 else 1.0
         cost_matrix = cost_matrix / max_cost
         
-        # Pad matrix if needed
-        if len(arr1) != len(arr2):
-            max_len = max(len(arr1), len(arr2))
-            padded_matrix = np.ones((max_len, max_len))
-            padded_matrix[:len(arr1), :len(arr2)] = cost_matrix
-            cost_matrix = padded_matrix
+        if self.use_hungarian:
+            # Pad matrix if needed
+            if len(arr1) != len(arr2):
+                max_len = max(len(arr1), len(arr2))
+                padded_matrix = np.ones((max_len, max_len))
+                padded_matrix[:len(arr1), :len(arr2)] = cost_matrix
+                cost_matrix = padded_matrix
+            
+            # Find optimal assignment using Hungarian algorithm
+            row_indices, col_indices = linear_sum_assignment(cost_matrix)
+            
+            # Calculate similarity and collect matching pairs
+            total_similarity = 0
+            matching_pairs = []
+            
+            for i, j in zip(row_indices, col_indices):
+                if i < len(arr1) and j < len(arr2):
+                    similarity = 1 - cost_matrix[i, j]
+                    total_similarity += similarity
+                    matching_pairs.append((i, j))
+            
+            avg_similarity = total_similarity / max(len(arr1), len(arr2))
+        else:
+            # Without Hungarian algorithm, use greedy matching
+            # For each element in arr1, find the best match in arr2
+            total_similarity = 0
+            matching_pairs = []
+            used_indices = set()
+            
+            # Sort by similarity (lowest cost first)
+            pairs = []
+            for i in range(len(arr1)):
+                for j in range(len(arr2)):
+                    pairs.append((i, j, cost_matrix[i, j]))
+            
+            pairs.sort(key=lambda x: x[2])  # Sort by cost (ascending)
+            
+            # Greedy assignment
+            for i, j, cost in pairs:
+                if i not in [p[0] for p in matching_pairs] and j not in [p[1] for p in matching_pairs]:
+                    similarity = 1 - cost
+                    total_similarity += similarity
+                    matching_pairs.append((i, j))
+                    
+                    # Stop when we've matched all elements in either array
+                    if len(matching_pairs) == min(len(arr1), len(arr2)):
+                        break
+            
+            avg_similarity = total_similarity / max(len(arr1), len(arr2))
         
-        # Find optimal assignment
-        row_indices, col_indices = linear_sum_assignment(cost_matrix)
-        
-        # Calculate similarity and collect matching pairs
-        total_similarity = 0
-        matching_pairs = []
-        
-        for i, j in zip(row_indices, col_indices):
-            if i < len(arr1) and j < len(arr2):
-                similarity = 1 - cost_matrix[i, j]
-                total_similarity += similarity
-                matching_pairs.append((i, j))
-        
-        avg_similarity = total_similarity / max(len(arr1), len(arr2))
         return avg_similarity, matching_pairs
     
     def calculate_tree_edit_distance(self, json1: Dict[str, Any], json2: Dict[str, Any]) -> Tuple[float, List[Dict[str, Any]]]:
@@ -1117,7 +1222,9 @@ def evaluate_semantic_json_consistency(
     required_fields: List[str] = None,
     use_semantic_similarity: bool = True,
     embedding_model: str = 'all-MiniLM-L6-v2',
-    semantic_threshold: float = 0.7
+    semantic_threshold: float = 0.7,
+    use_hungarian: bool = True,
+    long_string_method: str = 'hungarian'
 ) -> Dict[str, Any]:
     """
     Evaluate structural consistency of JSON outputs with semantic similarity support.
@@ -1142,7 +1249,9 @@ def evaluate_semantic_json_consistency(
         required_fields=set(required_fields) if required_fields else set(),
         use_semantic_similarity=use_semantic_similarity,
         embedding_model=embedding_model,
-        semantic_threshold=semantic_threshold
+        semantic_threshold=semantic_threshold,
+        use_hungarian=use_hungarian,
+        long_string_method=long_string_method
     )
     
     # Evaluate consistency
@@ -1197,7 +1306,9 @@ if __name__ == "__main__":
         [json1, json2, json3],
         array_order_matters=False,
         use_semantic_similarity=True,
-        semantic_threshold=0.6
+        semantic_threshold=0.6,
+        use_hungarian=True,
+        long_string_method='hungarian'
     )
     
     print(f"   Structural Consistency Score: {result_semantic['structural_consistency_score']:.4f}")
@@ -1208,7 +1319,9 @@ if __name__ == "__main__":
     result_exact = evaluate_semantic_json_consistency(
         [json1, json2, json3],
         array_order_matters=False,
-        use_semantic_similarity=False
+        use_semantic_similarity=False,
+        use_hungarian=False,
+        long_string_method='direct'
     )
     
     print(f"   Structural Consistency Score: {result_exact['structural_consistency_score']:.4f}")

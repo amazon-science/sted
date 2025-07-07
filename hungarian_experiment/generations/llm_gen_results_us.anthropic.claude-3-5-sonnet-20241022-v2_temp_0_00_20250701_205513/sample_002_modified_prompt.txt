@@ -1,0 +1,223 @@
+738
+§ 214.3 47 CFR Ch. II (10–1–05 Edition)
+§ 214.3 Assumptions.
+When the provisions of this part become operative, Presidential emergency authority, including Executive
+Order 12656, 12472, 12046 (3 CFR, 1966–
+1970 Comp., p. 820), and other emergency plans regarding the allocation
+and use of national resources will be in
+effect. During an attack, and in a
+postattack period, the Director, OSTP,
+will have authority to make new or revised assignments of radio frequencies
+in accordance with authority delegated
+by the President.
+§ 214.4 Planned actions.
+(a) Whenever it is determined necessary to exercise, in whole or in part,
+the President’s emergency authority
+over telecommunications, the Director,
+OSTP, will exercise that authority as
+specified in Executive Order 12472 (49
+FR 13471; 3 CFR, 1984 Comp., p. 193).
+(b) In this connection, and concurrently with the war or national emergency proclamation by the President,
+the Director will:
+(1) Authorize the continuance of all
+frequency authorizations issued by the
+National Telecommunications and Information Administration (NTIA) and
+the Federal Communications Commission (FCC), except as they may otherwise be modified or revoked by the Director, OSTP, in the national interest;
+(2) Redelegate to the Secretary of Defense the authority necessary to control the use of the radio spectrum in
+areas of active combat, where such
+control is necessary to the support of
+U.S. military operations;
+(3) Close all non-government radio
+stations in the international broadcasting service as defined in the FCC
+rules and regulations, except those carrying or scheduled to carry U.S. Government-controlled radio broadcasts.
+§ 214.5 Responsibilities.
+(a) The Director, OSTP, will issue
+such policy guidance, rules, regulations, procedures, and directives as
+may be necessary to assure effective
+frequency usage during wartime emergency conditions.
+(b) The FCC, in coordination with
+NTIA, shall issue appropriate rules,
+regulations, orders, and instructions
+and take such other actions not inconsistent with the actions of the Director, OSTP, and the NTIA Emergency
+Readiness Plan for Use of the Radio
+Spectrum as may be necessary to ensure the effective use of those portions
+of the radio spectrum shared by Government and non-governments users.
+(c) The FCC shall assist the Director
+in the preparation of emergency plans
+pursuant to section 3(h)(3) of Executive
+Order 12472.
+(d) Each Federal Government agency
+concerned shall develop and be prepared to implement its own plans, and
+shall make necessary preemergency arrangements with non-government entities for the provision of desired facilities or services, all subject to the guidance and control of the Director.
+§ 214.6 Postattack procedures and actions.
+(a) The frequency management staff
+supporting the Director, OSTP, comprised of predesignated personnel from
+the frequency management staffs of
+the government user agencies, NTIA
+and the FCC, will have proceeded to
+the OSTP relocation site in accordance
+with alerting orders in force.
+(b) Government agencies having need
+for new radio frequency assignments or
+for modification of existing assignments involving a change in the frequency usage pattern shall, unless otherwise provided, submit applications
+therefor to the Director, OSTP, by
+whatever means of communication are
+available and appropriate, together
+with a statement of any preapplication
+coordination accomplished. The Director, OSTP, will review such applications accomplish the necessary additional coordination insofar as practicable, consider all pertinent views
+and comments, and grant or deny, as
+he shall determine, the assignment of
+such frequencies. All concerned will be
+informed promptly of his decisions.
+(c) Non-Government entities having
+need for new radio frequency assignments or for modifications of existing
+assignments will continue to submit
+applications therefor to the FCC, or in
+accordance with FCC instructions.
+Such applications shall be coordinated
+with the Director, OSTP, and granted
+subject to the approval of the Director,
+OSTP, or his delegate.
+VerDate Aug<31>2005 13:23 Nov 08, 2005 Jkt 205199 PO 00000 Frm 00748 Fmt 8010 Sfmt 8010 Y:\SGML\205199.XXX 205199
+
+Please ensure your response follows this JSON schema:
+```json
+{
+  "type": "object",
+  "properties": {
+    "regulations": {
+      "type": "object",
+      "properties": {
+        "section": {
+          "type": "string"
+        },
+        "subsections": {
+          "type": "object",
+          "properties": {
+            "214.3": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title",
+                "description"
+              ]
+            },
+            "214.4": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "actions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "description"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "title",
+                "actions"
+              ]
+            },
+            "214.5": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "responsibilities": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "entity": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "entity",
+                      "description"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "title",
+                "responsibilities"
+              ]
+            },
+            "214.6": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "procedures": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "procedure": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "procedure",
+                      "description"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "title",
+                "procedures"
+              ]
+            }
+          },
+          "required": [
+            "214.3",
+            "214.4",
+            "214.5",
+            "214.6"
+          ]
+        }
+      },
+      "required": [
+        "section",
+        "subsections"
+      ]
+    }
+  },
+  "required": [
+    "regulations"
+  ]
+}
+```
+
+Your response should be valid JSON that conforms to the schema above.

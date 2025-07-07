@@ -1,429 +1,418 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
-Temperature Experiment for Semantic Tree Consistency
+Temperature-Stability Correlation Experiment
 
-This script runs the LLM generation with different temperature settings
-and evaluates the consistency using the Semantic Tree Consistency framework.
+This script runs a comprehensive experiment to analyze the relationship between
+temperature settings and output stability in LLM generations.
+
+Usage:
+    python run_temperature_experiment.py --data-dir extracted_sharegpt_data --output-dir ./temperature_experiment
 """
 
-import os
-import json
-import subprocess
 import argparse
+import json
+import os
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-from semantic_json_tree_consistency import evaluate_semantic_json_consistency
+import seaborn as sns
+from scipy import stats
+from typing import List, Dict, Any
+import subprocess
+import pandas as pd
+from pathlib import Path
 
-def run_generation_with_temperature(data_dir, output_dir, model_id, temperatures, run_num=10, sample_limit=5):
-    """Run LLM generation with different temperature settings."""
-    results = {}
+def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: int, include_schema: bool) -> str:
+    """
+    Run LLM generation with specified parameters.
     
-    for temp in temperatures:
-        print(f"\n{'='*80}")
-        print(f"RUNNING GENERATION WITH TEMPERATURE {temp}")
-        print(f"{'='*80}")
+    Args:
+        data_dir: Directory containing the data files
+        output_dir: Directory to save generation results
+        temperature: Temperature setting for generation
+        run_num: Number of runs to perform
+        include_schema: Whether to include schema in the prompt
         
-        # Format temperature for command line
-        temp_str = str(temp)
-        
-        # Run the llm_gen.py script with the specified temperature
-        cmd = [
-            "python", "llm_gen.py",
-            "--data-dir", data_dir,
-            "--output-dir", output_dir,
-            "--model-id", model_id,
-            "--temperature", temp_str,
-            "--run-num", str(run_num),
-            "--sample-limit", str(sample_limit)
-        ]
-        
-        try:
-            subprocess.run(cmd, check=True)
-            
-            # Find the most recent output directory for this temperature
-            temp_dirs = []
-            for dir_name in os.listdir(output_dir):
-                if dir_name.startswith(f"llm_gen_results_") and f"temp_{temp_str.replace('.', '_')}" in dir_name:
-                    dir_path = os.path.join(output_dir, dir_name)
-                    if os.path.isdir(dir_path):
-                        temp_dirs.append((dir_path, os.path.getmtime(dir_path)))
-            
-            if not temp_dirs:
-                print(f"Warning: No output directory found for temperature {temp}")
-                continue
-                
-            # Get the most recent directory
-            most_recent_dir = sorted(temp_dirs, key=lambda x: x[1], reverse=True)[0][0]
-            results[temp] = most_recent_dir
-            print(f"Results for temperature {temp} saved in {most_recent_dir}")
-            
-        except subprocess.CalledProcessError as e:
-            print(f"Error running generation with temperature {temp}: {e}")
+    Returns:
+        Path to the generated results file
+    """
+    cmd = [
+        "python", "llm_gen_simple.py",
+        "--data-dir", data_dir,
+        "--output-dir", output_dir,
+        "--temperature", str(temperature),
+        "--run-num", str(run_num)
+    ]
     
-    return results
+    if include_schema:
+        cmd.append("--include-schema")
+    
+    print(f"Running generation with temperature {temperature}...")
+    subprocess.run(cmd, check=True)
+    
+    # Find the most recent results directory for this temperature
+    temp_str = f"temp_{temperature:.2f}".replace('.', '_')
+    result_dirs = list(Path(output_dir).glob(f"llm_gen_results_*{temp_str}*"))
+    
+    if not result_dirs:
+        raise FileNotFoundError(f"No results found for temperature {temperature}")
+    
+    # Sort by creation time (most recent first)
+    result_dir = sorted(result_dirs, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+    results_file = result_dir / "all_results.json"
+    
+    return str(results_file)
 
-def evaluate_consistency(result_dirs):
-    """Evaluate consistency for each temperature setting."""
-    consistency_results = {}
-    empty_response_rates = {}
-    empty_response_rates = {}
+def run_evaluation(input_file: str, output_dir: str) -> str:
+    """
+    Run evaluation on generated outputs.
     
-    for temp, result_dir in result_dirs.items():
-        all_results_path = os.path.join(result_dir, "all_results.json")
+    Args:
+        input_file: Path to the generated results file
+        output_dir: Directory to save evaluation results
         
-        if not os.path.exists(all_results_path):
-            print(f"Warning: Results file not found for temperature {temp}: {all_results_path}")
-            continue
+    Returns:
+        Path to the evaluation results file
+    """
+    cmd = [
+        "python", "evaluate_generations.py",
+        "--input-file", input_file,
+        "--output-dir", output_dir,
+        "--metrics", "all"
+    ]
+    
+    print(f"Running evaluation on {input_file}...")
+    subprocess.run(cmd, check=True)
+    
+    # Find the most recent evaluation results file
+    eval_files = list(Path(output_dir).glob("evaluation_results_*.json"))
+    
+    if not eval_files:
+        raise FileNotFoundError("No evaluation results found")
+    
+    # Sort by creation time (most recent first)
+    eval_file = sorted(eval_files, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+    
+    return str(eval_file)
+
+def extract_metrics(eval_file: str) -> Dict[str, Any]:
+    """
+    Extract metrics from evaluation results file.
+    
+    Args:
+        eval_file: Path to the evaluation results file
+        
+    Returns:
+        Dictionary with extracted metrics
+    """
+    with open(eval_file, 'r') as f:
+        data = json.load(f)
+    
+    results = data.get('results', [])
+    
+    # Initialize aggregated metrics
+    metrics = {
+        'semantic_similarity_mean': [],
+        'semantic_similarity_std': [],
+        'semantic_stability': [],
+        'cross_run_consistency': [],
+        'bleu_mean': [],
+        'rouge_l_mean': [],
+        'bert_score_mean': [],
+        'jaccard_mean': []
+    }
+    
+    # Extract metrics from each sample
+    for sample in results:
+        # Extract semantic metrics if available
+        if 'semantic_tree_metrics' in sample and sample['semantic_tree_metrics']:
+            if 'ground_truth_accuracy' in sample['semantic_tree_metrics']:
+                gt_metrics = sample['semantic_tree_metrics']['ground_truth_accuracy']
+                if 'semantic_similarity' in gt_metrics:
+                    metrics['semantic_similarity_mean'].append(gt_metrics['semantic_similarity'].get('mean', 0))
+                    metrics['semantic_similarity_std'].append(gt_metrics['semantic_similarity'].get('std', 0))
+                    metrics['semantic_stability'].append(gt_metrics['semantic_similarity'].get('stability', 0))
             
-        with open(all_results_path, 'r') as f:
-            data = json.load(f)
+            if 'cross_run_consistency' in sample['semantic_tree_metrics'] and 'consistency_metrics' in sample['semantic_tree_metrics']['cross_run_consistency']:
+                consistency = sample['semantic_tree_metrics']['cross_run_consistency']['consistency_metrics']
+                metrics['cross_run_consistency'].append(consistency.get('mean_similarity', 0))
         
-        # Evaluate consistency for each sample
-        sample_consistencies = []
-        sample_consistencies_standard = []
-        
-        for sample in data["results"]:
-            responses = sample["responses"]
-            
-            # Handle empty or invalid responses
-            if not responses:
-                print(f"Warning: Empty responses for sample {sample['sample_id']}")
-                continue
+        # Extract NLP metrics if available
+        if 'nlp_metrics' in sample and sample['nlp_metrics']:
+            if 'accuracy_metrics' in sample['nlp_metrics']:
+                acc_metrics = sample['nlp_metrics']['accuracy_metrics']
                 
-            # Check for empty dictionaries (failed generations)
-            empty_count = sum(1 for r in responses if isinstance(r, dict) and not r)
-            
-            # If all responses are empty, assign a very low consistency score
-            if empty_count == len(responses):
-                print(f"Warning: All responses are empty for sample {sample['sample_id']}")
-                sample_consistencies.append(0.0)  # Penalize with lowest possible score
-                sample_consistencies_standard.append(0.0)  # Penalize with lowest possible score
+                if 'bleu' in acc_metrics:
+                    metrics['bleu_mean'].append(acc_metrics['bleu'].get('mean', 0))
                 
-                # Store penalty metrics
-                sample["consistency_analysis"] = {
-                    "with_semantic": {
-                        "mean_similarity": 0.0,
-                        "std_deviation": 0.0,
-                        "consistency_coefficient": 0.0,
-                        "min_similarity": 0.0,
-                        "max_similarity": 0.0,
-                        "similarity_range": 0.0,
-                        "empty_responses": empty_count,
-                        "total_responses": len(responses)
-                    },
-                    "without_semantic": {
-                        "mean_similarity": 0.0,
-                        "std_deviation": 0.0,
-                        "consistency_coefficient": 0.0,
-                        "min_similarity": 0.0,
-                        "max_similarity": 0.0,
-                        "similarity_range": 0.0,
-                        "empty_responses": empty_count,
-                        "total_responses": len(responses)
-                    }
-                }
-                continue
+                if 'rouge_l' in acc_metrics:
+                    metrics['rouge_l_mean'].append(acc_metrics['rouge_l'].get('mean', 0))
                 
-            # If some responses are empty but not all, filter them out but track the count
-            if empty_count > 0:
-                print(f"Warning: {empty_count}/{len(responses)} empty responses for sample {sample['sample_id']}")
-                responses = [r for r in responses if isinstance(r, dict) and r]
+                if 'bert_score' in acc_metrics:
+                    metrics['bert_score_mean'].append(acc_metrics['bert_score'].get('mean', 0))
                 
-            # Skip if we don't have at least 2 valid responses after filtering
-            if len(responses) < 2:
-                print(f"Warning: Not enough valid responses for sample {sample['sample_id']}")
-                continue
-                
-            # Evaluate with semantic tree consistency
-            semantic_result = evaluate_semantic_json_consistency(
-                responses,
-                use_semantic_similarity=True,
-                semantic_threshold=0.7
-            )
-            
-            # Evaluate with standard tree consistency (semantic features disabled)
-            standard_result = evaluate_semantic_json_consistency(
-                responses,
-                use_semantic_similarity=False
-            )
-            
-            # Extract basic consistency metrics
-            sample_consistencies.append(semantic_result["consistency_metrics"]["mean_similarity"])
-            sample_consistencies_standard.append(standard_result["consistency_metrics"]["mean_similarity"])
-            
-            # Store detailed metrics for this sample
-            sample["consistency_analysis"] = {
-                "with_semantic": {
-                    "mean_similarity": semantic_result["consistency_metrics"]["mean_similarity"],
-                    "std_deviation": semantic_result["consistency_metrics"]["std_deviation"],
-                    "consistency_coefficient": semantic_result["consistency_metrics"]["consistency_coefficient"],
-                    "min_similarity": semantic_result["consistency_metrics"]["min_similarity"],
-                    "max_similarity": semantic_result["consistency_metrics"]["max_similarity"],
-                    "similarity_range": semantic_result["consistency_metrics"]["similarity_range"],
-                    "statistical_metrics": semantic_result["statistical_metrics"]
-                },
-                "without_semantic": {
-                    "mean_similarity": standard_result["consistency_metrics"]["mean_similarity"],
-                    "std_deviation": standard_result["consistency_metrics"]["std_deviation"],
-                    "consistency_coefficient": standard_result["consistency_metrics"]["consistency_coefficient"],
-                    "min_similarity": standard_result["consistency_metrics"]["min_similarity"],
-                    "max_similarity": standard_result["consistency_metrics"]["max_similarity"],
-                    "similarity_range": standard_result["consistency_metrics"]["similarity_range"],
-                    "statistical_metrics": standard_result["statistical_metrics"]
-                }
-            }
-        
-        # Calculate empty response rate
-        total_responses = 0
-        empty_responses = 0
-        
-        for sample in data["results"]:
-            responses = sample["responses"]
-            total_responses += len(responses)
-            empty_responses += sum(1 for r in responses if isinstance(r, dict) and not r)
-        
-        empty_rate = empty_responses / total_responses if total_responses > 0 else 0
-        empty_response_rates[temp] = empty_rate
-        
-        # Calculate average consistency across samples
-        if sample_consistencies:
-            avg_consistency = np.mean(sample_consistencies)
-            std_consistency = np.std(sample_consistencies)
-            avg_consistency_standard = np.mean(sample_consistencies_standard)
-            std_consistency_standard = np.std(sample_consistencies_standard)
-            
-            min_consistency = np.min(sample_consistencies)
-            max_consistency = np.max(sample_consistencies)
-            
-            min_consistency_standard = np.min(sample_consistencies_standard)
-            max_consistency_standard = np.max(sample_consistencies_standard)
-            
-            consistency_results[temp] = {
-                "with_semantic": {
-                    "mean": avg_consistency,
-                    "std": std_consistency,
-                    "samples": sample_consistencies,
-                    "min": min_consistency,
-                    "max": max_consistency
-                },
-                "without_semantic": {
-                    "mean": avg_consistency_standard,
-                    "std": std_consistency_standard,
-                    "samples": sample_consistencies_standard,
-                    "min": min_consistency_standard,
-                    "max": max_consistency_standard
-                },
-                "sample_count": len(sample_consistencies),
-                "empty_response_rate": empty_rate,
-                "empty_responses": empty_responses,
-                "total_responses": total_responses
-            }
-            
-            print(f"Temperature {temp}: With Semantic = {avg_consistency:.4f} ± {std_consistency:.4f}, "
-                  f"Without Semantic = {avg_consistency_standard:.4f} ± {std_consistency_standard:.4f}, "
-                  f"Empty Rate = {empty_rate:.2%}")
+                if 'jaccard' in acc_metrics:
+                    metrics['jaccard_mean'].append(acc_metrics['jaccard'].get('mean', 0))
+    
+    # Calculate averages
+    result = {}
+    for key, values in metrics.items():
+        if values:
+            result[key] = sum(values) / len(values)
         else:
-            print(f"Warning: No valid samples for temperature {temp}")
+            result[key] = 0
     
-    return consistency_results, empty_response_rates
+    return result
 
-def plot_results(consistency_results, empty_response_rates, output_dir):
-    """Plot consistency vs temperature."""
-    timestamp = time.strftime('%Y%m%d_%H%M%S')
-    temperatures = sorted(consistency_results.keys())
+def analyze_temperature_stability_relationship(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Analyze the relationship between temperature and stability.
     
-    # Create main plot directory
-    plots_dir = os.path.join(output_dir, f"plots_{timestamp}")
-    os.makedirs(plots_dir, exist_ok=True)
+    Args:
+        results: List of dictionaries with temperature and metrics
+        
+    Returns:
+        Dictionary with analysis results
+    """
+    # Extract data for analysis
+    temperatures = [r['temperature'] for r in results]
+    semantic_stabilities = [r['semantic_stability'] for r in results]
+    cross_run_consistencies = [r['cross_run_consistency'] for r in results]
+    semantic_similarities = [r['semantic_similarity_mean'] for r in results]
     
-    # Plot 1: Mean Similarity
-    semantic_means = [consistency_results[t]["with_semantic"]["mean"] for t in temperatures]
-    semantic_stds = [consistency_results[t]["with_semantic"]["std"] for t in temperatures]
-    standard_means = [consistency_results[t]["without_semantic"]["mean"] for t in temperatures]
-    standard_stds = [consistency_results[t]["without_semantic"]["std"] for t in temperatures]
+    # Calculate correlations
+    pearson_stability = stats.pearsonr(temperatures, semantic_stabilities)
+    spearman_stability = stats.spearmanr(temperatures, semantic_stabilities)
+    pearson_consistency = stats.pearsonr(temperatures, cross_run_consistencies)
+    spearman_consistency = stats.spearmanr(temperatures, cross_run_consistencies)
+    pearson_similarity = stats.pearsonr(temperatures, semantic_similarities)
+    spearman_similarity = stats.spearmanr(temperatures, semantic_similarities)
     
-    plt.figure(figsize=(10, 6))
+    # Fit linear regression for stability
+    slope, intercept, r_value, p_value, std_err = stats.linregress(temperatures, semantic_stabilities)
     
-    # Plot semantic consistency
-    plt.errorbar(temperatures, semantic_means, yerr=semantic_stds, 
-                 marker='o', linestyle='-', label='With Semantic Similarity')
+    # Fit polynomial regression for stability
+    poly_degree = min(3, len(temperatures) - 1)  # Avoid overfitting
+    poly_coeffs = np.polyfit(temperatures, semantic_stabilities, poly_degree)
+    poly_r_squared = np.corrcoef(temperatures, np.polyval(poly_coeffs, temperatures))[0, 1] ** 2
     
-    # Plot standard consistency
-    plt.errorbar(temperatures, standard_means, yerr=standard_stds, 
-                 marker='s', linestyle='--', label='Without Semantic Similarity')
+    return {
+        'correlations': {
+            'pearson_stability': {
+                'correlation': pearson_stability[0],
+                'p_value': pearson_stability[1]
+            },
+            'spearman_stability': {
+                'correlation': spearman_stability[0],
+                'p_value': spearman_stability[1]
+            },
+            'pearson_consistency': {
+                'correlation': pearson_consistency[0],
+                'p_value': pearson_consistency[1]
+            },
+            'spearman_consistency': {
+                'correlation': spearman_consistency[0],
+                'p_value': spearman_consistency[1]
+            },
+            'pearson_similarity': {
+                'correlation': pearson_similarity[0],
+                'p_value': pearson_similarity[1]
+            },
+            'spearman_similarity': {
+                'correlation': spearman_similarity[0],
+                'p_value': spearman_similarity[1]
+            }
+        },
+        'linear_regression': {
+            'slope': slope,
+            'intercept': intercept,
+            'r_squared': r_value ** 2,
+            'p_value': p_value,
+            'std_err': std_err,
+            'equation': f"stability = {slope:.4f} * temperature + {intercept:.4f}"
+        },
+        'polynomial_regression': {
+            'coefficients': poly_coeffs.tolist(),
+            'degree': poly_degree,
+            'r_squared': poly_r_squared
+        }
+    }
+
+def create_visualizations(results: List[Dict[str, Any]], output_dir: str, analysis: Dict[str, Any]):
+    """
+    Create visualizations of the temperature-stability relationship.
+    
+    Args:
+        results: List of dictionaries with temperature and metrics
+        output_dir: Directory to save visualizations
+        analysis: Dictionary with analysis results
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Convert results to DataFrame for easier plotting
+    df = pd.DataFrame(results)
+    
+    # Set up the plotting style
+    sns.set(style="whitegrid")
+    plt.figure(figsize=(12, 8))
+    
+    # 1. Scatter plot with regression line for stability
+    plt.subplot(2, 2, 1)
+    sns.regplot(x='temperature', y='semantic_stability', data=df, scatter_kws={'alpha':0.7}, line_kws={'color':'red'})
+    plt.title('Temperature vs. Semantic Stability')
+    plt.xlabel('Temperature')
+    plt.ylabel('Semantic Stability')
+    
+    # Add regression equation
+    equation = analysis['linear_regression']['equation']
+    r_squared = analysis['linear_regression']['r_squared']
+    plt.annotate(f"{equation}\nR² = {r_squared:.4f}", 
+                xy=(0.05, 0.05), xycoords='axes fraction',
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
+    
+    # 2. Scatter plot with regression line for cross-run consistency
+    plt.subplot(2, 2, 2)
+    sns.regplot(x='temperature', y='cross_run_consistency', data=df, scatter_kws={'alpha':0.7}, line_kws={'color':'blue'})
+    plt.title('Temperature vs. Cross-Run Consistency')
+    plt.xlabel('Temperature')
+    plt.ylabel('Cross-Run Consistency')
+    
+    # 3. Dual y-axis plot for stability and accuracy
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    
+    color = 'tab:red'
+    ax1.set_xlabel('Temperature')
+    ax1.set_ylabel('Semantic Stability', color=color)
+    ax1.plot(df['temperature'], df['semantic_stability'], 'o-', color=color)
+    ax1.tick_params(axis='y', labelcolor=color)
+    
+    ax2 = ax1.twinx()
+    color = 'tab:blue'
+    ax2.set_ylabel('Semantic Similarity (Accuracy)', color=color)
+    ax2.plot(df['temperature'], df['semantic_similarity_mean'], 's-', color=color)
+    ax2.tick_params(axis='y', labelcolor=color)
+    
+    plt.title('Temperature vs. Stability and Accuracy')
+    fig.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'temperature_stability_accuracy.png'), dpi=300)
+    
+    # 4. Heatmap of correlations between metrics
+    plt.figure(figsize=(10, 8))
+    correlation_columns = ['temperature', 'semantic_stability', 'cross_run_consistency', 
+                          'semantic_similarity_mean', 'bleu_mean', 'rouge_l_mean', 
+                          'bert_score_mean', 'jaccard_mean']
+    correlation_df = df[correlation_columns].corr()
+    sns.heatmap(correlation_df, annot=True, cmap='coolwarm', vmin=-1, vmax=1)
+    plt.title('Correlation Between Metrics')
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'metric_correlations.png'), dpi=300)
+    
+    # 5. Line plot comparing different metrics across temperatures
+    plt.figure(figsize=(12, 6))
+    metrics = ['semantic_stability', 'cross_run_consistency', 'semantic_similarity_mean', 
+              'bleu_mean', 'rouge_l_mean', 'bert_score_mean', 'jaccard_mean']
+    
+    for metric in metrics:
+        plt.plot(df['temperature'], df[metric], 'o-', label=metric)
     
     plt.xlabel('Temperature')
-    plt.ylabel('Consistency Score')
-    plt.title('Mean Consistency vs Temperature')
+    plt.ylabel('Metric Value')
+    plt.title('Comparison of Metrics Across Temperatures')
     plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'metrics_comparison.png'), dpi=300)
     
-    # Add correlation coefficient
-    semantic_corr = np.corrcoef(temperatures, semantic_means)[0, 1]
-    standard_corr = np.corrcoef(temperatures, standard_means)[0, 1]
-    plt.annotate(f"With Semantic: r = {semantic_corr:.4f}\nWithout Semantic: r = {standard_corr:.4f}",
-                xy=(0.05, 0.05), xycoords='axes fraction')
+    # Save all figures
+    plt.savefig(os.path.join(output_dir, 'temperature_stability.png'), dpi=300)
     
-    # Save the plot
-    mean_plot_path = os.path.join(plots_dir, "mean_consistency.png")
-    plt.savefig(mean_plot_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"Mean consistency plot saved to {mean_plot_path}")
+    print(f"Visualizations saved to {output_dir}")
+
+def run_experiment(args):
+    """
+    Run the temperature-stability correlation experiment.
     
-    # Plot 2: Consistency Coefficient
-    plt.figure(figsize=(10, 6))
+    Args:
+        args: Command-line arguments
+    """
+    # Create output directories
+    os.makedirs(args.output_dir, exist_ok=True)
+    generations_dir = os.path.join(args.output_dir, "generations")
+    evaluations_dir = os.path.join(args.output_dir, "evaluations")
+    visualizations_dir = os.path.join(args.output_dir, "visualizations")
+    os.makedirs(generations_dir, exist_ok=True)
+    os.makedirs(evaluations_dir, exist_ok=True)
     
-    semantic_coef = [consistency_results[t]["with_semantic"]["mean"] * 
-                    (1 - min(consistency_results[t]["with_semantic"]["std"] / 
-                             max(consistency_results[t]["with_semantic"]["mean"], 0.001), 1)) 
-                    for t in temperatures]
+    # Define temperatures to test
+    if args.temperatures:
+        temperatures = args.temperatures
+    else:
+        temperatures = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
     
-    standard_coef = [consistency_results[t]["without_semantic"]["mean"] * 
-                     (1 - min(consistency_results[t]["without_semantic"]["std"] / 
-                              max(consistency_results[t]["without_semantic"]["mean"], 0.001), 1)) 
-                     for t in temperatures]
+    results = []
     
-    plt.plot(temperatures, semantic_coef, marker='o', linestyle='-', label='With Semantic Similarity')
-    plt.plot(temperatures, standard_coef, marker='s', linestyle='--', label='Without Semantic Similarity')
+    # Run generation and evaluation for each temperature
+    for temp in temperatures:
+        # Run generation
+        gen_results_file = run_generation(
+            data_dir=args.data_dir,
+            output_dir=generations_dir,
+            temperature=temp,
+            run_num=args.run_num,
+            include_schema=args.include_schema
+        )
+        
+        # Run evaluation
+        eval_results_file = run_evaluation(
+            input_file=gen_results_file,
+            output_dir=evaluations_dir
+        )
+        
+        # Extract metrics
+        metrics = extract_metrics(eval_results_file)
+        metrics['temperature'] = temp
+        results.append(metrics)
     
-    plt.xlabel('Temperature')
-    plt.ylabel('Consistency Coefficient')
-    plt.title('Consistency Coefficient vs Temperature')
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.7)
+    # Analyze the relationship between temperature and stability
+    analysis = analyze_temperature_stability_relationship(results)
     
-    coef_plot_path = os.path.join(plots_dir, "consistency_coefficient.png")
-    plt.savefig(coef_plot_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"Consistency coefficient plot saved to {coef_plot_path}")
+    # Create visualizations
+    create_visualizations(results, visualizations_dir, analysis)
     
-    # Plot 3: Standard Deviation
-    plt.figure(figsize=(10, 6))
-    
-    semantic_std = [consistency_results[t]["with_semantic"]["std"] for t in temperatures]
-    standard_std = [consistency_results[t]["without_semantic"]["std"] for t in temperatures]
-    
-    plt.plot(temperatures, semantic_std, marker='o', linestyle='-', label='With Semantic Similarity')
-    plt.plot(temperatures, standard_std, marker='s', linestyle='--', label='Without Semantic Similarity')
-    
-    plt.xlabel('Temperature')
-    plt.ylabel('Standard Deviation')
-    plt.title('Consistency Variation vs Temperature')
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.7)
-    
-    std_plot_path = os.path.join(plots_dir, "consistency_std.png")
-    plt.savefig(std_plot_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"Standard deviation plot saved to {std_plot_path}")
-    
-    # Plot 4: Min-Max Range
-    plt.figure(figsize=(10, 6))
-    
-    semantic_range = [consistency_results[t]["with_semantic"]["max"] - 
-                      consistency_results[t]["with_semantic"]["min"] 
-                      for t in temperatures]
-    
-    standard_range = [consistency_results[t]["without_semantic"]["max"] - 
-                       consistency_results[t]["without_semantic"]["min"] 
-                       for t in temperatures]
-    
-    plt.plot(temperatures, semantic_range, marker='o', linestyle='-', label='With Semantic Similarity')
-    plt.plot(temperatures, standard_range, marker='s', linestyle='--', label='Without Semantic Similarity')
-    
-    plt.xlabel('Temperature')
-    plt.ylabel('Min-Max Range')
-    plt.title('Consistency Range vs Temperature')
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.7)
-    
-    range_plot_path = os.path.join(plots_dir, "consistency_range.png")
-    plt.savefig(range_plot_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"Range plot saved to {range_plot_path}")
-    
-    # Plot 5: Empty Response Rate
-    plt.figure(figsize=(10, 6))
-    
-    empty_rates = [empty_response_rates[t] for t in temperatures]
-    
-    plt.plot(temperatures, empty_rates, marker='o', linestyle='-', color='firebrick')
-    plt.fill_between(temperatures, [0] * len(temperatures), empty_rates, alpha=0.2, color='firebrick')
-    
-    plt.xlabel('Temperature')
-    plt.ylabel('Empty Response Rate')
-    plt.title('Empty Response Rate vs Temperature')
-    plt.grid(True, linestyle='--', alpha=0.7)
-    
-    # Add correlation coefficient
-    empty_corr = np.corrcoef(temperatures, empty_rates)[0, 1] if len(temperatures) > 1 else 0
-    plt.annotate(f"Correlation: r = {empty_corr:.4f}", xy=(0.05, 0.95), xycoords='axes fraction', 
-                 va='top', ha='left')
-    
-    empty_plot_path = os.path.join(plots_dir, "empty_response_rate.png")
-    plt.savefig(empty_plot_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"Empty response rate plot saved to {empty_plot_path}")
-    
-    # Save all data
-    data_path = os.path.join(plots_dir, "consistency_data.json")
-    with open(data_path, 'w') as f:
+    # Save results and analysis
+    results_file = os.path.join(args.output_dir, "temperature_stability_results.json")
+    with open(results_file, 'w') as f:
         json.dump({
-            "temperatures": temperatures,
-            "results": consistency_results,
-            "empty_response_rates": empty_response_rates,
-            "correlations": {
-                "with_semantic": float(semantic_corr),
-                "without_semantic": float(standard_corr),
-                "empty_rate": float(empty_corr)
+            'results': results,
+            'analysis': analysis,
+            'parameters': {
+                'temperatures': temperatures,
+                'run_num': args.run_num,
+                'include_schema': args.include_schema,
+                'data_dir': args.data_dir
             }
         }, f, indent=2)
-    print(f"Data saved to {data_path}")
     
-    return plots_dir, data_path
+    print(f"Results saved to {results_file}")
+    
+    # Print summary of findings
+    print("\n=== Temperature-Stability Correlation Analysis ===")
+    print(f"Pearson correlation: {analysis['correlations']['pearson_stability']['correlation']:.4f} (p-value: {analysis['correlations']['pearson_stability']['p_value']:.4f})")
+    print(f"Spearman correlation: {analysis['correlations']['spearman_stability']['correlation']:.4f} (p-value: {analysis['correlations']['spearman_stability']['p_value']:.4f})")
+    print(f"Linear regression: {analysis['linear_regression']['equation']}")
+    print(f"R-squared (linear): {analysis['linear_regression']['r_squared']:.4f}")
+    print(f"R-squared (polynomial): {analysis['polynomial_regression']['r_squared']:.4f}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Run temperature experiment for consistency evaluation")
-    parser.add_argument("--data-dir", type=str, required=True, help="Directory containing the data files")
-    parser.add_argument("--output-dir", type=str, default="./temperature_experiment", help="Directory to save results")
-    parser.add_argument("--model-id", type=str, default="us.anthropic.claude-3-5-sonnet-20241022-v2:0", 
-                        help="Model ID to use")
-    parser.add_argument("--run-num", type=int, default=10, help="Number of runs per temperature")
-    parser.add_argument("--sample-limit", type=int, default=5, help="Number of samples to process")
+    parser = argparse.ArgumentParser(description="Run temperature-stability correlation experiment.")
+    parser.add_argument("--data-dir", type=str, required=True, help="Directory containing the data files.")
+    parser.add_argument("--output-dir", type=str, default="./temperature_experiment", help="Directory to save experiment results.")
+    parser.add_argument("--run-num", type=int, default=10, help="Number of runs per temperature.")
+    parser.add_argument("--include-schema", action="store_true", help="Include JSON schema in the prompt.")
+    parser.add_argument("--temperatures", type=float, nargs="+", help="List of temperatures to test. Default: 0.0 to 1.0 in 0.1 increments.")
     args = parser.parse_args()
     
-    # Create output directory
-    os.makedirs(args.output_dir, exist_ok=True)
-    
-    # Define temperature range to test
-    temperatures = [0.1, 0.3, 0.5, 0.7, 1.0]
-    
-    print(f"Running temperature experiment with {len(temperatures)} temperature settings:")
-    print(f"Temperatures: {temperatures}")
-    print(f"Model: {args.model_id}")
-    print(f"Runs per temperature: {args.run_num}")
-    print(f"Samples per run: {args.sample_limit}")
-    
-    # Run generation with different temperatures
-    result_dirs = run_generation_with_temperature(
-        args.data_dir,
-        args.output_dir,
-        args.model_id,
-        temperatures,
-        args.run_num,
-        args.sample_limit
-    )
-    
-    # Evaluate consistency
-    consistency_results, empty_response_rates = evaluate_consistency(result_dirs)
-    
-    # Plot results
-    plot_path, data_path = plot_results(consistency_results, empty_response_rates, args.output_dir)
-    
-    print("\nExperiment completed!")
-    print(f"Plot: {plot_path}")
-    print(f"Data: {data_path}")
+    run_experiment(args)
 
 if __name__ == "__main__":
     main()

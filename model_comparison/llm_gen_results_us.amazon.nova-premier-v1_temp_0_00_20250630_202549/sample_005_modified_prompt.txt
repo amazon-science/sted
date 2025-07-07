@@ -1,0 +1,203 @@
+Somalia Flood Exposure Methodology Note
+Analysis for 2024 HNRP
+This technical note summarises the methodology used to calculate the number of people
+potentially exposed to ooding in Somalia in the 2024 Somalia Humanitarian Needs and
+Response Plan (HNRP). The UN OCHA Centre for Humanitarian Data worked with a wide range
+of technical partners to develop a methodology that was then endorsed by the Somalia ICCG
+and HCT.
+Daily FloodScan (1998-2022) & WorldPop (2020 UN Adjusted) raster data was analysed to gain
+understanding of ood conditions across Somalia for both March-April-May (MAM) and
+October-November-December (OND) seasons. FloodScan daily ood fraction Standard Flood
+Exposure Depiction (SFED) was aggregated to yearly seasonal maximum fraction composites
+for both the MAM and OND seasons for all years of historical FloodScan data (1998-2022).
+The yearly seasonal SFED composites were then processed/reclassied in two distinct ways:
+1. Composites reclassied to binary using a 20 percent ood fraction threshold.
+2. Composites masked to just remove any ood fraction values < 0.05 percent and the
+ood fraction (0-100 percent) retained.
+All composites in both sets of processed yearly-seasonal ood fraction rasters were then
+multiplied by the WorldPop (2020 UN Adjusted) population estimate raster to create two sets of
+yearly seasonal ood exposure rasters. These were then aggregated at the second
+administrative level via zonal statistics (sum) to obtain the estimated population exposure per
+district for each season across all years for each set. These estimates were converted to the
+percent of population exposed by dividing the estimates by the total population per district
+(from World Pop raster). The percent exposure gure was then applied to the updated 2024
+population data set (UN OCHA, UNFPA Methodology) to obtain updated population exposure
+estimates. These data were further aggregated to administrative level 1.
+Ranges for exposure were estimated using percentiles for both the MAM and OND seasons per
+administrative level. As ECMWF seasonal forecast predicts an above average precipitation
+season for MAM 2024, the range of population exposed was based on the 50th-95th percentile
+levels. Since there was no available data to inform predictions for OND 2024, the 25-75th
+percentile values were used to bound the range. The lower and upper limits of the ranges were
+Page 1 of 2
+calculated at the administrative level using all of the historical yearly seasonal ood exposure
+estimates. The two sets of range estimates were combined conservatively by taking the
+maximum value for both the upper and lower bounds for each season.
+Contact the OCHA Centre for Humanitarian Data via Leonardo Milano, Team Lead for Data
+Science at leonardo.milano@un.org with any questions or feedback.
+Page 2 of 2
+
+Please ensure your response follows this JSON schema:
+```json
+{
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "analysis": {
+      "type": "string"
+    },
+    "methodology": {
+      "type": "object",
+      "properties": {
+        "dataSources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "seasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "processingSteps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "step": {
+                "type": "integer"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "step",
+              "description"
+            ]
+          }
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "rasterType": {
+              "type": "string"
+            },
+            "aggregationLevel": {
+              "type": "string"
+            },
+            "statistics": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "rasterType",
+            "aggregationLevel",
+            "statistics"
+          ]
+        }
+      },
+      "required": [
+        "dataSources",
+        "seasons",
+        "processingSteps",
+        "output"
+      ]
+    },
+    "exposureEstimates": {
+      "type": "object",
+      "properties": {
+        "ranges": {
+          "type": "object",
+          "properties": {
+            "MAM": {
+              "type": "object",
+              "properties": {
+                "percentileRange": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "percentileRange",
+                "reason"
+              ]
+            },
+            "OND": {
+              "type": "object",
+              "properties": {
+                "percentileRange": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "percentileRange",
+                "reason"
+              ]
+            }
+          },
+          "required": [
+            "MAM",
+            "OND"
+          ]
+        },
+        "aggregation": {
+          "type": "object",
+          "properties": {
+            "level": {
+              "type": "string"
+            },
+            "method": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "level",
+            "method"
+          ]
+        }
+      },
+      "required": [
+        "ranges",
+        "aggregation"
+      ]
+    },
+    "contact": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "email"
+      ]
+    }
+  },
+  "required": [
+    "title",
+    "analysis",
+    "methodology",
+    "exposureEstimates",
+    "contact"
+  ]
+}
+```
+
+Your response should be valid JSON that conforms to the schema above.
