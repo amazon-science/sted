@@ -25,24 +25,13 @@ import nltk
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from rouge import Rouge
 from bert_score import score as bert_score
+from semantic_json_tree_consistency import (
+    SemanticJsonTreeConsistencyEvaluator,
+    evaluate_semantic_json_consistency,
+    parse_json_outputs
+)
 
-# Import semantic comparison functionality
-try:
-    from semantic_json_tree_consistency import (
-        SemanticJsonTreeConsistencyEvaluator,
-        evaluate_semantic_json_consistency,
-        parse_json_outputs
-    )
-    SEMANTIC_COMPARISON_AVAILABLE = True
-except ImportError:
-    print("Warning: semantic_json_tree_consistency module not available. Falling back to basic comparison.")
-    SEMANTIC_COMPARISON_AVAILABLE = False
-
-# Download necessary NLTK data
-try:
-    nltk.download('punkt', quiet=True)
-except:
-    pass
+nltk.download('punkt', quiet=True)
 
 # Function to recursively convert objects to JSON-serializable types
 def make_json_serializable(obj):
@@ -61,7 +50,7 @@ def make_json_serializable(obj):
         return obj.tolist() if obj.numel() > 1 else float(obj.item())
     elif isinstance(obj, (set, frozenset)):
         return list(obj)
-    elif isinstance(obj, (bool, np.bool_, np.bool)):
+    elif isinstance(obj, (bool, np.bool_)):
         return bool(obj)
     elif obj is np.True_:
         return True
@@ -104,7 +93,7 @@ def calculate_semantic_metrics(generated_outputs: List[Dict], ground_truth: Dict
     """
     try:
         # Create a list with ground truth and all generated outputs
-        all_outputs = [ground_truth] + [output for output in generated_outputs if output]
+        all_outputs = [output for output in generated_outputs if output]
         
         # Use the existing evaluate_semantic_json_consistency function
         consistency_result = evaluate_semantic_json_consistency(
@@ -393,6 +382,23 @@ def evaluate_generations(input_file: str, output_dir: str, metrics_to_calculate:
     calculate_semantic = 'semantic' in metrics_to_calculate or 'all' in metrics_to_calculate
     calculate_nlp = 'nlp' in metrics_to_calculate or 'all' in metrics_to_calculate
     
+    # Initialize aggregated metrics for overall statistics
+    overall_metrics = {
+        "semantic": {
+            "ground_truth_similarity": [],
+            "cross_run_consistency": []
+        },
+        "nlp": {
+            "bleu": [],
+            "rouge_1": [],
+            "rouge_2": [],
+            "rouge_l": [],
+            "bert_score": [],
+            "jaccard": [],
+            "cross_run_stability": []
+        }
+    }
+    
     # Process each sample
     evaluation_results = []
     
@@ -481,7 +487,99 @@ def evaluate_generations(input_file: str, output_dir: str, metrics_to_calculate:
             "nlp_metrics": nlp_metrics if calculate_nlp else {},
         }
         
+        # Collect metrics for overall statistics
+        if calculate_semantic and semantic_metrics:
+            if 'ground_truth_accuracy' in semantic_metrics and 'semantic_similarity' in semantic_metrics['ground_truth_accuracy']:
+                overall_metrics['semantic']['ground_truth_similarity'].append(
+                    semantic_metrics['ground_truth_accuracy']['semantic_similarity']['mean']
+                )
+            
+            if 'cross_run_consistency' in semantic_metrics and 'consistency_metrics' in semantic_metrics['cross_run_consistency']:
+                overall_metrics['semantic']['cross_run_consistency'].append(
+                    semantic_metrics['cross_run_consistency']['consistency_metrics'].get('mean_similarity', 0)
+                )
+        
+        if calculate_nlp and nlp_metrics:
+            if 'cross_run_stability' in nlp_metrics:
+                overall_metrics['nlp']['cross_run_stability'].append(nlp_metrics['cross_run_stability'])
+            
+            if 'accuracy_metrics' in nlp_metrics:
+                for metric in ['bleu', 'rouge_1', 'rouge_2', 'rouge_l', 'bert_score', 'jaccard']:
+                    if metric in nlp_metrics['accuracy_metrics']:
+                        overall_metrics['nlp'][metric].append(nlp_metrics['accuracy_metrics'][metric]['mean'])
+        
         evaluation_results.append(evaluation_result)
+    
+    # Calculate overall metrics across all samples
+    overall_summary = {}
+    
+    # Helper function to calculate statistics for a list of values
+    def calc_overall_stats(values, name):
+        if not values:
+            return {name: {"mean": 0, "std": 0, "min": 0, "max": 0}}
+        return {name: {
+            "mean": float(sum(values) / len(values)),
+            "std": float(statistics.stdev(values) if len(values) > 1 else 0),
+            "min": float(min(values)),
+            "max": float(max(values))
+        }}
+    
+    # Calculate semantic metrics summary if available
+    if calculate_semantic:
+        semantic_summary = {}
+        if overall_metrics['semantic']['ground_truth_similarity']:
+            semantic_summary.update(calc_overall_stats(
+                overall_metrics['semantic']['ground_truth_similarity'], 
+                "ground_truth_similarity"
+            ))
+        if overall_metrics['semantic']['cross_run_consistency']:
+            semantic_summary.update(calc_overall_stats(
+                overall_metrics['semantic']['cross_run_consistency'], 
+                "cross_run_consistency"
+            ))
+        overall_summary["semantic"] = semantic_summary
+    
+    # Calculate NLP metrics summary if available
+    if calculate_nlp:
+        nlp_summary = {}
+        for metric in ['bleu', 'rouge_1', 'rouge_2', 'rouge_l', 'bert_score', 'jaccard']:
+            if overall_metrics['nlp'][metric]:
+                nlp_summary.update(calc_overall_stats(overall_metrics['nlp'][metric], metric))
+        if overall_metrics['nlp']['cross_run_stability']:
+            nlp_summary.update(calc_overall_stats(
+                overall_metrics['nlp']['cross_run_stability'], 
+                "cross_run_stability"
+            ))
+        overall_summary["nlp"] = nlp_summary
+    
+    # Print overall summary
+    print("\n" + "=" * 60)
+    print("OVERALL METRICS SUMMARY ACROSS ALL SAMPLES")
+    print("=" * 60)
+    
+    if "semantic" in overall_summary:
+        print("\n=== Semantic Tree-Based Metrics (Average Across All Samples) ===")
+        if "ground_truth_similarity" in overall_summary["semantic"]:
+            gt_sim = overall_summary["semantic"]["ground_truth_similarity"]
+            print(f"Ground Truth Similarity: {gt_sim['mean']:.4f} ± {gt_sim['std']:.4f}")
+            print(f"Min: {gt_sim['min']:.4f}, Max: {gt_sim['max']:.4f}")
+        
+        if "cross_run_consistency" in overall_summary["semantic"]:
+            consistency = overall_summary["semantic"]["cross_run_consistency"]
+            print(f"Cross-Run Consistency: {consistency['mean']:.4f} ± {consistency['std']:.4f}")
+            print(f"Min: {consistency['min']:.4f}, Max: {consistency['max']:.4f}")
+    
+    if "nlp" in overall_summary:
+        print("\n=== NLP-Based Metrics (Average Across All Samples) ===")
+        for metric in ["bleu", "rouge_1", "rouge_2", "rouge_l", "bert_score", "jaccard"]:
+            if metric in overall_summary["nlp"]:
+                m = overall_summary["nlp"][metric]
+                print(f"{metric.upper()}: {m['mean']:.4f} ± {m['std']:.4f} (Min: {m['min']:.4f}, Max: {m['max']:.4f})")
+        
+        if "cross_run_stability" in overall_summary["nlp"]:
+            stability = overall_summary["nlp"]["cross_run_stability"]
+            print(f"Cross-Run Stability: {stability['mean']:.4f} ± {stability['std']:.4f}")
+            print(f"Min: {stability['min']:.4f}, Max: {stability['max']:.4f}")
     
     # Create the final evaluation results
     final_results = {
@@ -490,6 +588,7 @@ def evaluate_generations(input_file: str, output_dir: str, metrics_to_calculate:
             "evaluation_timestamp": time.strftime('%Y%m%d_%H%M%S'),
             "metrics_calculated": metrics_to_calculate
         },
+        "overall_metrics": overall_summary,
         "results": evaluation_results
     }
     

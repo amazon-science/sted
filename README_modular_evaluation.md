@@ -5,6 +5,7 @@ This repository provides a modular approach to LLM generation and evaluation, al
 1. Generate outputs from LLMs
 2. Evaluate those outputs using various metrics
 3. Run different evaluation experiments on the same generated outputs
+4. Compare different evaluation methodologies
 
 ## Scripts
 
@@ -35,7 +36,7 @@ Key features:
 
 ### 2. Evaluation (`evaluate_generations.py`)
 
-This script evaluates previously generated LLM outputs using various metrics.
+This script evaluates previously generated LLM outputs using various metrics and now includes overall metrics across all samples.
 
 ```bash
 python evaluate_generations.py --input-file ./generations/llm_gen_results_claude-3-5-sonnet-20241022-v2_temp_0_10_20250622_123456/all_results.json --output-dir ./evaluation_results
@@ -45,6 +46,7 @@ Key features:
 - Supports multiple evaluation metrics:
   - Semantic tree-based metrics (accuracy and cross-run consistency)
   - NLP-based metrics (BLEU, ROUGE, BERTScore)
+- Calculates overall metrics across all samples
 - Saves comprehensive evaluation results
 
 #### Arguments:
@@ -53,9 +55,58 @@ Key features:
 - `--output-dir`: Directory to save the evaluation results (default: "./evaluation_results")
 - `--metrics`: Which metrics to calculate (choices: "semantic", "nlp", "all"; default: "all")
 
-## Workflow Example
+### 3. Hungarian Algorithm Experiment (`run_hungarian_experiment.py`)
 
-### Step 1: Generate outputs with different temperatures
+This script evaluates the effectiveness of the Hungarian algorithm for comparing arrays and long free text in the semantic tree evaluation approach.
+
+```bash
+python run_hungarian_experiment.py --data-dir extracted_sharegpt_data --output-dir ./hungarian_experiment
+```
+
+Key features:
+- Compares evaluation with and without Hungarian algorithm
+- Analyzes complex fields (arrays and long texts) in the data
+- Creates visualizations showing improvements in accuracy and stability
+- Provides detailed analysis of when Hungarian algorithm is most beneficial
+
+#### Arguments:
+
+- `--data-dir`: Directory containing the data files
+- `--input-file`: Path to the JSON file containing the generated outputs (optional)
+- `--output-dir`: Directory to save experiment results (default: "./hungarian_experiment")
+- `--run-num`: Number of runs to perform (default: 5)
+- `--include-schema`: Include JSON schema in the prompt
+
+Note: The script uses a default sample limit of 10 when generating outputs.
+
+### 4. String Method Comparison (`run_string_method_comparison.py`)
+
+This script compares different string comparison methods in the semantic tree evaluation.
+
+```bash
+python run_string_method_comparison.py --data-dir extracted_sharegpt_data --output-dir ./string_method_experiment
+```
+
+Key features:
+- Compares different string comparison methods (levenshtein, semantic, exact, jaccard)
+- Evaluates impact on accuracy, stability, and cross-run consistency
+- Creates visualizations showing the performance of each method
+- Recommends optimal string method based on combined metrics
+
+#### Arguments:
+
+- `--data-dir`: Directory containing the data files
+- `--input-file`: Path to the JSON file containing the generated outputs (optional)
+- `--output-dir`: Directory to save experiment results (default: "./string_method_experiment")
+- `--run-num`: Number of runs to perform (default: 5)
+- `--include-schema`: Include JSON schema in the prompt
+- `--string-methods`: List of string methods to test (choices: "levenshtein", "semantic", "exact", "jaccard"; default: all methods)
+
+## Workflow Examples
+
+### Example 1: Temperature Comparison
+
+#### Step 1: Generate outputs with different temperatures
 
 ```bash
 # Generate outputs with temperature 0.1
@@ -65,7 +116,7 @@ python llm_gen_simple.py --data-dir extracted_sharegpt_data --output-dir ./gener
 python llm_gen_simple.py --data-dir extracted_sharegpt_data --output-dir ./generations --temperature 0.7 --include-schema
 ```
 
-### Step 2: Evaluate the generated outputs
+#### Step 2: Evaluate the generated outputs
 
 ```bash
 # Evaluate outputs with temperature 0.1
@@ -75,7 +126,7 @@ python evaluate_generations.py --input-file ./generations/llm_gen_results_claude
 python evaluate_generations.py --input-file ./generations/llm_gen_results_claude-3-5-sonnet-20241022-v2_temp_0_70_*/all_results.json --output-dir ./evaluation_results
 ```
 
-### Step 3: Compare different evaluation metrics
+#### Step 3: Compare different evaluation metrics
 
 ```bash
 # Evaluate using only semantic metrics
@@ -84,6 +135,50 @@ python evaluate_generations.py --input-file ./generations/llm_gen_results_claude
 # Evaluate using only NLP metrics
 python evaluate_generations.py --input-file ./generations/llm_gen_results_claude-3-5-sonnet-20241022-v2_temp_0_10_*/all_results.json --output-dir ./evaluation_results --metrics nlp
 ```
+
+### Example 2: Hungarian Algorithm Evaluation
+
+#### Step 1: Generate outputs
+
+```bash
+python llm_gen_simple.py --data-dir extracted_sharegpt_data --output-dir ./generations --include-schema --sample-limit 10
+```
+
+Note: The Hungarian experiment uses a default sample limit of 10 when generating outputs.
+
+#### Step 2: Run Hungarian algorithm experiment
+
+```bash
+python run_hungarian_experiment.py --input-file ./generations/llm_gen_results_*/all_results.json --output-dir ./hungarian_experiment
+```
+
+#### Step 3: Analyze the results
+
+Examine the visualizations in `./hungarian_experiment/visualizations/` to see the impact of the Hungarian algorithm on accuracy and stability.
+
+### Example 3: String Method Comparison
+
+#### Step 1: Generate outputs
+
+```bash
+python llm_gen_simple.py --data-dir extracted_sharegpt_data --output-dir ./generations --include-schema
+```
+
+#### Step 2: Compare different string methods
+
+```bash
+python run_string_method_comparison.py --input-file ./generations/llm_gen_results_*/all_results.json --output-dir ./string_method_experiment
+```
+
+Or specify specific string methods to test:
+
+```bash
+python run_string_method_comparison.py --input-file ./generations/llm_gen_results_*/all_results.json --output-dir ./string_method_experiment --string-methods levenshtein semantic
+```
+
+#### Step 3: Analyze the results
+
+Examine the visualizations in `./string_method_experiment/visualizations/` to see which string method performs best.
 
 ## Metrics Explained
 
@@ -98,6 +193,7 @@ These metrics use tree edit distance with semantic understanding to evaluate:
 2. **Cross-Run Consistency**:
    - **Overall consistency score**: How consistent the outputs are across multiple runs
    - **Perfect consistency**: Whether all outputs are identical
+   - **Consistency coefficient**: A measure of overall consistency quality
 
 ### NLP-Based Metrics
 
@@ -112,12 +208,36 @@ These metrics use standard NLP evaluation techniques:
 2. **Cross-Run Stability**:
    - **Overall stability**: How consistent the outputs are across multiple runs
 
+### Hungarian Algorithm Enhancement
+
+The Hungarian algorithm improves evaluation in two key ways:
+
+1. **Array Matching**:
+   - Finds optimal matching between array elements regardless of order
+   - Particularly valuable for unordered lists or when order doesn't matter semantically
+
+2. **Long Text Comparison**:
+   - Breaks long texts into meaningful chunks
+   - Finds optimal matching between chunks across texts
+   - Captures structural similarity even when wording differs
+
+### String Comparison Methods
+
+Multiple string comparison methods are available:
+
+1. **Levenshtein**: Character-based edit distance (default)
+2. **Semantic**: Embedding-based semantic similarity
+3. **Exact**: Binary exact matching
+4. **Jaccard**: Token overlap similarity
+
 ## Benefits of This Modular Approach
 
 1. **Separation of Concerns**: Generation and evaluation are separate processes
 2. **Reusability**: Generate once, evaluate multiple times with different metrics
 3. **Experimentation**: Easy to compare different evaluation approaches
 4. **Efficiency**: No need to regenerate outputs for each evaluation experiment
+5. **Comprehensive Analysis**: Multiple metrics provide a more complete picture of model performance
+6. **Customizability**: Choose the evaluation methods most appropriate for your specific use case
 
 ## Experiments
 
@@ -228,11 +348,18 @@ python run_hungarian_experiment.py --data-dir extracted_sharegpt_data \
                                   --include-schema
 ```
 
+**Key Features**:
+- Compares evaluation with and without Hungarian algorithm
+- Analyzes complex fields (arrays and long texts) in the data
+- Creates visualizations showing improvements in accuracy and stability
+- Calculates statistical significance of improvements
+
 **Expected Outcomes**:
 - Quantification of improvement from using the Hungarian algorithm
 - Identification of cases where the Hungarian algorithm provides the most benefit
 - Demonstration of robustness to array order and text structure variations
 - Empirical evidence for the value of this algorithmic choice
+- Visualization of accuracy vs. stability improvements
 
 ### 7. Run Count Analysis
 

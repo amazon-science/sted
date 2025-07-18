@@ -298,7 +298,7 @@ def make_json_serializable(obj):
         return obj.tolist()
     elif isinstance(obj, (set, frozenset)):
         return list(obj)
-    elif isinstance(obj, (bool, np.bool_, np.bool)):
+    elif isinstance(obj, (bool, np.bool_)):
         return bool(obj)
     elif hasattr(obj, 'item'):
         try:

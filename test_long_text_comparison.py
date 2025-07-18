@@ -1,498 +1,669 @@
+#!/usr/bin/env python
 """
-Test script for enhanced long text comparison in semantic JSON tree consistency
+Test Long Text Comparison Methods
 
-This script demonstrates how the enhanced string comparison handles long text values
-by breaking them into chunks and finding optimal matches between them.
+This script compares different methods for evaluating similarity between long texts,
+with a focus on demonstrating the effectiveness of the Hungarian algorithm approach.
+
+Usage:
+    python test_long_text_comparison.py --input-file path/to/long_article.txt --output-dir ./text_comparison_results
 """
 
+import argparse
 import json
+import os
 import time
-from semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from typing import List, Dict, Any, Tuple
+import re
+import random
+from scipy.optimize import linear_sum_assignment
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+import nltk
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+from rouge import Rouge
+from difflib import SequenceMatcher
+import torch
 
-def print_separator():
-    print("\n" + "="*60 + "\n")
+# Import from semantic_json_tree_consistency.py
+try:
+    from semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
+    SEMANTIC_TREE_AVAILABLE = True
+except ImportError:
+    print("Warning: semantic_json_tree_consistency module not available. Install it for Hungarian algorithm.")
+    SEMANTIC_TREE_AVAILABLE = False
 
-def test_long_text_comparison():
-    """Test the enhanced string comparison with long text values."""
-    print("Testing long text comparison...")
+# Try to import BERTScore
+try:
+    from bert_score import score as bert_score
+    BERT_SCORE_AVAILABLE = True
+except ImportError:
+    print("Warning: BERTScore not available. Install with 'pip install bert-score'")
+    BERT_SCORE_AVAILABLE = False
+
+# Download NLTK data if needed
+try:
+    nltk.download('punkt', quiet=True)
+except:
+    pass
+
+class TextComparer:
+    """Class for comparing long texts using various methods."""
     
-    # Create evaluator with different settings
-    evaluator_standard = SemanticJsonTreeConsistencyEvaluator(
-        use_semantic_similarity=False,
-        string_method='levenshtein'
+    def __init__(self, embedding_model: str = 'all-MiniLM-L6-v2'):
+        """
+        Initialize the text comparer.
+        
+        Args:
+            embedding_model: Name of the sentence transformer model to use
+        """
+        # Initialize embedding model
+        self.embedding_model = SentenceTransformer(embedding_model)
+        
+        # Initialize Rouge
+        self.rouge = Rouge()
+        
+        # Initialize smoothing function for BLEU
+        self.smoothie = SmoothingFunction().method1
+        
+        # Initialize SemanticJsonTreeConsistencyEvaluator for Hungarian algorithm
+        if SEMANTIC_TREE_AVAILABLE:
+            self.tree_evaluator = SemanticJsonTreeConsistencyEvaluator(
+                array_order_matters=False,
+                use_semantic_similarity=True,
+                semantic_threshold=0.7,
+                string_method='semantic',
+                use_hungarian=True,
+                long_string_method='hungarian'
+            )
+    
+    def split_into_chunks(self, text: str) -> List[str]:
+        """
+        Split text into meaningful chunks.
+        
+        Args:
+            text: Text to split
+            
+        Returns:
+            List of text chunks
+        """
+        # First try to split by paragraphs
+        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+        
+        # If we have enough paragraphs, use those
+        if len(paragraphs) >= 3:
+            return paragraphs
+        
+        # Otherwise, split by sentences
+        sentences = nltk.sent_tokenize(text)
+        
+        # If we have enough sentences, use those
+        if len(sentences) >= 5:
+            return sentences
+        
+        # Otherwise, use a sliding window approach
+        words = text.split()
+        chunk_size = max(20, len(words) // 10)  # Aim for about 10 chunks
+        chunks = []
+        
+        for i in range(0, len(words), chunk_size // 2):  # 50% overlap
+            chunk = ' '.join(words[i:i + chunk_size])
+            if chunk:
+                chunks.append(chunk)
+        
+        return chunks
+    
+    def modify_text(self, text: str, modification_level: float = 0.2) -> str:
+        """
+        Create a modified version of the text with controlled changes.
+        
+        Args:
+            text: Original text
+            modification_level: Level of modification (0.0 to 1.0)
+            
+        Returns:
+            Modified text
+        """
+        # Split into paragraphs
+        paragraphs = text.split('\n\n')
+        
+        # Determine how many paragraphs to modify
+        num_to_modify = max(1, int(len(paragraphs) * modification_level))
+        
+        # Choose paragraphs to modify
+        indices_to_modify = random.sample(range(len(paragraphs)), num_to_modify)
+        
+        # Apply modifications
+        for i in indices_to_modify:
+            if i < len(paragraphs):
+                # Choose a modification type
+                mod_type = random.choice(['rephrase', 'delete', 'add', 'reorder'])
+                
+                if mod_type == 'rephrase':
+                    # Rephrase by changing some words
+                    words = paragraphs[i].split()
+                    for j in range(min(5, len(words))):
+                        idx = random.randint(0, len(words) - 1)
+                        words[idx] = random.choice(['very', 'quite', 'extremely', 'somewhat', 'rather']) + ' ' + words[idx]
+                    paragraphs[i] = ' '.join(words)
+                
+                elif mod_type == 'delete':
+                    # Delete a sentence if paragraph is long enough
+                    sentences = nltk.sent_tokenize(paragraphs[i])
+                    if len(sentences) > 1:
+                        del sentences[random.randint(0, len(sentences) - 1)]
+                        paragraphs[i] = ' '.join(sentences)
+                    else:
+                        paragraphs[i] = ''  # Delete the whole paragraph if it's just one sentence
+                
+                elif mod_type == 'add':
+                    # Add a sentence
+                    added_text = random.choice([
+                        " This is an important consideration.",
+                        " Many experts agree on this point.",
+                        " Further research is needed in this area.",
+                        " This has significant implications.",
+                        " This finding is consistent with previous studies."
+                    ])
+                    paragraphs[i] += added_text
+                
+                elif mod_type == 'reorder':
+                    # Reorder sentences if there are multiple
+                    sentences = nltk.sent_tokenize(paragraphs[i])
+                    if len(sentences) > 1:
+                        random.shuffle(sentences)
+                        paragraphs[i] = ' '.join(sentences)
+        
+        # Randomly reorder some paragraphs
+        if len(paragraphs) > 2:
+            reorder_count = max(1, int(len(paragraphs) * modification_level * 0.5))
+            for _ in range(reorder_count):
+                i, j = random.sample(range(len(paragraphs)), 2)
+                paragraphs[i], paragraphs[j] = paragraphs[j], paragraphs[i]
+        
+        return '\n\n'.join(paragraphs)
+    
+    def create_text_pair(self, text: str, modification_levels: List[float] = [0.1, 0.3, 0.5]) -> List[Tuple[str, str, float]]:
+        """
+        Create pairs of original and modified texts at different modification levels.
+        
+        Args:
+            text: Original text
+            modification_levels: List of modification levels to apply
+            
+        Returns:
+            List of (original, modified, level) tuples
+        """
+        pairs = []
+        for level in modification_levels:
+            modified = self.modify_text(text, level)
+            pairs.append((text, modified, level))
+        return pairs
+    
+    def compare_with_hungarian(self, text1: str, text2: str) -> Dict[str, Any]:
+        """
+        Compare texts using Hungarian algorithm with chunking.
+        
+        Args:
+            text1: First text
+            text2: Second text
+            
+        Returns:
+            Dictionary with similarity metrics
+        """
+        if SEMANTIC_TREE_AVAILABLE:
+            # Use the implementation from semantic_json_tree_consistency.py
+            similarity = self.tree_evaluator._compare_long_strings_hungarian(text1, text2)
+            
+            # Get additional information about chunks
+            chunks1 = self.tree_evaluator._split_into_chunks(text1)
+            chunks2 = self.tree_evaluator._split_into_chunks(text2)
+            
+            return {
+                "method": "hungarian",
+                "score": float(similarity),
+                "num_chunks1": len(chunks1),
+                "num_chunks2": len(chunks2),
+                "implementation": "semantic_json_tree_consistency"
+            }
+        else:
+            # Fallback implementation if semantic_json_tree_consistency is not available
+            # Split texts into chunks
+            chunks1 = self.split_into_chunks(text1)
+            chunks2 = self.split_into_chunks(text2)
+            
+            # Get embeddings for all chunks
+            embeddings1 = self.embedding_model.encode(chunks1)
+            embeddings2 = self.embedding_model.encode(chunks2)
+            
+            # Calculate similarity matrix
+            similarity_matrix = np.zeros((len(chunks1), len(chunks2)))
+            
+            for i in range(len(chunks1)):
+                for j in range(len(chunks2)):
+                    # Calculate cosine similarity between embeddings
+                    sim = cosine_similarity([embeddings1[i]], [embeddings2[j]])[0][0]
+                    similarity_matrix[i, j] = sim
+            
+            # Use Hungarian algorithm to find optimal matching
+            row_ind, col_ind = linear_sum_assignment(-similarity_matrix)  # Negate for max similarity
+            
+            # Calculate metrics
+            matched_similarities = [similarity_matrix[i, j] for i, j in zip(row_ind, col_ind)]
+            
+            # Calculate average similarity of matched chunks
+            avg_similarity = sum(matched_similarities) / len(matched_similarities) if matched_similarities else 0.0
+            
+            # Calculate coverage (what percentage of chunks are matched well)
+            good_matches = sum(1 for sim in matched_similarities if sim > 0.7)
+            coverage = good_matches / max(len(chunks1), len(chunks2))
+            
+            # Combine similarity and coverage
+            hungarian_score = 0.7 * avg_similarity + 0.3 * coverage
+            
+            return {
+                "method": "hungarian",
+                "score": float(hungarian_score),
+                "avg_similarity": float(avg_similarity),
+                "coverage": float(coverage),
+                "num_chunks1": len(chunks1),
+                "num_chunks2": len(chunks2),
+                "matched_similarities": [float(sim) for sim in matched_similarities],
+                "implementation": "fallback"
+            }
+    
+    def compare_with_bertscore(self, text1: str, text2: str) -> Dict[str, Any]:
+        """
+        Compare texts using BERTScore.
+        
+        Args:
+            text1: First text
+            text2: Second text
+            
+        Returns:
+            Dictionary with similarity metrics
+        """
+        if not BERT_SCORE_AVAILABLE:
+            return {
+                "method": "bertscore",
+                "score": 0.0,
+                "error": "BERTScore not available"
+            }
+        
+        try:
+            P, R, F1 = bert_score([text1], [text2], lang="en")
+            
+            return {
+                "method": "bertscore",
+                "score": float(F1.item()),
+                "precision": float(P.item()),
+                "recall": float(R.item())
+            }
+        except Exception as e:
+            return {
+                "method": "bertscore",
+                "score": 0.0,
+                "error": str(e)
+            }
+    
+    def compare_with_cosine(self, text1: str, text2: str) -> Dict[str, Any]:
+        """
+        Compare texts using cosine similarity of embeddings.
+        
+        Args:
+            text1: First text
+            text2: Second text
+            
+        Returns:
+            Dictionary with similarity metrics
+        """
+        # Get embeddings
+        embedding1 = self.embedding_model.encode(text1)
+        embedding2 = self.embedding_model.encode(text2)
+        
+        # Calculate cosine similarity
+        similarity = cosine_similarity([embedding1], [embedding2])[0][0]
+        
+        return {
+            "method": "cosine",
+            "score": float(similarity)
+        }
+    
+    def compare_with_traditional(self, text1: str, text2: str) -> Dict[str, Any]:
+        """
+        Compare texts using traditional metrics (BLEU, ROUGE).
+        
+        Args:
+            text1: First text
+            text2: Second text
+            
+        Returns:
+            Dictionary with similarity metrics
+        """
+        results = {
+            "method": "traditional"
+        }
+        
+        # Tokenize texts
+        tokens1 = nltk.word_tokenize(text1.lower())
+        tokens2 = nltk.word_tokenize(text2.lower())
+        
+        # Calculate BLEU score
+        try:
+            bleu = sentence_bleu([tokens1], tokens2, smoothing_function=self.smoothie)
+            results["bleu"] = float(bleu)
+        except Exception as e:
+            results["bleu_error"] = str(e)
+        
+        # Calculate ROUGE scores
+        try:
+            rouge_scores = self.rouge.get_scores(text1, text2)[0]
+            results["rouge_1"] = float(rouge_scores['rouge-1']['f'])
+            results["rouge_2"] = float(rouge_scores['rouge-2']['f'])
+            results["rouge_l"] = float(rouge_scores['rouge-l']['f'])
+        except Exception as e:
+            results["rouge_error"] = str(e)
+        
+        # Calculate Levenshtein ratio
+        try:
+            levenshtein_ratio = SequenceMatcher(None, text1, text2).ratio()
+            results["levenshtein"] = float(levenshtein_ratio)
+        except Exception as e:
+            results["levenshtein_error"] = str(e)
+        
+        return results
+    
+    def compare_all_methods(self, text1: str, text2: str) -> Dict[str, Any]:
+        """
+        Compare texts using all available methods.
+        
+        Args:
+            text1: First text
+            text2: Second text
+            
+        Returns:
+            Dictionary with results from all methods
+        """
+        results = {
+            "text_length_1": len(text1),
+            "text_length_2": len(text2),
+            "word_count_1": len(text1.split()),
+            "word_count_2": len(text2.split()),
+            "sentence_count_1": len(nltk.sent_tokenize(text1)),
+            "sentence_count_2": len(nltk.sent_tokenize(text2))
+        }
+        
+        # Compare with Hungarian algorithm
+        hungarian_results = self.compare_with_hungarian(text1, text2)
+        results["hungarian"] = hungarian_results
+        
+        # Compare with BERTScore
+        bertscore_results = self.compare_with_bertscore(text1, text2)
+        results["bertscore"] = bertscore_results
+        
+        # Compare with cosine similarity
+        cosine_results = self.compare_with_cosine(text1, text2)
+        results["cosine"] = cosine_results
+        
+        # Compare with traditional metrics
+        traditional_results = self.compare_with_traditional(text1, text2)
+        results["traditional"] = traditional_results
+        
+        return results
+
+def run_experiment(args):
+    """
+    Run the long text comparison experiment.
+    
+    Args:
+        args: Command-line arguments
+    """
+    # Create output directory
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Load the input text
+    print(f"Loading text from {args.input_file}...")
+    with open(args.input_file, 'r', encoding='utf-8') as f:
+        text = f.read()
+    
+    print(f"Loaded text: {len(text)} characters, {len(text.split())} words")
+    
+    # Initialize text comparer
+    comparer = TextComparer()
+    
+    # Create text pairs with different modification levels
+    modification_levels = [0.1, 0.2, 0.3, 0.4, 0.5]
+    print(f"Creating text pairs with modification levels: {modification_levels}")
+    text_pairs = comparer.create_text_pair(text, modification_levels)
+    
+    # Compare each pair with all methods
+    results = []
+    for original, modified, level in text_pairs:
+        print(f"Comparing texts with modification level {level:.1f}...")
+        comparison_results = comparer.compare_all_methods(original, modified)
+        comparison_results["modification_level"] = level
+        results.append(comparison_results)
+    
+    # Save results
+    results_file = os.path.join(args.output_dir, "text_comparison_results.json")
+    with open(results_file, 'w') as f:
+        json.dump(results, f, indent=2)
+    
+    print(f"Results saved to {results_file}")
+    
+    # Create visualizations
+    create_visualizations(results, args.output_dir)
+    
+    # Print summary
+    print_summary(results)
+    
+    # Print implementation info
+    if SEMANTIC_TREE_AVAILABLE:
+        print("\nUsing Hungarian algorithm implementation from semantic_json_tree_consistency.py")
+    else:
+        print("\nUsing fallback Hungarian algorithm implementation")
+        print("To use the implementation from semantic_json_tree_consistency.py, make sure it's in your path.")
+
+def create_visualizations(results: List[Dict[str, Any]], output_dir: str):
+    """
+    Create visualizations of the text comparison results.
+    
+    Args:
+        results: List of comparison results
+        output_dir: Directory to save visualizations
+    """
+    # Set up the plotting style
+    sns.set(style="whitegrid")
+    plt.rcParams.update({'font.size': 12})
+    
+    # Extract data for plotting
+    modification_levels = [r["modification_level"] for r in results]
+    hungarian_scores = [r["hungarian"]["score"] for r in results]
+    bertscore_scores = [r["bertscore"].get("score", 0) for r in results]
+    cosine_scores = [r["cosine"]["score"] for r in results]
+    rouge_l_scores = [r["traditional"].get("rouge_l", 0) for r in results]
+    
+    # 1. Line plot comparing all methods
+    plt.figure(figsize=(12, 8))
+    plt.plot(modification_levels, hungarian_scores, 'o-', label='Hungarian', linewidth=2)
+    plt.plot(modification_levels, bertscore_scores, 's-', label='BERTScore', linewidth=2)
+    plt.plot(modification_levels, cosine_scores, '^-', label='Cosine', linewidth=2)
+    plt.plot(modification_levels, rouge_l_scores, 'd-', label='ROUGE-L', linewidth=2)
+    
+    plt.title('Text Similarity Methods vs. Modification Level')
+    plt.xlabel('Modification Level')
+    plt.ylabel('Similarity Score')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'method_comparison.png'), dpi=300)
+    
+    # 2. Bar chart comparing methods at each modification level
+    plt.figure(figsize=(14, 8))
+    
+    x = np.arange(len(modification_levels))
+    width = 0.2
+    
+    plt.bar(x - width*1.5, hungarian_scores, width, label='Hungarian')
+    plt.bar(x - width*0.5, bertscore_scores, width, label='BERTScore')
+    plt.bar(x + width*0.5, cosine_scores, width, label='Cosine')
+    plt.bar(x + width*1.5, rouge_l_scores, width, label='ROUGE-L')
+    
+    plt.title('Comparison of Text Similarity Methods')
+    plt.xlabel('Modification Level')
+    plt.ylabel('Similarity Score')
+    plt.xticks(x, [f"{level:.1f}" for level in modification_levels])
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'method_comparison_bar.png'), dpi=300)
+    
+    # 3. Scatter plot of Hungarian vs. BERTScore
+    plt.figure(figsize=(10, 8))
+    plt.scatter(hungarian_scores, bertscore_scores, s=100, c=modification_levels, cmap='viridis')
+    
+    plt.title('Hungarian Algorithm vs. BERTScore')
+    plt.xlabel('Hungarian Score')
+    plt.ylabel('BERTScore')
+    plt.colorbar(label='Modification Level')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'hungarian_vs_bertscore.png'), dpi=300)
+    
+    # 4. Heatmap of all methods
+    plt.figure(figsize=(12, 8))
+    
+    # Create a matrix of scores
+    methods = ['Hungarian', 'BERTScore', 'Cosine', 'ROUGE-L']
+    scores_matrix = np.array([
+        hungarian_scores,
+        bertscore_scores,
+        cosine_scores,
+        rouge_l_scores
+    ])
+    
+    sns.heatmap(
+        scores_matrix, 
+        annot=True, 
+        fmt=".3f", 
+        cmap="YlGnBu",
+        xticklabels=[f"{level:.1f}" for level in modification_levels],
+        yticklabels=methods
     )
     
-    evaluator_semantic = SemanticJsonTreeConsistencyEvaluator(
-        use_semantic_similarity=True,
-        string_method='semantic'
-    )
+    plt.title('Similarity Scores Across Methods and Modification Levels')
+    plt.xlabel('Modification Level')
+    plt.ylabel('Method')
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'scores_heatmap.png'), dpi=300)
     
-    # Test case 1: Paragraphs with similar content but different wording
-    text1 = """
-    The JSON tree consistency evaluator is designed to measure structural similarity
-    between JSON objects. It converts JSON structures to trees and calculates edit
-    distances between them. This approach allows for accurate comparison of complex
-    nested structures, taking into account both the structure and the values.
-    
-    The evaluator supports various configuration options, including schema awareness,
-    array order sensitivity, and path weight decay. It can also be customized with
-    different cost functions for type changes and required fields.
+    print(f"Visualizations saved to {output_dir}")
+
+def print_summary(results: List[Dict[str, Any]]):
     """
+    Print a summary of the text comparison results.
     
-    text2 = """
-    Our JSON structural similarity tool measures how alike two JSON objects are by
-    transforming them into tree structures and computing the edit distance. This method
-    enables precise comparison of nested JSON data, considering both structural elements
-    and actual values within the objects.
-    
-    The tool is highly configurable with options for schema validation, handling array
-    ordering, and adjusting weights based on path depth. Users can also define custom
-    cost functions for different types of changes and specify which fields are required.
+    Args:
+        results: List of comparison results
     """
+    print("\n" + "=" * 80)
+    print("TEXT COMPARISON SUMMARY")
+    print("=" * 80)
     
-    # Test case 2: Code blocks with similar functionality but different variable names
-    code1 = """
-    function calculateDistance(json1, json2) {
-        // Convert JSONs to trees
-        const tree1 = jsonToTree(json1);
-        const tree2 = jsonToTree(json2);
-        
-        // Calculate edit distance
-        const distance = treeEditDistance(tree1, tree2);
-        
-        // Normalize by tree size
-        const size1 = countNodes(tree1);
-        const size2 = countNodes(tree2);
-        const maxSize = Math.max(size1, size2);
-        
-        return distance / maxSize;
-    }
-    """
+    # Print text statistics
+    first_result = results[0]
+    print(f"\nText Statistics:")
+    print(f"  Length: {first_result['text_length_1']} characters")
+    print(f"  Words: {first_result['word_count_1']} words")
+    print(f"  Sentences: {first_result['sentence_count_1']} sentences")
     
-    code2 = """
-    function computeSimilarity(obj1, obj2) {
-        // Transform objects to tree representation
-        const t1 = convertToTree(obj1);
-        const t2 = convertToTree(obj2);
-        
-        // Get the edit distance between trees
-        const editDist = calculateTreeDistance(t1, t2);
-        
-        // Normalize by the larger tree size
-        const nodeCount1 = getNodeCount(t1);
-        const nodeCount2 = getNodeCount(t2);
-        const largerSize = Math.max(nodeCount1, nodeCount2);
-        
-        return 1 - (editDist / largerSize);
-    }
-    """
+    # Print results for each modification level
+    print("\nResults by Modification Level:")
+    for result in results:
+        level = result["modification_level"]
+        print(f"\n  Modification Level: {level:.1f}")
+        print(f"    Hungarian: {result['hungarian']['score']:.4f}")
+        print(f"    BERTScore: {result['bertscore'].get('score', 0):.4f}")
+        print(f"    Cosine: {result['cosine']['score']:.4f}")
+        print(f"    ROUGE-L: {result['traditional'].get('rouge_l', 0):.4f}")
     
-    # Test case 3: Partially similar text with added/removed sections
-    text3 = """
-    The JSON tree consistency evaluator is designed to measure structural similarity
-    between JSON objects. It converts JSON structures to trees and calculates edit
-    distances between them.
+    # Calculate correlations with modification level
+    modification_levels = [r["modification_level"] for r in results]
+    hungarian_scores = [r["hungarian"]["score"] for r in results]
+    bertscore_scores = [r["bertscore"].get("score", 0) for r in results]
+    cosine_scores = [r["cosine"]["score"] for r in results]
+    rouge_l_scores = [r["traditional"].get("rouge_l", 0) for r in results]
     
-    This approach allows for accurate comparison of complex nested structures,
-    taking into account both the structure and the values.
-    """
+    # Calculate correlation coefficients
+    hungarian_corr = np.corrcoef(modification_levels, hungarian_scores)[0, 1]
+    bertscore_corr = np.corrcoef(modification_levels, bertscore_scores)[0, 1]
+    cosine_corr = np.corrcoef(modification_levels, cosine_scores)[0, 1]
+    rouge_corr = np.corrcoef(modification_levels, rouge_l_scores)[0, 1]
     
-    text4 = """
-    The JSON tree consistency evaluator is designed to measure structural similarity
-    between JSON objects. It converts JSON structures to trees and calculates edit
-    distances between them.
+    print("\nCorrelation with Modification Level:")
+    print(f"  Hungarian: {hungarian_corr:.4f}")
+    print(f"  BERTScore: {bertscore_corr:.4f}")
+    print(f"  Cosine: {cosine_corr:.4f}")
+    print(f"  ROUGE-L: {rouge_corr:.4f}")
     
-    The evaluator has been enhanced with semantic understanding capabilities to recognize
-    when fields have different names but similar meanings. This makes it more robust
-    when comparing JSON objects with different naming conventions.
-    """
+    # Calculate average scores
+    avg_hungarian = sum(hungarian_scores) / len(hungarian_scores)
+    avg_bertscore = sum(bertscore_scores) / len(bertscore_scores)
+    avg_cosine = sum(cosine_scores) / len(cosine_scores)
+    avg_rouge = sum(rouge_l_scores) / len(rouge_l_scores)
     
-    # Test case 4: Technical documentation with reordered sections
-    doc1 = """
-    # JSON Tree Consistency Evaluator
+    print("\nAverage Scores:")
+    print(f"  Hungarian: {avg_hungarian:.4f}")
+    print(f"  BERTScore: {avg_bertscore:.4f}")
+    print(f"  Cosine: {avg_cosine:.4f}")
+    print(f"  ROUGE-L: {avg_rouge:.4f}")
     
-    ## Overview
-    The JSON Tree Consistency Evaluator is a tool for measuring the structural similarity between JSON objects.
-    It uses tree edit distance algorithms to calculate how similar two JSON structures are.
+    # Calculate score ranges
+    range_hungarian = max(hungarian_scores) - min(hungarian_scores)
+    range_bertscore = max(bertscore_scores) - min(bertscore_scores)
+    range_cosine = max(cosine_scores) - min(cosine_scores)
+    range_rouge = max(rouge_l_scores) - min(rouge_l_scores)
     
-    ## Features
-    - Converts JSON to tree structures
-    - Calculates edit distance between trees
-    - Supports custom cost functions
-    - Handles array order sensitivity
-    - Provides detailed similarity reports
+    print("\nScore Ranges (Max - Min):")
+    print(f"  Hungarian: {range_hungarian:.4f}")
+    print(f"  BERTScore: {range_bertscore:.4f}")
+    print(f"  Cosine: {range_cosine:.4f}")
+    print(f"  ROUGE-L: {range_rouge:.4f}")
     
-    ## Configuration Options
-    - `schema_aware`: Whether to use schema information
-    - `array_order_matters`: Whether array order affects similarity
-    - `path_weight_decay`: Weight decay factor for deeper paths
-    - `type_change_cost`: Custom costs for type changes
-    - `required_fields`: Set of required field paths
+    # Determine which method has the strongest correlation with modification level
+    correlations = [
+        ("Hungarian", abs(hungarian_corr)),
+        ("BERTScore", abs(bertscore_corr)),
+        ("Cosine", abs(cosine_corr)),
+        ("ROUGE-L", abs(rouge_corr))
+    ]
     
-    ## Usage Example
-    ```python
-    evaluator = JsonTreeConsistencyEvaluator()
-    similarity = evaluator.compare(json1, json2)
-    print(f"Similarity: {similarity:.2f}")
-    ```
-    """
+    best_method = max(correlations, key=lambda x: x[1])
     
-    doc2 = """
-    # JSON Structural Similarity Tool
+    print(f"\nMethod with strongest correlation to modification level: {best_method[0]} ({best_method[1]:.4f})")
     
-    ## Features
-    - Tree-based JSON comparison
-    - Customizable edit distance calculation
-    - Detailed similarity reporting
-    - Array order handling options
-    - Schema-aware comparison mode
+    # Determine which method has the widest range (most sensitive)
+    ranges = [
+        ("Hungarian", range_hungarian),
+        ("BERTScore", range_bertscore),
+        ("Cosine", range_cosine),
+        ("ROUGE-L", range_rouge)
+    ]
     
-    ## Configuration Options
-    - `schema_aware`: Enable/disable schema validation
-    - `array_order_matters`: Consider/ignore array element order
-    - `path_weight_decay`: Adjust importance by path depth
-    - `type_change_cost`: Customize type conversion costs
-    - `required_fields`: Specify critical fields
+    most_sensitive = max(ranges, key=lambda x: x[1])
     
-    ## Overview
-    This tool evaluates how similar two JSON documents are by converting them to tree structures
-    and applying tree edit distance algorithms. It's particularly useful for comparing complex
-    nested JSON structures where simple string comparison would be inadequate.
+    print(f"Most sensitive method (widest score range): {most_sensitive[0]} ({most_sensitive[1]:.4f})")
+
+def main():
+    parser = argparse.ArgumentParser(description="Test long text comparison methods.")
+    parser.add_argument("--input-file", type=str, required=True, help="Path to the input text file.")
+    parser.add_argument("--output-dir", type=str, default="./text_comparison_results", help="Directory to save results.")
+    args = parser.parse_args()
     
-    ## Usage Example
-    ```python
-    tool = JsonStructuralSimilarityTool()
-    result = tool.calculate_similarity(json1, json2)
-    print(f"Similarity score: {result:.2f}")
-    ```
-    """
-    
-    # Test case 5: Error logs with similar patterns but different details
-    log1 = """
-    [2025-06-18 14:32:15] ERROR: Failed to parse JSON input
-    File: /app/services/parser.js
-    Line: 127
-    Details: Unexpected token } in JSON at position 1024
-    
-    Stack trace:
-    at JSON.parse (<anonymous>)
-    at Parser.parseInput (/app/services/parser.js:127:23)
-    at RequestHandler.processRequest (/app/handlers/request.js:45:18)
-    at Server.handleConnection (/app/server.js:92:12)
-    
-    Request ID: 8f72a1b5-c3e4-42e1-9631-a3f892e1d504
-    Client IP: 192.168.1.105
-    Timestamp: 2025-06-18T14:32:15.234Z
-    """
-    
-    log2 = """
-    [2025-06-19 09:17:42] ERROR: JSON parsing failed
-    File: /app/services/parser.js
-    Line: 127
-    Details: Unexpected token ] in JSON at position 892
-    
-    Stack trace:
-    at JSON.parse (<anonymous>)
-    at Parser.parseInput (/app/services/parser.js:127:23)
-    at RequestHandler.processRequest (/app/handlers/request.js:45:18)
-    at Server.handleConnection (/app/server.js:92:12)
-    
-    Request ID: 3e9a2c7d-f5b6-48d3-87a1-b4c5d6e7f8g9
-    Client IP: 192.168.1.107
-    Timestamp: 2025-06-19T09:17:42.567Z
-    """
-    
-    # Test case 6: Scientific text with similar content but different terminology
-    science1 = """
-    Abstract: This study investigates the application of tree edit distance algorithms
-    for comparing hierarchical data structures. We propose a novel approach that incorporates
-    semantic understanding into the traditional tree edit distance calculation, allowing for
-    more accurate comparison of structures with different naming conventions but similar meanings.
-    
-    Methods: We implemented a modified Zhang-Shasha algorithm with custom cost functions for
-    insert, delete, and update operations. The algorithm was enhanced with embedding-based
-    semantic similarity to recognize semantically equivalent node labels. We evaluated our
-    approach on a dataset of 1,000 JSON documents from various domains.
-    
-    Results: Our semantic tree edit distance algorithm achieved a 27% improvement in accuracy
-    compared to traditional syntactic approaches. The algorithm was particularly effective for
-    documents with different naming conventions but equivalent structures, reducing false
-    negatives by 42%.
-    
-    Conclusion: The integration of semantic understanding into tree edit distance calculations
-    significantly improves the accuracy of hierarchical data comparison. This approach has
-    applications in data integration, schema matching, and document similarity assessment.
-    """
-    
-    science2 = """
-    Abstract: In this paper, we examine how hierarchical data structures can be compared using
-    modified tree distance algorithms. Our research introduces a semantic-aware methodology that
-    enhances traditional tree comparison by incorporating meaning-based analysis, enabling more
-    precise matching of structures that use different terminology for similar concepts.
-    
-    Methodology: A customized version of the tree edit distance algorithm was developed, featuring
-    specialized cost functions for node operations (insertion, deletion, modification). We augmented
-    this with vector embeddings to detect semantic equivalence between differently named nodes. The
-    evaluation utilized 1,000 JSON documents spanning multiple domains.
-    
-    Findings: The semantically-enhanced tree distance algorithm demonstrated a 27% accuracy improvement
-    over conventional syntax-based methods. Particularly noteworthy was its performance on structurally
-    equivalent documents with terminology variations, where it reduced misclassifications by 42%.
-    
-    Discussion and Implications: By incorporating semantic analysis into hierarchical structure comparison,
-    we achieve substantially more accurate similarity assessments. This technique offers valuable
-    applications in data merging, schema alignment, and content similarity evaluation.
-    """
-    
-    # Test case 7: Mixed content with code, text and structured data
-    mixed1 = """
-    # Project Documentation
-    
-    ## Data Structure
-    
-    The system uses the following JSON structure for configuration:
-    
-    ```json
-    {
-      "name": "ConfigurationSettings",
-      "version": "1.0",
-      "settings": {
-        "timeout": 30,
-        "retries": 3,
-        "logging": {
-          "level": "info",
-          "format": "json"
-        }
-      }
-    }
-    ```
-    
-    ## Implementation
-    
-    The configuration is loaded using the following function:
-    
-    ```javascript
-    function loadConfig(path) {
-      const fs = require('fs');
-      const data = fs.readFileSync(path, 'utf8');
-      return JSON.parse(data);
-    }
-    ```
-    
-    ## Usage Guidelines
-    
-    Always validate the configuration before using it in production environments.
-    The timeout should be adjusted based on network conditions, and logging levels
-    should be set to "debug" only during development.
-    """
-    
-    mixed2 = """
-    # System Documentation
-    
-    ## Implementation Details
-    
-    Configuration loading is handled by this function:
-    
-    ```javascript
-    function getConfiguration(configPath) {
-      const fs = require('fs');
-      const rawData = fs.readFileSync(configPath, 'utf8');
-      return JSON.parse(rawData);
-    }
-    ```
-    
-    ## Configuration Format
-    
-    The configuration uses this JSON structure:
-    
-    ```json
-    {
-      "name": "SystemConfig",
-      "version": "1.0",
-      "settings": {
-        "timeout": 30,
-        "maxRetries": 3,
-        "logging": {
-          "level": "info",
-          "outputFormat": "json"
-        }
-      }
-    }
-    ```
-    
-    ## Best Practices
-    
-    Make sure to validate all configuration values before using them.
-    Adjust timeout settings based on your network performance, and only
-    use debug logging in development environments.
-    """
-    
-    # Run comparisons
-    print("\nTest Case 1: Similar paragraphs with different wording")
-    print(f"Standard comparison: {evaluator_standard._compare_strings(text1, text2):.4f}")
-    print(f"Enhanced comparison: {evaluator_semantic._compare_strings(text1, text2):.4f}")
-    
-    print("\nTest Case 2: Similar code with different variable names")
-    print(f"Standard comparison: {evaluator_standard._compare_strings(code1, code2):.4f}")
-    print(f"Enhanced comparison: {evaluator_semantic._compare_strings(code1, code2):.4f}")
-    
-    print("\nTest Case 3: Partially similar text with added/removed sections")
-    print(f"Standard comparison: {evaluator_standard._compare_strings(text3, text4):.4f}")
-    print(f"Enhanced comparison: {evaluator_semantic._compare_strings(text3, text4):.4f}")
-    
-    print("\nTest Case 4: Technical documentation with reordered sections")
-    print(f"Standard comparison: {evaluator_standard._compare_strings(doc1, doc2):.4f}")
-    print(f"Enhanced comparison: {evaluator_semantic._compare_strings(doc1, doc2):.4f}")
-    
-    print("\nTest Case 5: Error logs with similar patterns but different details")
-    print(f"Standard comparison: {evaluator_standard._compare_strings(log1, log2):.4f}")
-    print(f"Enhanced comparison: {evaluator_semantic._compare_strings(log1, log2):.4f}")
-    
-    print("\nTest Case 6: Scientific text with similar content but different terminology")
-    print(f"Standard comparison: {evaluator_standard._compare_strings(science1, science2):.4f}")
-    print(f"Enhanced comparison: {evaluator_semantic._compare_strings(science1, science2):.4f}")
-    
-    print("\nTest Case 7: Mixed content with code, text and structured data")
-    print(f"Standard comparison: {evaluator_standard._compare_strings(mixed1, mixed2):.4f}")
-    print(f"Enhanced comparison: {evaluator_semantic._compare_strings(mixed1, mixed2):.4f}")
-    
-    # Test with complex JSON objects containing long text values
-    json1 = {
-        "metadata": {
-            "title": "JSON Tree Consistency",
-            "version": "1.0",
-            "author": "Developer Team"
-        },
-        "documentation": {
-            "overview": text1,
-            "technical": doc1,
-            "implementation": code1
-        },
-        "logs": {
-            "recent": log1,
-            "archived": False
-        },
-        "research": {
-            "abstract": science1,
-            "published": True,
-            "citations": 42
-        }
-    }
-    
-    json2 = {
-        "metadata": {
-            "title": "JSON Structural Similarity",
-            "version": "1.0.1",
-            "author": "Development Team"
-        },
-        "documentation": {
-            "overview": text2,
-            "technical": doc2,
-            "implementation": code2
-        },
-        "logs": {
-            "recent": log2,
-            "archived": False
-        },
-        "research": {
-            "abstract": science2,
-            "published": True,
-            "citations": 45
-        }
-    }
-    
-    # Compare full JSON objects
-    print("\nComparing complex JSON objects:")
-    start_time = time.time()
-    similarity, _ = evaluator_standard.calculate_tree_edit_distance(json1, json2)
-    standard_time = time.time() - start_time
-    print(f"Standard similarity: {similarity:.4f} (time: {standard_time:.2f}s)")
-    
-    start_time = time.time()
-    similarity, _ = evaluator_semantic.calculate_tree_edit_distance(json1, json2)
-    semantic_time = time.time() - start_time
-    print(f"Semantic similarity: {similarity:.4f} (time: {semantic_time:.2f}s)")
-    
-    # Test with nested JSON containing mixed content types
-    nested_json1 = {
-        "project": {
-            "name": "Data Analysis Tool",
-            "description": "A tool for analyzing and visualizing data",
-            "modules": [
-                {
-                    "name": "Parser",
-                    "description": text3,
-                    "implementation": code1,
-                    "documentation": doc1
-                },
-                {
-                    "name": "Analyzer",
-                    "description": "Analyzes parsed data using statistical methods",
-                    "implementation": "function analyze(data) { /* implementation */ }",
-                    "documentation": "# Analyzer\n\nAnalyzes data using statistical methods."
-                }
-            ],
-            "errors": [
-                {
-                    "id": "ERR001",
-                    "description": "Parser error",
-                    "details": log1
-                }
-            ]
-        }
-    }
-    
-    nested_json2 = {
-        "project": {
-            "name": "Data Visualization System",
-            "description": "A system for analyzing and visualizing complex datasets",
-            "modules": [
-                {
-                    "name": "DataParser",
-                    "description": text4,
-                    "implementation": code2,
-                    "documentation": doc2
-                },
-                {
-                    "name": "DataAnalyzer",
-                    "description": "Performs statistical analysis on parsed datasets",
-                    "implementation": "function performAnalysis(dataset) { /* implementation */ }",
-                    "documentation": "# Data Analyzer\n\nPerforms statistical analysis on datasets."
-                }
-            ],
-            "errors": [
-                {
-                    "id": "ERROR-001",
-                    "description": "Parsing failure",
-                    "details": log2
-                }
-            ]
-        }
-    }
-    
-    print("\nComparing nested JSON with mixed content types:")
-    start_time = time.time()
-    similarity, _ = evaluator_standard.calculate_tree_edit_distance(nested_json1, nested_json2)
-    standard_time = time.time() - start_time
-    print(f"Standard similarity: {similarity:.4f} (time: {standard_time:.2f}s)")
-    
-    start_time = time.time()
-    similarity, _ = evaluator_semantic.calculate_tree_edit_distance(nested_json1, nested_json2)
-    semantic_time = time.time() - start_time
-    print(f"Semantic similarity: {similarity:.4f} (time: {semantic_time:.2f}s)")
+    run_experiment(args)
 
 if __name__ == "__main__":
-    print_separator()
-    print("ENHANCED LONG TEXT COMPARISON TEST")
-    print_separator()
-    
-    try:
-        test_long_text_comparison()
-    except Exception as e:
-        import traceback
-        print(f"Error during testing: {e}")
-        traceback.print_exc()
-    
-    print_separator()
-    print("Test completed!")
-    print_separator()
+    main()

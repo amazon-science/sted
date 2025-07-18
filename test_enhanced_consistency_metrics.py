@@ -1,246 +1,314 @@
+#!/usr/bin/env python
 """
-Test script for enhanced consistency metrics in semantic JSON tree consistency
+Test Enhanced Consistency Metrics with LangChain Text Splitting
 
-This script demonstrates the comprehensive consistency metrics for evaluating
-structural consistency across multiple JSON outputs.
+This script tests the enhanced semantic_json_tree_consistency.py with LangChain text splitting
+to evaluate its effectiveness on long text comparison.
+
+Usage:
+    python test_enhanced_consistency_metrics.py --input-file sample_long_article.txt
 """
 
+import argparse
 import json
+import os
+import time
 import numpy as np
-from semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator, evaluate_semantic_json_consistency
+import matplotlib.pyplot as plt
+from typing import List, Dict, Any, Tuple
+import random
 
-def print_separator():
-    print("\n" + "="*60 + "\n")
+# Import the semantic tree consistency evaluator
+from semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
 
-def print_metrics(metrics, indent=0):
-    """Pretty print nested metrics dictionary."""
-    indent_str = " " * indent
-    for key, value in metrics.items():
-        if isinstance(value, dict):
-            print(f"{indent_str}{key}:")
-            print_metrics(value, indent + 2)
-        else:
-            if isinstance(value, float):
-                print(f"{indent_str}{key}: {value:.4f}")
-            else:
-                print(f"{indent_str}{key}: {value}")
-
-def generate_json_variations(base_json, num_variations=5, variation_level=0.2):
-    """Generate variations of a base JSON with controlled consistency."""
-    variations = [base_json]
-    
-    for i in range(1, num_variations):
-        # Create a copy of the base JSON
-        variation = json.loads(json.dumps(base_json))
-        
-        # Apply random variations
-        _apply_variations(variation, level=variation_level * i)
-        variations.append(variation)
-    
-    return variations
-
-def _apply_variations(json_obj, level=0.2, path=""):
-    """Apply random variations to a JSON object."""
-    import random
-    
-    if isinstance(json_obj, dict):
-        # Randomly modify some keys
-        keys = list(json_obj.keys())
-        num_to_modify = max(1, int(len(keys) * level))
-        keys_to_modify = random.sample(keys, min(num_to_modify, len(keys)))
-        
-        for key in keys_to_modify:
-            # Different variation strategies
-            strategy = random.choice(["rename", "modify", "remove", "add"])
-            
-            if strategy == "rename" and random.random() < level:
-                # Rename key
-                new_key = key + "_modified"
-                json_obj[new_key] = json_obj[key]
-                del json_obj[key]
-            
-            elif strategy == "modify":
-                # Modify value
-                _apply_variations(json_obj[key], level, path + "." + key)
-            
-            elif strategy == "remove" and random.random() < level * 0.5:
-                # Remove key (less likely)
-                del json_obj[key]
-            
-            elif strategy == "add" and random.random() < level * 0.7:
-                # Add new key
-                json_obj[key + "_new"] = "new_value"
-        
-    elif isinstance(json_obj, list) and json_obj:
-        # Modify list elements
-        for i in range(len(json_obj)):
-            if random.random() < level:
-                if isinstance(json_obj[i], (dict, list)):
-                    _apply_variations(json_obj[i], level, f"{path}[{i}]")
-                else:
-                    # Modify primitive value
-                    if isinstance(json_obj[i], str):
-                        json_obj[i] = json_obj[i] + " (modified)"
-                    elif isinstance(json_obj[i], (int, float)):
-                        json_obj[i] = json_obj[i] * (1 + level)
-        
-        # Possibly add or remove elements
-        if random.random() < level and json_obj:
-            if random.choice([True, False]):
-                # Add element
-                if isinstance(json_obj[0], dict):
-                    json_obj.append({})
-                elif isinstance(json_obj[0], str):
-                    json_obj.append("new_item")
-                elif isinstance(json_obj[0], (int, float)):
-                    json_obj.append(0)
-            else:
-                # Remove element
-                json_obj.pop()
-    
-    elif isinstance(json_obj, str) and random.random() < level:
-        # Modify string
-        json_obj = json_obj + " (modified)"
-    
-    elif isinstance(json_obj, (int, float)) and random.random() < level:
-        # Modify number
-        json_obj = json_obj * (1 + level)
-
-def test_consistency_metrics():
-    """Test the enhanced consistency metrics."""
-    print("Testing enhanced consistency metrics...")
-    
-    # Create evaluator
-    evaluator = SemanticJsonTreeConsistencyEvaluator(
+# Create evaluator with different configurations
+evaluators = {
+    "hungarian_langchain": SemanticJsonTreeConsistencyEvaluator(
         use_semantic_similarity=True,
-        string_method='semantic'
+        string_method='semantic',
+        use_hungarian=True,
+        long_string_method='hungarian',
+        use_langchain_splitter=True  # Use LangChain's text splitter
+    ),
+    "hungarian_custom": SemanticJsonTreeConsistencyEvaluator(
+        use_semantic_similarity=True,
+        string_method='semantic',
+        use_hungarian=True,
+        long_string_method='hungarian',
+        use_langchain_splitter=False  # Use custom text splitting
+    ),
+    "direct": SemanticJsonTreeConsistencyEvaluator(
+        use_semantic_similarity=True,
+        string_method='semantic',
+        use_hungarian=False,
+        long_string_method='direct',
+        use_langchain_splitter=False  # Use custom text splitting
+    ),
+    "cosine": SemanticJsonTreeConsistencyEvaluator(
+        use_semantic_similarity=True,
+        string_method='semantic',
+        use_hungarian=False,
+        long_string_method='cosine',
+        use_langchain_splitter=False  # Use custom text splitting
     )
+}
+
+def load_text(input_file: str) -> str:
+    """
+    Load text from a file.
     
-    # Base JSON for testing
-    base_json = {
-        "user": {
-            "name": "John Doe",
-            "age": 30,
-            "email": "john.doe@example.com",
-            "address": {
-                "street": "123 Main St",
-                "city": "New York",
-                "zip": "10001"
-            },
-            "preferences": {
-                "theme": "dark",
-                "notifications": True,
-                "language": "en-US"
-            }
-        },
-        "products": [
-            {
-                "id": "p1",
-                "name": "Product 1",
-                "price": 99.99,
-                "inStock": True
-            },
-            {
-                "id": "p2",
-                "name": "Product 2",
-                "price": 149.99,
-                "inStock": False
-            }
-        ],
-        "metadata": {
-            "version": "1.0",
-            "lastUpdated": "2025-06-20T12:00:00Z"
+    Args:
+        input_file: Path to the input file
+        
+    Returns:
+        The text content
+    """
+    with open(input_file, 'r', encoding='utf-8') as f:
+        return f.read()
+
+def modify_text(text: str, modification_level: float = 0.2) -> str:
+    """
+    Create a modified version of the text with controlled changes.
+    
+    Args:
+        text: Original text
+        modification_level: Level of modification (0.0 to 1.0)
+        
+    Returns:
+        Modified text
+    """
+    # Split into paragraphs
+    paragraphs = text.split('\n\n')
+    
+    # Determine how many paragraphs to modify
+    num_to_modify = max(1, int(len(paragraphs) * modification_level))
+    
+    # Choose paragraphs to modify
+    indices_to_modify = random.sample(range(len(paragraphs)), num_to_modify)
+    
+    # Apply modifications
+    for i in indices_to_modify:
+        if i < len(paragraphs):
+            # Choose a modification type
+            mod_type = random.choice(['rephrase', 'delete', 'add', 'reorder'])
+            
+            if mod_type == 'rephrase':
+                # Rephrase by changing some words
+                words = paragraphs[i].split()
+                for j in range(min(5, len(words))):
+                    idx = random.randint(0, len(words) - 1)
+                    words[idx] = random.choice(['very', 'quite', 'extremely', 'somewhat', 'rather']) + ' ' + words[idx]
+                paragraphs[i] = ' '.join(words)
+            
+            elif mod_type == 'delete':
+                # Delete a sentence if paragraph is long enough
+                import nltk
+                try:
+                    nltk.download('punkt', quiet=True)
+                    sentences = nltk.sent_tokenize(paragraphs[i])
+                    if len(sentences) > 1:
+                        del sentences[random.randint(0, len(sentences) - 1)]
+                        paragraphs[i] = ' '.join(sentences)
+                    else:
+                        paragraphs[i] = ''  # Delete the whole paragraph if it's just one sentence
+                except:
+                    # If NLTK fails, just delete the paragraph
+                    paragraphs[i] = ''
+            
+            elif mod_type == 'add':
+                # Add a sentence
+                added_text = random.choice([
+                    " This is an important consideration.",
+                    " Many experts agree on this point.",
+                    " Further research is needed in this area.",
+                    " This has significant implications.",
+                    " This finding is consistent with previous studies."
+                ])
+                paragraphs[i] += added_text
+            
+            elif mod_type == 'reorder':
+                # Reorder sentences if there are multiple
+                import nltk
+                try:
+                    nltk.download('punkt', quiet=True)
+                    sentences = nltk.sent_tokenize(paragraphs[i])
+                    if len(sentences) > 1:
+                        random.shuffle(sentences)
+                        paragraphs[i] = ' '.join(sentences)
+                except:
+                    # If NLTK fails, leave the paragraph as is
+                    pass
+    
+    # Randomly reorder some paragraphs
+    if len(paragraphs) > 2:
+        reorder_count = max(1, int(len(paragraphs) * modification_level * 0.5))
+        for _ in range(reorder_count):
+            i, j = random.sample(range(len(paragraphs)), 2)
+            paragraphs[i], paragraphs[j] = paragraphs[j], paragraphs[i]
+    
+    return '\n\n'.join(paragraphs)
+
+def compare_texts(text1: str, text2: str) -> Dict[str, Any]:
+    """
+    Compare two texts using the enhanced semantic tree consistency evaluator.
+    
+    Args:
+        text1: First text
+        text2: Second text
+        
+    Returns:
+        Dictionary with comparison results
+    """
+    results = {}
+    
+    # Compare using each evaluator
+    for name, evaluator in evaluators.items():
+        start_time = time.time()
+        similarity = evaluator._compare_long_strings(text1, text2)
+        end_time = time.time()
+        
+        # Get chunk information
+        chunks1 = evaluator._split_into_chunks(text1)
+        chunks2 = evaluator._split_into_chunks(text2)
+        
+        results[name] = {
+            "similarity": float(similarity),
+            "num_chunks1": len(chunks1),
+            "num_chunks2": len(chunks2),
+            "time_taken": end_time - start_time
         }
-    }
     
-    print("\nTest Case 1: High Consistency (Minor Variations)")
-    high_consistency_jsons = generate_json_variations(base_json, num_variations=5, variation_level=0.05)
-    high_consistency_result = evaluator.evaluate_structural_consistency(high_consistency_jsons)
+    return results
+
+def run_experiment(args):
+    """
+    Run the experiment.
     
-    print("High Consistency Metrics:")
-    print_metrics(high_consistency_result["consistency_metrics"])
-    print("\nStatistical Metrics:")
-    print_metrics(high_consistency_result["statistical_metrics"])
+    Args:
+        args: Command-line arguments
+    """
+    # Load the text
+    print(f"Loading text from {args.input_file}...")
+    text = load_text(args.input_file)
     
-    print("\nTest Case 2: Medium Consistency (Moderate Variations)")
-    medium_consistency_jsons = generate_json_variations(base_json, num_variations=5, variation_level=0.2)
-    medium_consistency_result = evaluator.evaluate_structural_consistency(medium_consistency_jsons)
+    print(f"Loaded text: {len(text)} characters")
     
-    print("Medium Consistency Metrics:")
-    print_metrics(medium_consistency_result["consistency_metrics"])
-    print("\nStatistical Metrics:")
-    print_metrics(medium_consistency_result["statistical_metrics"])
+    # Create modified versions at different levels
+    modification_levels = [0.1, 0.2, 0.3, 0.4, 0.5]
+    results = []
     
-    print("\nTest Case 3: Low Consistency (Major Variations)")
-    low_consistency_jsons = generate_json_variations(base_json, num_variations=5, variation_level=0.5)
-    low_consistency_result = evaluator.evaluate_structural_consistency(low_consistency_jsons)
+    for level in modification_levels:
+        print(f"\nTesting modification level {level:.1f}...")
+        modified_text = modify_text(text, level)
+        
+        # Compare original and modified text
+        comparison_results = compare_texts(text, modified_text)
+        
+        # Add to results
+        results.append({
+            "modification_level": level,
+            "results": comparison_results
+        })
+        
+        # Print results
+        print(f"\nModification level: {level:.1f}")
+        print(f"Original text length: {len(text)} chars, Modified text length: {len(modified_text)} chars")
+        for method, metrics in comparison_results.items():
+            print(f"  {method}: {metrics['similarity']:.4f} (chunks: {metrics['num_chunks1']}/{metrics['num_chunks2']}, time: {metrics['time_taken']:.2f}s)")
+        
+        # Print detailed chunk information for the first level only
+        if level == modification_levels[0]:
+            print("\nDetailed chunk information for first modification level:")
+            for method, metrics in comparison_results.items():
+                print(f"\n{method}:")
+                print(f"  Number of chunks in original text: {metrics['num_chunks1']}")
+                print(f"  Number of chunks in modified text: {metrics['num_chunks2']}")
+                
+                # Get the evaluator for this method
+                evaluator = evaluators[method]
+                
+                # Get chunks for original text
+                chunks1 = evaluator._split_into_chunks(text)
+                
+                # Print first few chunks
+                print(f"\n  First 2 chunks from original text:")
+                for i, chunk in enumerate(chunks1[:2]):
+                    print(f"    Chunk {i+1} ({len(chunk)} chars): {chunk[:50]}...")
+                    
+                # Print information about the evaluator
+                print(f"\n  Evaluator configuration:")
+                print(f"    use_hungarian: {evaluator.use_hungarian}")
+                print(f"    long_string_method: {evaluator.long_string_method}")
+                print(f"    use_langchain_splitter: {evaluator.use_langchain_splitter}")
+                print(f"    string_method: {evaluator.string_method}")
     
-    print("Low Consistency Metrics:")
-    print_metrics(low_consistency_result["consistency_metrics"])
-    print("\nStatistical Metrics:")
-    print_metrics(low_consistency_result["statistical_metrics"])
+    # Create output directory if needed
+    os.makedirs("./enhanced_metrics_results", exist_ok=True)
     
-    # Compare the three cases
-    print("\nComparison of Consistency Metrics:")
-    print(f"{'Metric':<25} {'High':<10} {'Medium':<10} {'Low':<10}")
-    print("-" * 55)
+    # Save results
+    output_file = os.path.join("./enhanced_metrics_results", "results.json")
+    with open(output_file, 'w') as f:
+        json.dump(results, f, indent=2)
     
-    metrics = [
-        "mean_similarity", 
-        "std_deviation", 
-        "consistency_coefficient",
-        "similarity_range"
-    ]
+    print(f"\nResults saved to {output_file}")
     
-    for metric in metrics:
-        high = high_consistency_result["consistency_metrics"][metric]
-        medium = medium_consistency_result["consistency_metrics"][metric]
-        low = low_consistency_result["consistency_metrics"][metric]
-        print(f"{metric:<25} {high:<10.4f} {medium:<10.4f} {low:<10.4f}")
+    # Create visualization
+    create_visualization(results)
+
+def create_visualization(results: List[Dict[str, Any]]):
+    """
+    Create visualization of the results.
     
-    # Compare statistical metrics
-    print("\nComparison of Statistical Metrics:")
+    Args:
+        results: List of results
+    """
+    # Extract data
+    modification_levels = [r["modification_level"] for r in results]
     
-    # Quartiles
-    print("\nQuartiles:")
-    quartile_metrics = ["median", "iqr"]
-    for metric in quartile_metrics:
-        high = high_consistency_result["statistical_metrics"]["quartiles"][metric]
-        medium = medium_consistency_result["statistical_metrics"]["quartiles"][metric]
-        low = low_consistency_result["statistical_metrics"]["quartiles"][metric]
-        print(f"{metric:<25} {high:<10.4f} {medium:<10.4f} {low:<10.4f}")
+    # Extract similarity scores for each method
+    methods = list(results[0]["results"].keys())
+    scores = {method: [] for method in methods}
     
-    # Entropy and Gini
-    print("\nEntropy and Gini:")
-    other_metrics = ["entropy", "gini_coefficient"]
-    for metric in other_metrics:
-        high = high_consistency_result["statistical_metrics"][metric]
-        medium = medium_consistency_result["statistical_metrics"][metric]
-        low = low_consistency_result["statistical_metrics"][metric]
-        print(f"{metric:<25} {high:<10.4f} {medium:<10.4f} {low:<10.4f}")
+    for result in results:
+        for method in methods:
+            scores[method].append(result["results"][method]["similarity"])
     
-    # Check for outliers
-    print("\nOutliers Detected:")
-    print(f"High Consistency: {len(high_consistency_result['outliers'])}")
-    print(f"Medium Consistency: {len(medium_consistency_result['outliers'])}")
-    print(f"Low Consistency: {len(low_consistency_result['outliers'])}")
+    # Create plot
+    plt.figure(figsize=(12, 8))
     
-    if high_consistency_result['outliers']:
-        print("\nSample outlier from high consistency set:")
-        print_metrics(high_consistency_result['outliers'][0])
+    for method in methods:
+        plt.plot(modification_levels, scores[method], 'o-', label=method, linewidth=2)
+    
+    plt.title('Text Similarity Methods vs. Modification Level')
+    plt.xlabel('Modification Level')
+    plt.ylabel('Similarity Score')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    
+    # Save plot
+    output_file = os.path.join("./enhanced_metrics_results", "comparison.png")
+    plt.savefig(output_file, dpi=300)
+    print(f"Visualization saved to {output_file}")
+    
+    # Calculate correlations
+    print("\nCorrelation with modification level:")
+    for method in methods:
+        correlation = np.corrcoef(modification_levels, scores[method])[0, 1]
+        print(f"  {method}: {correlation:.4f}")
+    
+    # Calculate ranges
+    print("\nScore ranges (Max - Min):")
+    for method in methods:
+        score_range = max(scores[method]) - min(scores[method])
+        print(f"  {method}: {score_range:.4f}")
+
+def main():
+    parser = argparse.ArgumentParser(description="Test enhanced consistency metrics with LangChain text splitting.")
+    parser.add_argument("--input-file", type=str, default="sample_long_article.txt", help="Path to the input text file.")
+    args = parser.parse_args()
+    
+    run_experiment(args)
 
 if __name__ == "__main__":
-    print_separator()
-    print("ENHANCED CONSISTENCY METRICS TEST")
-    print_separator()
-    
-    try:
-        test_consistency_metrics()
-    except Exception as e:
-        import traceback
-        print(f"Error during testing: {e}")
-        traceback.print_exc()
-    
-    print_separator()
-    print("Test completed!")
-    print_separator()
+    main()

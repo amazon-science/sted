@@ -18,8 +18,91 @@ import re
 
 from scipy.optimize import linear_sum_assignment
 import zss
+
+# Optional imports
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
 import torch
+import boto3
+from botocore.exceptions import ClientError
+from botocore.config import Config
+
+def getEmbeddings(text, model_id, max_retries=10, initial_delay=2, output_embedding_length=1024):
+    """
+    Get embeddings from Bedrock with proper retry and connection handling
+    """
+    def exponential_delay(attempt):
+        # Add jitter to prevent thundering herd
+        jitter = 0.1 * initial_delay * np.random.random()
+        return initial_delay * (2 ** attempt) + jitter
+    
+    if model_id == "amazon.titan-embed-text-v1":
+        request_body = {
+            "inputText": text
+        }
+    elif model_id == "amazon.titan-embed-text-v2:0":
+        request_body = {
+            "inputText": text,
+            "dimensions": 1024,
+            "normalize": True,
+            "embeddingTypes": ["float"]
+        }
+    elif model_id == "cohere.embed-multilingual-v3":
+        request_body = {
+            "texts": [text],
+            "input_type": "clustering",
+            "truncate": "END",
+            "dimensions": 1024,
+            "normalize": True,
+            "embeddingTypes": ["float"]
+        }
+    else:
+        raise Exception(f"Unknown model_id: {model_id}")
+
+    for attempt in range(max_retries):
+        try:
+            body = json.dumps(request_body)
+            response = bedrock.invoke_model(
+                body=body,
+                modelId=model_id,
+                accept="application/json",
+                contentType="application/json")
+            response_body = json.loads(response.get("body").read())
+            return np.array([response_body.get("embedding")]).astype(np.float32)
+        
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+            
+            # Handle specific errors differently
+            if error_code in ['ThrottlingException', 'TooManyRequestsException', 'ServiceUnavailable']:
+                # These are definitely retryable
+                print(f"Throttling detected on attempt {attempt + 1}: {str(e)}")
+            elif error_code in ['InternalServerError', 'ServiceError']:
+                # Server-side errors that might resolve
+                print(f"Server error on attempt {attempt + 1}: {str(e)}")
+            else:
+                print(f"Client error on attempt {attempt + 1}: {str(e)}")
+            
+            if attempt == max_retries - 1:
+                print(f"Max retries ({max_retries}) exceeded. Giving up.")
+                raise  # If this was the last attempt, re-raise the exception
+            
+            delay = exponential_delay(attempt)
+            print(f"Retrying in {delay:.2f} seconds...")
+            time.sleep(delay)
+        
+        except Exception as e:
+            # Catch other exceptions (like connection errors)
+            print(f"Unexpected error on attempt {attempt + 1}: {str(e)}")
+            if attempt == max_retries - 1:
+                raise
+            
+            delay = exponential_delay(attempt)
+            print(f"Retrying in {delay:.2f} seconds...")
+            time.sleep(delay)
+
+    # This should be unreachable with the retry logic above
+    raise Exception("Max retries reached. Unable to get embeddings.")
 
 class JsonNode:
     """Node representation for JSON tree structure."""
@@ -87,14 +170,17 @@ class SemanticJsonTreeConsistencyEvaluator:
                  type_change_cost: Dict[Tuple[str, str], float] = None,
                  required_fields: Set[str] = None,
                  use_semantic_similarity: bool = True,
-                 embedding_model: str = 'all-MiniLM-L6-v2',
+                 model_id: str = 'all-MiniLM-L6-v2',
                  semantic_threshold: float = 0.7,
                  key_semantic_weight: float = 0.7,
                  exact_match_weight: float = 0.3,
                  string_method: str = 'levenshtein',
                  number_tolerance: float = 0.01,
                  use_hungarian: bool = True,
-                 long_string_method: str = 'hungarian'):
+                 long_string_method: str = 'hungarian',
+                 use_langchain_splitter: bool = True,
+                 chunk_size: int = 300,
+                 chunk_overlap: int = 50):
         """
         Initialize the evaluator with semantic capabilities.
         
@@ -105,7 +191,7 @@ class SemanticJsonTreeConsistencyEvaluator:
             type_change_cost: Custom costs for type changes
             required_fields: Set of required field paths
             use_semantic_similarity: Whether to use embedding-based semantic similarity
-            embedding_model: Name of the sentence transformer model
+            model_id: Name of the sentence transformer model
             semantic_threshold: Minimum semantic similarity to consider keys as matching
             key_semantic_weight: Weight for semantic similarity vs exact match for keys
             exact_match_weight: Weight for exact key matching
@@ -152,16 +238,38 @@ class SemanticJsonTreeConsistencyEvaluator:
         # Initialize embedding model if available
         self.embedding_model = None
         if self.use_semantic_similarity:
-            try:
-                self.embedding_model = SentenceTransformer(embedding_model)
-                # Warm up the model
-                self.embedding_model.encode(["test"], show_progress_bar=False)
-            except Exception as e:
-                warnings.warn(f"Failed to load embedding model: {e}")
-                self.use_semantic_similarity = False
+            if model_id in ["amazon.titan-embed-text-v1", "amazon.titan-embed-text-v2:0", "cohere.embed-multilingual-v3"]:    
+                bedrock_config = Config(
+                    max_pool_connections=50,  # Increase connection pool size
+                    retries={'max_attempts': 5, 'mode': 'adaptive'},
+                    connect_timeout=10,
+                    read_timeout=30,
+                    tcp_keepalive=True
+                )
+                session = boto3.Session()
+                
+                self.bedrock_client = session.client(
+                    'bedrock-runtime',
+                    config=bedrock_config
+                )
+            else:
+                try:
+                    self.embedding_model = SentenceTransformer(model_id)
+                    # Warm up the model
+                    self.embedding_model.encode(["test"], show_progress_bar=False)
+                except Exception as e:
+                    warnings.warn(f"Failed to load embedding model: {e}")
+                    self.use_semantic_similarity = False
+
+
         
         # Cache for embeddings
         self._embedding_cache = {}
+        
+        # Text splitting configuration
+        self.use_langchain_splitter = use_langchain_splitter
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
     def _default_type_change_costs(self) -> Dict[Tuple[str, str], float]:
         """Define default costs for type changes."""
         costs = {}
@@ -197,6 +305,9 @@ class SemanticJsonTreeConsistencyEvaluator:
         """Get embedding for a text with caching."""
         if not self.use_semantic_similarity or not self.embedding_model:
             return None
+        
+        if model_id in ["amazon.titan-embed-text-v1", "amazon.titan-embed-text-v2:0", "cohere.embed-multilingual-v3"]:
+            return getEmbeddings(text, self.model_id)
         
         try:
             # Preprocess key names for better semantic understanding
@@ -670,12 +781,40 @@ class SemanticJsonTreeConsistencyEvaluator:
         return chunks
     
     def _split_natural_text(self, text: str) -> List[str]:
-        """Split natural language text into sentences or paragraphs."""
-        import re
-        
+        """Split natural language text into sentences or paragraphs using LangChain if available and enabled."""
         # For short text, don't split at all
         if len(text) < 100:
             return [text]
+        
+        # Try to use LangChain's text splitters if available and enabled
+        if self.use_langchain_splitter:
+            print(f"Using LangChain splitter for text of length {len(text)}")
+            # Create a text splitter that tries to create semantically meaningful chunks
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=self.chunk_size,
+                chunk_overlap=self.chunk_overlap,
+                length_function=len,
+                separators=["\n\n", "\n", ".", "!", "?", ";", ":", " ", ""]  # Try these separators in order
+            )
+            
+            # Split the text
+            chunks = text_splitter.split_text(text)
+            
+            # If we got reasonable chunks, return them
+            if len(chunks) >= 2:
+                print(f"LangChain produced {len(chunks)} chunks")
+                return chunks
+                
+            # If LangChain didn't produce enough chunks, fall back to custom logic
+            print("LangChain produced too few chunks, falling back to custom logic")
+        else:                
+            print("LangChain splitter disabled, using custom splitter")
+        
+        print(f"Using custom splitter for text of length {len(text)}")
+        # Custom splitting logic (fallback)
+        
+        # Custom splitting logic (fallback)
+        import re
         
         # Try to split by sentences first
         sentences = re.split(r'(?<=[.!?])\s+', text)
