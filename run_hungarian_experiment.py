@@ -22,17 +22,12 @@ import pandas as pd
 from pathlib import Path
 import copy
 from scipy.optimize import linear_sum_assignment
+from tqdm import tqdm
 
-# Import semantic comparison functionality
-try:
-    from semantic_json_tree_consistency import (
-        SemanticJsonTreeConsistencyEvaluator,
-        evaluate_semantic_json_consistency
-    )
-    SEMANTIC_COMPARISON_AVAILABLE = True
-except ImportError:
-    print("Warning: semantic_json_tree_consistency module not available.")
-    SEMANTIC_COMPARISON_AVAILABLE = False
+from semantic_json_tree_consistency import (
+    SemanticJsonTreeConsistencyEvaluator,
+    evaluate_semantic_json_consistency
+)
 
 def run_generation(data_dir: str, output_dir: str, run_num: int, include_schema: bool, sample_limit: int = 10) -> str:
     """
@@ -52,7 +47,8 @@ def run_generation(data_dir: str, output_dir: str, run_num: int, include_schema:
         "--data-dir", data_dir,
         "--output-dir", output_dir,
         "--run-num", str(run_num),
-        "--sample-limit", str(sample_limit)
+        "--sample-limit", str(sample_limit),
+        "--include-schema"
     ]
     
     if include_schema:
@@ -178,12 +174,10 @@ def evaluate_real_data(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     Returns:
         List of evaluation results
     """
-    if not SEMANTIC_COMPARISON_AVAILABLE:
-        raise ImportError("semantic_json_tree_consistency module is required for this experiment")
     
     results = []
     
-    for sample in data.get('results', []):
+    for sample in tqdm(data.get('results', []), desc="iterate evaluation for each sample"):
         sample_id = sample.get('sample_id', 'unknown')
         ground_truth = sample.get('ground_truth', {})
         responses = sample.get('responses', [])
@@ -538,6 +532,19 @@ def create_visualizations(real_data_results: List[Dict[str, Any]], field_stats: 
                 print(f"Error creating field correlation plots: {e}")
     
     print(f"Visualizations saved to {output_dir}")
+    
+def find_latest_generation(generations_dir):
+    """
+    Find the latest generation result in the given directory.
+
+    Args:
+        generations_dir: Directory containing generation results
+    """
+    generation_files = [f for f in os.listdir(generations_dir) if f.endswith('all_results.json')]
+    if not generation_files:
+        raise FileNotFoundError("No generation results found.")
+    latest_file = max(generation_files, key=lambda f: os.path.getmtime(os.path.join(generations_dir, f)))
+    return os.path.join(generations_dir, latest_file)    
 
 def run_experiment(args):
     """
@@ -552,7 +559,6 @@ def run_experiment(args):
     visualizations_dir = os.path.join(args.output_dir, "visualizations")
     os.makedirs(generations_dir, exist_ok=True)
     
-    # Run generation if input file is not provided
     if args.input_file:
         input_file = args.input_file
     else:
@@ -723,6 +729,7 @@ def main():
     parser.add_argument("--output-dir", type=str, default="./hungarian_experiment", help="Directory to save experiment results.")
     parser.add_argument("--run-num", type=int, default=5, help="Number of runs to perform.")
     parser.add_argument("--include-schema", action="store_true", help="Include JSON schema in the prompt.")
+    parser.add_argument("--skip-generation", action="store_true", help="Skip generation")
     args = parser.parse_args()
     
     # Validate arguments

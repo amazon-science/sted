@@ -231,3 +231,7 @@ wandb/
 *.bak
 *.backup
 *~
+
+
+*.txt
+*.swp
