@@ -80,28 +80,6 @@ def getEmbeddings(text, model_id, bedrock_client, max_retries=10, initial_delay=
                 embedding = response_body.get("embedding", [])
                 
             return np.array(embedding).astype(np.float32)
-        
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            
-            # Handle specific errors differently
-            if error_code in ['ThrottlingException', 'TooManyRequestsException', 'ServiceUnavailable']:
-                # These are definitely retryable
-                print(f"Throttling detected on attempt {attempt + 1}: {str(e)}")
-            elif error_code in ['InternalServerError', 'ServiceError']:
-                # Server-side errors that might resolve
-                print(f"Server error on attempt {attempt + 1}: {str(e)}")
-            else:
-                print(f"Client error on attempt {attempt + 1}: {str(e)}")
-            
-            if attempt == max_retries - 1:
-                print(f"Max retries ({max_retries}) exceeded. Giving up.")
-                raise  # If this was the last attempt, re-raise the exception
-            
-            delay = exponential_delay(attempt)
-            print(f"Retrying in {delay:.2f} seconds...")
-            time.sleep(delay)
-        
         except Exception as e:
             # Catch other exceptions (like connection errors)
             print(f"Unexpected error on attempt {attempt + 1}: {str(e)}")
@@ -181,12 +159,8 @@ class SemanticJsonTreeConsistencyEvaluator:
                  required_fields: Set[str] = None,
                  model_id: str = 'all-MiniLM-L6-v2',
                  semantic_threshold: float = 0.7,
-                 key_semantic_weight: float = 0.7,
-                 exact_match_weight: float = 0.3,
                  string_method: str = 'bertscore',  # Changed default to bertscore
                  number_tolerance: float = 0.01,
-                 use_hungarian: bool = True,
-                 long_string_method: str = 'bertscore',  # Changed default to bertscore
                  use_langchain_splitter: bool = True,
                  chunk_size: int = 300,
                  chunk_overlap: int = 50):
@@ -204,8 +178,6 @@ class SemanticJsonTreeConsistencyEvaluator:
             exact_match_weight: Weight for exact key matching
             string_method: Method for string comparison ('levenshtein', 'semantic', 'exact', 'jaccard', 'bertscore')
             number_tolerance: Relative tolerance for number comparison
-            use_hungarian: Whether to use Hungarian algorithm for array matching and long string comparison
-            long_string_method: Method for long string comparison ('hungarian', 'bertscore', 'cosine', 'direct')
             use_langchain_splitter: Whether to use LangChain for text splitting
             chunk_size: Size of chunks for text splitting
             chunk_overlap: Overlap between chunks
@@ -217,21 +189,10 @@ class SemanticJsonTreeConsistencyEvaluator:
         
         # Semantic similarity parameters
         self.semantic_threshold = semantic_threshold
-        self.key_semantic_weight = key_semantic_weight
-        self.exact_match_weight = exact_match_weight
         self.number_tolerance = number_tolerance
-        
-        # Hungarian algorithm parameters
-        self.use_hungarian = use_hungarian
         
         # Import BERTScore if needed
         self.bert_score = bert_score
-        
-        # Normalize key weights
-        key_total = self.key_semantic_weight + self.exact_match_weight
-        if key_total > 0:
-            self.key_semantic_weight /= key_total
-            self.exact_match_weight /= key_total
         
         # Initialize embedding model if available
         self.embedding_model = None
@@ -363,49 +324,12 @@ class SemanticJsonTreeConsistencyEvaluator:
             return 1.0
         
         # Calculate exact match similarity (character-based)
-        exact_sim = SequenceMatcher(None, key1.lower(), key2.lower()).ratio()
+        # exact_sim = SequenceMatcher(None, key1.lower(), key2.lower()).ratio()
         
         # Calculate semantic similarity
         semantic_sim = self._calculate_semantic_similarity(key1, key2)
         
-        return (self.exact_match_weight * exact_sim + self.key_semantic_weight * semantic_sim)
-    
-    def _find_key_mapping(self, keys1: List[str], keys2: List[str]) -> Dict[str, str]:
-        """Find optimal mapping between keys using semantic similarity."""
-        if not keys1 or not keys2:
-            return {}
-        
-        # Create similarity matrix
-        n1, n2 = len(keys1), len(keys2)
-        similarity_matrix = np.zeros((n1, n2))
-        
-        for i, k1 in enumerate(keys1):
-            for j, k2 in enumerate(keys2):
-                similarity_matrix[i, j] = self._calculate_key_similarity(k1, k2)
-        
-        # Use Hungarian algorithm for optimal assignment
-        # Convert to cost matrix (1 - similarity)
-        cost_matrix = 1 - similarity_matrix
-        
-        # Pad matrix if needed
-        if n1 != n2:
-            max_n = max(n1, n2)
-            padded_cost = np.ones((max_n, max_n))
-            padded_cost[:n1, :n2] = cost_matrix
-            cost_matrix = padded_cost
-        
-        # Find optimal assignment
-        row_indices, col_indices = linear_sum_assignment(cost_matrix)
-        
-        # Create mapping
-        mapping = {}
-        for i, j in zip(row_indices, col_indices):
-            if i < n1 and j < n2:
-                similarity = similarity_matrix[i, j]
-                if similarity >= self.semantic_threshold:
-                    mapping[keys1[i]] = keys2[j]
-        
-        return mapping
+        return semantic_sim
     
     def json_to_tree(self, json_obj: Any, path: str = "", parent_path: str = "") -> JsonNode:
         """
@@ -445,7 +369,6 @@ class SemanticJsonTreeConsistencyEvaluator:
     def calculate_path_weight(self, path: str) -> float:
         """
         Calculate weight for a path based on its depth.
-        
         Args:
             path: The path to calculate weight for
             
@@ -584,8 +507,6 @@ class SemanticJsonTreeConsistencyEvaluator:
         
         if len(str1) < 500 and len(str2) < 500:
             P, R, F1 = self.bert_score([str1], [str2], lang="en")
-            
-            print(f"str1: {str1}, str2: {str2}, f1: {F1}")
             return float(F1.item())
         else:
             return self._compare_long_strings_hungarian(str1, str2)
@@ -719,8 +640,10 @@ class SemanticJsonTreeConsistencyEvaluator:
         """Compare two numbers with tolerance."""
         if num1 == num2:
             return 1.0
+        else:
+            return 0
         
-        return abs(num1 - num2) / max(abs(num1), abs(num2))
+        #return 1 - abs(num1 - num2) / max(abs(num1), abs(num2))
             
     def update_cost(self, node1: JsonNode, node2: JsonNode) -> float:
         """
@@ -751,7 +674,7 @@ class SemanticJsonTreeConsistencyEvaluator:
             value_cost = 0.0  # No value cost if types are different or not leaf nodes
         
         # Reduce cost based on key similarity
-        key_factor = 1.0 - (sim["key_sim"] * 0.5)  # At most 50% reduction based on key similarity
+        key_factor = 1.0 - (sim["key_sim"] * 0.2)  # At most 50% reduction based on key similarity
         
         # Combine costs
         cost = (type_cost + value_cost * 0.5) * key_factor  # Weight value cost less than type cost
@@ -764,6 +687,8 @@ class SemanticJsonTreeConsistencyEvaluator:
         
         cost *= avg_path_weight
         
+        print(f"node1: {node1.value}, node2: {node2.value}, cost: {cost}")
+        
         return cost
     
     def _compare_arrays_unordered(self, arr1: List[JsonNode], arr2: List[JsonNode]) -> Tuple[float, List[Tuple[int, int]]]:
@@ -775,52 +700,44 @@ class SemanticJsonTreeConsistencyEvaluator:
             arr2: Second array of nodes
             
         Returns:
-            Tuple of (similarity_score, matching_pairs)
+            similarity_score
         """
         if len(arr1) == 0 or len(arr2) == 0:
             return 0.0, []
         
         # Create cost matrix
-        cost_matrix = np.zeros((len(arr1), len(arr2)))
+        sim_matrix = np.zeros((len(arr1), len(arr2)))
         for i, item1 in enumerate(arr1):
             for j, item2 in enumerate(arr2):
                 # Cost is inverse of similarity
                 if isinstance(item1, str) and isinstance(item2, str):
-                    cost_matrix[i, j] = self._compare_strings(item1, item2)
+                    sim_matrix[i, j] = self._compare_strings(item1, item2)
                 elif isinstance(item1, dict) and isinstance(item2, dict):
-                    cost_matrix[i, j] = self._calculate_node_similarity(item1, item2)
+                    sim_matrix[i, j] = self._calculate_node_similarity(item1, item2)
                 elif isinstance(item1, (int, float)) and isinstance(item2, (int, float)):
-                    cost_matrix[i, j] = self._compare_numbers(item1, item2)
+                    sim_matrix[i, j] = self._compare_numbers(item1, item2)
                 else:
-                    cost_matrix[i, j] = 0 # similarity is 0 if arr1 and arr2 have different type
+                    sim_matrix[i, j] = 0 # cost is 1 if arr1 and arr2 have different type
         
-        # Normalize cost matrix to [0, 1] range
-        max_cost = np.max(cost_matrix) if np.max(cost_matrix) > 0 else 1.0
-        cost_matrix = cost_matrix / max_cost
+        print(f"sim_matrix: {sim_matrix}")
         
         # Pad matrix if needed
         if len(arr1) != len(arr2):
             max_len = max(len(arr1), len(arr2))
-            padded_matrix = np.ones((max_len, max_len))
-            padded_matrix[:len(arr1), :len(arr2)] = cost_matrix
-            cost_matrix = padded_matrix
+            padded_matrix = np.zeros((max_len, max_len))
+            padded_matrix[:len(arr1), :len(arr2)] = sim_matrix
+            sim_matrix = padded_matrix
         
         # Find optimal assignment using Hungarian algorithm
-        row_indices, col_indices = linear_sum_assignment(cost_matrix)
+        row_indices, col_indices = linear_sum_assignment(-sim_matrix)
         
-        # Calculate similarity and collect matching pairs
-        total_similarity = 0
-        matching_pairs = []
+        print(f"row_indices: {row_indices}, col_indices: {col_indices}")
+        # Calculate similarity and collect matching pairs        
+        total_similarity = [sim_matrix[i, j] for i, j in zip(row_indices, col_indices)]
+        normalized_similarity = sum(total_similarity) / max(len(arr1), len(arr2))
         
-        for i, j in zip(row_indices, col_indices):
-            if i < len(arr1) and j < len(arr2):
-                similarity = 1 - cost_matrix[i, j]
-                total_similarity += similarity
-                matching_pairs.append((i, j))
-        
-        avg_similarity = total_similarity / max(len(arr1), len(arr2))
-        
-        return avg_similarity
+        print(f"normalized_similarity: {normalized_similarity}")
+        return normalized_similarity
     
     def calculate_tree_edit_distance(self, json1: Dict[str, Any], json2: Dict[str, Any]) -> Tuple[float, List[Dict[str, Any]]]:
         """
@@ -916,6 +833,7 @@ class SemanticJsonTreeConsistencyEvaluator:
                 for j in range(i+1, n):
                     sim = self.calculate_tree_edit_distance(json_outputs[i], json_outputs[j])
                     similarity_values.append(sim)
+
         
         # Calculate basic statistics
         avg_similarity = sum(similarity_values) / len(similarity_values) if similarity_values else 1.0
@@ -958,12 +876,7 @@ class SemanticJsonTreeConsistencyEvaluator:
                 "quartiles": quartile_metrics,
                 "entropy": entropy_score,
                 "gini_coefficient": gini_coefficient
-            },
-            
-            "frequently_edited_paths": [
-                {"path": path, "edit_count": count}
-                for path, count in frequent_edits
-            ]
+            }
         }
         
         return report
@@ -1048,12 +961,14 @@ def parse_json_outputs(outputs: List[Union[str, Dict]]) -> List[Dict]:
         elif isinstance(output, list):
             if isinstance(output[0], dict) and len(output)>0:
                 parsed.append({"responses": output})
+            elif isinstance(output[0], str) and len(output)>0:
+                parsed.append({"responses": json.loads(str)})
             else:
-                print(output[0])
+                parsed.append({"responses": output})
         elif isinstance(output, dict):
             parsed.append(output)
         else:
-            print(f"Warning: Skipping non-JSON output at index {i} of type {type(output)}")
+            parsed.append({"responses": output})
     
     return parsed
 
@@ -1063,8 +978,6 @@ def evaluate_semantic_json_consistency(
     required_fields: List[str] = None,
     model_id: str = 'all-MiniLM-L6-v2',
     semantic_threshold: float = 0.7,
-    use_hungarian: bool = True,
-    long_string_method: str = 'hungarian'
 ) -> Dict[str, Any]:
     """
     Evaluate structural consistency of JSON outputs with semantic similarity support.
@@ -1074,14 +987,14 @@ def evaluate_semantic_json_consistency(
         required_fields: List of required field paths
         model_id: Name of the sentence transformer model or Bedrock model ID
         semantic_threshold: Minimum semantic similarity to consider keys as matching
-        use_hungarian: Whether to use Hungarian algorithm for optimal matching
-        long_string_method: Method for long string comparison
         
     Returns:
         Dictionary with consistency metrics
     """
     # Parse outputs
     parsed_outputs = parse_json_outputs(outputs)
+    
+    print(f"parsed_outputs: {parsed_outputs}")
     
     if len(parsed_outputs) < 2:
         return {
@@ -1095,8 +1008,6 @@ def evaluate_semantic_json_consistency(
         required_fields=set(required_fields) if required_fields else set(),
         model_id=model_id,
         semantic_threshold=semantic_threshold,
-        use_hungarian=use_hungarian,
-        long_string_method=long_string_method
     )
     
     # Evaluate consistency
@@ -1142,43 +1053,35 @@ if __name__ == "__main__":
         }
     }
     
+    json4 = [1,2,3,4]
+    json5 = [1,3,4,5]
+    
+    json6 = [1,3,5,6,1,1,1,1,1,1]
+    
+    json7 = [10,70,50,60]
+    
     print("=== Semantic JSON Tree Consistency Evaluation ===\n")
     
     # Test with semantic similarity enabled
     print("1. With Semantic Similarity:")
     result_semantic = evaluate_semantic_json_consistency(
-        [json1, json2, json3],
+        [json4, json5],
         semantic_threshold=0.6,
-        use_hungarian=True,
-        long_string_method='hungarian',
         model_id="all-MiniLM-L6-v2"  # Changed from Bedrock model for example
     )
     
     print(f"   Consistency Metrics: {result_semantic['consistency_metrics']}")
     
-    # Test without semantic similarity
-    print("\n2. Without Semantic Similarity:")
-    result_exact = evaluate_semantic_json_consistency(
-        [json1, json2, json3],
-        use_hungarian=False,
-        long_string_method='direct'
+    result_semantic = evaluate_semantic_json_consistency(
+        [json4, json6],
+        semantic_threshold=0.6,
+        model_id="all-MiniLM-L6-v2"  # Changed from Bedrock model for example
     )
+    print(f"   Consistency Metrics: {result_semantic['consistency_metrics']}")
     
-    print(f"   Consistency Metrics: {result_exact['consistency_metrics']}")
-    
-    # Compare the results
-    print("\n3. Improvement with Semantic Similarity:")
-    semantic_score = result_semantic['consistency_metrics']['mean_similarity']
-    exact_score = result_exact['consistency_metrics']['mean_similarity']
-    improvement = semantic_score - exact_score
-    print(f"   Consistency Score Improvement: {improvement:.4f} ({improvement*100:.1f}%)")
-    
-    # Show most different pairs
-    print("\n4. Most Different Pairs (with Semantic Similarity):")
-    for pair_info in result_semantic["most_different_pairs"]:
-        print(f"   Pair {pair_info['pair']}: Similarity {pair_info['similarity']:.4f}")
-        
-    # Show frequently edited paths
-    print("\n5. Frequently Edited Paths (with Semantic Similarity):")
-    for path_info in result_semantic["frequently_edited_paths"][:5]:
-        print(f"   {path_info['path']}: {path_info['edit_count']} edits")
+    result_semantic = evaluate_semantic_json_consistency(
+        [json4, json7],
+        semantic_threshold=0.6,
+        model_id="all-MiniLM-L6-v2"  # Changed from Bedrock model for example
+    )
+    print(f"   Consistency Metrics: {result_semantic['consistency_metrics']}")
