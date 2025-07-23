@@ -20,24 +20,35 @@ import os
 import numpy as np
 from typing import List, Dict, Any, Optional, Union, Callable, Set, Tuple
 import sys
+from tqdm import tqdm
 
 # Add the project root to the path to import modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-def read_sharegpt(data_dir="data"):
+def read_sharegpt(dataset_dir="data"):
     """
     Reads the dataset from the specified directory.
-    """
-    import os
-    import json
-    data_path = os.path.join(data_dir, f"all_conversations.json")
-    if not os.path.exists(data_path):
-        raise FileNotFoundError(f"Dataset file {data_path} does not exist.")
-
-    with open(data_path, 'r') as file:
-        data = json.load(file)
+    """    
+    dataset_list = os.listdir(dataset_dir)
+    print(f"dataset_list: {dataset_list}")
     
-    return data
+    json_data = []
+    for dataset_name in dataset_list:
+        print(f"Processing dataset: {dataset_name}")
+        data_dir = os.path.join(dataset_dir, dataset_name)
+        if not os.path.exists(data_dir):
+            print(f"Dataset {dataset_name} does not exist. Skipping.")
+            continue
+        
+        data_path = os.path.join(data_dir, f"all_conversations.json")
+        if not os.path.exists(data_path):
+            raise FileNotFoundError(f"Dataset file {data_path} does not exist.")
+
+        with open(data_path, 'r') as file:
+            # convert json to list
+            json_data.extend(json.load(file))
+    
+    return json_data
 
 def _single_inference(client, model_id, messages, system_prompts=None, max_tokens=8000, temperature=0.1, top_p=0.9, top_k=200, task_id=None):
     """
@@ -66,7 +77,7 @@ def _single_inference(client, model_id, messages, system_prompts=None, max_token
         if not response or not isinstance(response, list) or len(response) == 0:
             print(f"Warning: Empty or invalid response received for task {task_id}")
             return {}
-            
+        
         print(f"Response received for task {task_id}: {len(response)} items")
         response_text = response[0].get('text', '{}')
         
@@ -75,10 +86,12 @@ def _single_inference(client, model_id, messages, system_prompts=None, max_token
             if response_text.startswith("```json"):
                 response_text = response_text[7:-3]  # Remove backticks and 'json'
             if isinstance(response_text, str):
-                parsed_response = ast.literal_eval(response_text)  # Convert string to dict if necessary
+                #parsed_response = ast.literal_eval(response_text)  # Convert string to dict if necessary
+                parsed_response = json.loads(response_text)
             elif isinstance(response_text, bytes):
                 response_text = response_text.decode('utf-8')  # Decode bytes to string
-                parsed_response = ast.literal_eval(response_text)  # Convert string to dict if necessary
+                #parsed_response = ast.literal_eval(response_text)  # Convert string to dict if necessary
+                parsed_response = json.loads(response_text)
             elif isinstance(response_text, dict):
                 parsed_response = response_text
             else:
@@ -90,7 +103,7 @@ def _single_inference(client, model_id, messages, system_prompts=None, max_token
             return parsed_response
         except (SyntaxError, ValueError) as parse_error:
             print(f"Error parsing response for task {task_id}: {parse_error}")
-            print(f"Raw response text: {response_text[:100]}...")
+            print(f"Raw response text: {response_text}...")
             return {}
     except Exception as e:
         print(f"Error during inference for task {task_id}: {e}")
@@ -98,10 +111,10 @@ def _single_inference(client, model_id, messages, system_prompts=None, max_token
 
 def create_json_schema(ground_truth_dict, max_depth=10):
     """
-    Creates a JSON schema from the ground truth dictionary.
+    Creates a JSON schema from the ground truth dictionary or list of dictionaries.
     
     Args:
-        ground_truth_dict: The ground truth dictionary to create schema from
+        ground_truth_dict: The ground truth dictionary or list of dictionaries to create schema from
         max_depth: Maximum recursion depth to prevent infinite loops
         
     Returns:
@@ -109,6 +122,31 @@ def create_json_schema(ground_truth_dict, max_depth=10):
     """
     if max_depth <= 0:
         return {"type": "object"}
+    
+    # Handle list of dictionaries
+    if isinstance(ground_truth_dict, list):
+        if ground_truth_dict and all(isinstance(item, dict) for item in ground_truth_dict):
+            # Create schema from the first item in the list
+            item_schema = create_json_schema(ground_truth_dict[0], max_depth - 1)
+            return {
+                "type": "array",
+                "items": item_schema
+            }
+        else:
+            # For other lists, determine the type of items
+            item_type = "string"  # Default type
+            if ground_truth_dict:
+                if all(isinstance(item, int) for item in ground_truth_dict):
+                    item_type = "integer"
+                elif all(isinstance(item, float) for item in ground_truth_dict):
+                    item_type = "number"
+                elif all(isinstance(item, bool) for item in ground_truth_dict):
+                    item_type = "boolean"
+            
+            return {
+                "type": "array",
+                "items": {"type": item_type}
+            }
     
     if not isinstance(ground_truth_dict, dict):
         return {"type": type(ground_truth_dict).__name__}
@@ -330,7 +368,7 @@ if __name__ == "__main__":
     parser.add_argument("--top-k", type=int, default=200, help="Top-k sampling parameter.")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging.")
     parser.add_argument("--output-dir", type=str, default="./generations", help="Directory to save generation results.")
-    parser.add_argument("--sample-limit", type=int, default=None, help="Limit the number of samples to process.")
+    parser.add_argument("--sample-limit", type=int, default=-1, help="Limit the number of samples to process.")
     parser.add_argument("--include-schema", action="store_true", help="Include JSON schema in the prompt to guide the output structure.")
     args = parser.parse_args()
     
@@ -374,11 +412,15 @@ if __name__ == "__main__":
     
     print(f"Results will be saved to: {run_output_dir}")
     
+    print(f"Processing {len(dataset_dict)} samples, args.sample_limit: {args.sample_limit}")
     # Determine how many samples to process
-    sample_limit = args.sample_limit if args.sample_limit is not None else 2
-    samples_to_process = dataset_dict[:sample_limit]
+    if args.sample_limit > 0:
+        samples_to_process = dataset_dict[:args.sample_limit]
+    else:
+        samples_to_process = dataset_dict
     
-    for sample_idx, item in enumerate(samples_to_process):
+    print(f"Processing {type(samples_to_process)} samples")
+    for sample_idx, item in tqdm(enumerate(samples_to_process)):
         sample_id = f"sample_{sample_idx:03d}"
         print(f"\n{'='*60}")
         print(f"PROCESSING SAMPLE {sample_idx + 1}/{len(samples_to_process)}: {sample_id}")
@@ -389,12 +431,11 @@ if __name__ == "__main__":
         gt_value = item['conversations'][2]['value']
         
         try:
-            gt_dict = json.loads(gt_value)
+            gt_dict = json.loads(gt_value)            
         except json.JSONDecodeError as e:
             print(f"Warning: Could not parse ground truth JSON for {sample_id}: {e}")
+            print(f"gt_value: {gt_value}")
             gt_dict = {"error": "Invalid JSON", "raw_value": gt_value}
-        
-        print(f'Ground truth keys: {list(gt_dict.keys()) if isinstance(gt_dict, dict) else "Not a dict"}')
         
         # Determine whether to use the original prompt or a modified one with schema
         if not args.include_schema:
