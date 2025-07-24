@@ -11,7 +11,6 @@ import numpy as np
 from typing import Dict, Any, List, Tuple, Optional, Set, Union
 from collections import defaultdict
 import datetime
-from difflib import SequenceMatcher
 from functools import lru_cache
 import warnings
 import re
@@ -30,6 +29,11 @@ import torch
 import boto3
 from botocore.exceptions import ClientError
 from botocore.config import Config
+
+from deepdiff import DeepDiff
+
+from transformers import logging
+logging.set_verbosity_error()
 
 def getEmbeddings(text, model_id, bedrock_client, max_retries=10, initial_delay=2, output_embedding_length=1024):
     """
@@ -169,8 +173,6 @@ class SemanticJsonTreeConsistencyEvaluator:
             type_change_cost: Custom costs for type changes
             required_fields: Set of required field paths
             model_id: Name of the sentence transformer model or Bedrock model ID
-            key_semantic_weight: Weight for semantic similarity vs exact match for keys
-            exact_match_weight: Weight for exact key matching
             chunk_size: Size of chunks for text splitting
             chunk_overlap: Overlap between chunks
         """
@@ -178,9 +180,6 @@ class SemanticJsonTreeConsistencyEvaluator:
         self.path_weight_decay = path_weight_decay
         self.type_change_cost = type_change_cost or self._default_type_change_costs()
         self.required_fields = required_fields or set()
-        
-        # Import BERTScore if needed
-        self.bert_score = bert_score
         
         # Initialize embedding model if available
         self.embedding_model = None
@@ -212,6 +211,12 @@ class SemanticJsonTreeConsistencyEvaluator:
         # Text splitting configuration
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+        
+        self.calculate_similarity_method = {
+            "ted": self.calculate_tree_edit_distance,
+            "bertscore": self.calculate_bertscore,
+            "deepdiff": self.calculate_similarity_with_deepdiff
+        }
         
     def _default_type_change_costs(self) -> Dict[Tuple[str, str], float]:
         """Define default costs for type changes."""
@@ -309,10 +314,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         # Exact match
         if key1 == key2:
             return 1.0
-        
-        # Calculate exact match similarity (character-based)
-        # exact_sim = SequenceMatcher(None, key1.lower(), key2.lower()).ratio()
-        
+                
         # Calculate semantic similarity
         semantic_sim = self._calculate_semantic_similarity(key1, key2)
         
@@ -487,7 +489,7 @@ class SemanticJsonTreeConsistencyEvaluator:
             return 1.0
         
         if len(str1) < self.chunk_size and len(str2) < self.chunk_size:
-            P, R, F1 = self.bert_score([str1], [str2], lang="en")
+            P, R, F1 = bert_score([str1], [str2], lang="en")
             return float(F1.item())
         else:
             return self._compare_long_strings_hungarian(str1, str2)
@@ -637,6 +639,13 @@ class SemanticJsonTreeConsistencyEvaluator:
         Returns:
             The cost of update
         """
+        # Quick check for identical nodes
+        if (node1.label == node2.label and 
+            node1.node_type == node2.node_type and 
+            node1.value == node2.value and
+            len(node1.children) == len(node2.children)):
+            return 0.0  # Identical nodes have zero update cost
+        
         # Get similarity metrics from shared calculation
         sim = self._calculate_node_similarity(node1, node2)
         
@@ -653,21 +662,20 @@ class SemanticJsonTreeConsistencyEvaluator:
         else:
             value_cost = 1.0  # No value cost if types are different or not leaf nodes
         
-        # Combine costs
-        #cost = type_cost*0.3 + value_cost * 0.4 + sim["key_sim"] * 0.3  # Weight value cost less than type cost
         # Calculate key difference factor
         key_factor = 1 - sim["key_sim"]
 
-        # Combine costs - ensure key differences always contribute
-        if sim["type_match"] and sim["is_leaf"] and sim["value_sim"] == 1.0:
-            # Special case: same type, same value, but different keys
-            # Give a small penalty for key difference to encourage value-based matching
+        # Combine costs - ensure proper handling of identical nodes
+        if sim["type_match"] and sim["is_leaf"] and sim["value_sim"] == 1.0 and sim["key_sim"] == 1.0:
+            # Identical leaf nodes
+            cost = 0.0
+        elif sim["type_match"] and sim["is_leaf"] and sim["value_sim"] == 1.0:
+            # Same type, same value, but different keys
             cost = key_factor * 0.3
         else:
             # Normal case: combine type and value costs, scaled by key similarity
             base_cost = type_cost + value_cost * 0.5
             cost = base_cost * (1 + key_factor * 0.5)
-
         
         # Apply path-based weighting - consider both paths
         # Use the average of both path weights for symmetry
@@ -864,7 +872,15 @@ class SemanticJsonTreeConsistencyEvaluator:
         normalized = re.sub(r'\[\d+\]', '[*]', path)
         return normalized
     
-    def evaluate_structural_consistency(self, json_outputs: List[Dict[str, Any]], gt: Dict[str, Any]=None) -> Dict[str, Any]:
+    def calculate_bertscore(self, json1: Dict[str, Any], json2: Dict[str, Any]) -> float:
+        P, R, F1 = bert_score([str(json1)], [str(json2)], lang="en")
+        return float(F1.item())
+    
+    def calculate_similarity_with_deepdiff(self, json1: Dict[str, Any], json2: Dict[str, Any]) -> float:
+        diff = DeepDiff(json1, json2, ignore_order=True, cache_size=5000, get_deep_distance=True)
+        return 1- diff['deep_distance']
+    
+    def evaluate_structural_consistency(self, json_outputs: List[Dict[str, Any]], gt: Dict[str, Any]=None, method_name: str="ted") -> Dict[str, Any]:
         """
         Evaluate structural consistency across multiple JSON outputs with enhanced metrics.
         
@@ -875,22 +891,21 @@ class SemanticJsonTreeConsistencyEvaluator:
             Dictionary with comprehensive consistency metrics
         """
         n = len(json_outputs)
-        if n < 2:
+        if gt is None and n < 2:
             return {
                 "error": "Need at least 2 outputs to evaluate consistency",
                 "valid_count": n
             }
         
-        if gt:
-            similarity_values = [self.calculate_tree_edit_distance(gt, json_output) for json_output in json_outputs]
+        if gt:   
+            similarity_values = [self.calculate_similarity_method[method_name](gt, json_output) for json_output in json_outputs]
         else:
             similarity_values = []
             for i in range(n-1):
                 for j in range(i+1, n):
-                    sim = self.calculate_tree_edit_distance(json_outputs[i], json_outputs[j])
+                    sim = self.calculate_similarity_method[method_name](json_outputs[i], json_outputs[j])
                     similarity_values.append(sim)
 
-        
         # Calculate basic statistics
         avg_similarity = sum(similarity_values) / len(similarity_values) if similarity_values else 1.0
         std_similarity = float(np.std(similarity_values)) if len(similarity_values) > 1 else 0.0
@@ -936,7 +951,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         }
         
         return report
-    
+        
     def _calculate_quartile_metrics(self, similarities: List[float]) -> Dict[str, float]:
         """Calculate quartile-based metrics from similarity scores."""
         if not similarities:
@@ -1028,42 +1043,6 @@ def parse_json_outputs(outputs: List[Union[str, Dict]]) -> List[Dict]:
     
     return parsed
 
-
-def evaluate_semantic_json_consistency(
-    outputs: List[Union[str, Dict]],
-    required_fields: List[str] = None,
-    model_id: str = 'all-MiniLM-L6-v2',
-) -> Dict[str, Any]:
-    """
-    Evaluate structural consistency of JSON outputs with semantic similarity support.
-    
-    Args:
-        outputs: List of JSON strings or dictionaries
-        required_fields: List of required field paths
-        model_id: Name of the sentence transformer model or Bedrock model ID
-        
-    Returns:
-        Dictionary with consistency metrics
-    """
-    # Parse outputs
-    parsed_outputs = parse_json_outputs(outputs)
-    
-    if len(parsed_outputs) < 2:
-        return {
-            "error": "Need at least 2 valid JSON outputs to evaluate consistency",
-            "valid_count": len(parsed_outputs),
-            "total_count": len(outputs)
-        }
-    
-    # Create evaluator
-    evaluator = SemanticJsonTreeConsistencyEvaluator(
-        required_fields=set(required_fields) if required_fields else set(),
-        model_id=model_id,
-    )
-    
-    # Evaluate consistency
-    return evaluator.evaluate_structural_consistency(parsed_outputs)
-
 if __name__ == "__main__":
     # Example usage
     json1 = {
@@ -1106,13 +1085,13 @@ if __name__ == "__main__":
     test_cases = [
         (
             {
-                "hobbies": [
+                "interests": [
                     {
-                        "name": "coding",
+                        "name": "programming",
                         "frequency": 1
                     },
                     {
-                        "name": "running",
+                        "name": "go running",
                         "frequency": 5
                     }
                 ]
@@ -1178,15 +1157,16 @@ if __name__ == "__main__":
         )
     ]
     
+    # Create evaluator
+    evaluator = SemanticJsonTreeConsistencyEvaluator(
+        model_id='all-MiniLM-L6-v2',
+    )
     
+    # Evaluate consistency
     print("=== Semantic JSON Tree Consistency Evaluation ===\n")
     
     for (input1, input2) in test_cases:
         print(f"Input: {input1}, {input2}")
-        # Test with semantic similarity enabled
-        result_semantic = evaluate_semantic_json_consistency(
-            [input1, input2],
-            model_id="all-MiniLM-L6-v2"  # Changed from Bedrock model for example
-        )
-        
-        print(f"Consistency Metrics: {result_semantic['consistency_metrics']['mean_similarity']}")
+        for method in ['ted', 'bertscore', 'deepdiff']:        
+            result_semantic = evaluator.evaluate_structural_consistency([input1, input2], method_name=method)
+            print(f"{method} - Consistency Metrics: {result_semantic['consistency_metrics']['mean_similarity']}")
