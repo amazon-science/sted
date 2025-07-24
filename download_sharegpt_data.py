@@ -1,6 +1,7 @@
 from datasets import load_dataset
 import os
 import json
+import argparse
 
 def extract_sharegpt_conversations(input_file, output_dir="extracted_data"):
     """
@@ -140,5 +141,10 @@ def download_sharegpt_structured_data(output_dir="sharegpt_data"):
                 print(json.dumps(sample_dict, indent=2))
 
 if __name__ == "__main__":
-    download_sharegpt_structured_data()
+    # add arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output-dir", type=str, default="sharegpt_data")
+    args = parser.parse_args()
+    
+    download_sharegpt_structured_data(output_dir=args.output_dir)
     print("\nDownload complete!")

@@ -10,3 +10,4 @@ datasets
 mpmath==1.3.0
 sympy==1.12
 sentence-transformers>=2.2.0
+deepdiff
