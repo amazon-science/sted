@@ -158,9 +158,6 @@ class SemanticJsonTreeConsistencyEvaluator:
                  type_change_cost: Dict[Tuple[str, str], float] = None,
                  required_fields: Set[str] = None,
                  model_id: str = 'all-MiniLM-L6-v2',
-                 string_method: str = 'bertscore',  # Changed default to bertscore
-                 number_tolerance: float = 0.01,
-                 use_langchain_splitter: bool = True,
                  chunk_size: int = 300,
                  chunk_overlap: int = 50):
         """
@@ -174,9 +171,6 @@ class SemanticJsonTreeConsistencyEvaluator:
             model_id: Name of the sentence transformer model or Bedrock model ID
             key_semantic_weight: Weight for semantic similarity vs exact match for keys
             exact_match_weight: Weight for exact key matching
-            string_method: Method for string comparison ('levenshtein', 'semantic', 'exact', 'jaccard', 'bertscore')
-            number_tolerance: Relative tolerance for number comparison
-            use_langchain_splitter: Whether to use LangChain for text splitting
             chunk_size: Size of chunks for text splitting
             chunk_overlap: Overlap between chunks
         """
@@ -184,9 +178,6 @@ class SemanticJsonTreeConsistencyEvaluator:
         self.path_weight_decay = path_weight_decay
         self.type_change_cost = type_change_cost or self._default_type_change_costs()
         self.required_fields = required_fields or set()
-        
-        # Semantic similarity parameters
-        self.number_tolerance = number_tolerance
         
         # Import BERTScore if needed
         self.bert_score = bert_score
@@ -219,7 +210,6 @@ class SemanticJsonTreeConsistencyEvaluator:
         self._embedding_cache = {}
         
         # Text splitting configuration
-        self.use_langchain_splitter = use_langchain_splitter
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         
@@ -496,7 +486,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         if str1 == str2:
             return 1.0
         
-        if len(str1) < 500 and len(str2) < 500:
+        if len(str1) < self.chunk_size and len(str2) < self.chunk_size:
             P, R, F1 = self.bert_score([str1], [str2], lang="en")
             return float(F1.item())
         else:
@@ -613,7 +603,7 @@ class SemanticJsonTreeConsistencyEvaluator:
     def _split_natural_text(self, text: str) -> List[str]:
         """Split natural language text into sentences or paragraphs using LangChain if available and enabled."""
         # For short text, don't split at all
-        if len(text) < 100:
+        if len(text) < self.chunk_size:
             return [text]
         
         # Create a text splitter that tries to create semantically meaningful chunks
@@ -734,7 +724,74 @@ class SemanticJsonTreeConsistencyEvaluator:
         
         return normalized_similarity
     
-    def calculate_tree_edit_distance(self, json1: Dict[str, Any], json2: Dict[str, Any]) -> float:
+    def _calculate_optimal_matching_cost(
+        self, tree1: JsonNode, tree2: JsonNode
+    ) -> float:
+        """
+        Calculate optimal matching cost between two trees using Hungarian algorithm.
+        This addresses the issue where tree edit distance makes suboptimal choices due to ordering.
+        """
+        # Base case: both are leaf nodes
+        if not tree1.children and not tree2.children:
+            return self.update_cost(tree1, tree2)
+
+        # If one is leaf and other is not, use insert/delete costs
+        if not tree1.children and tree2.children:
+            return self.delete_cost(tree1) + sum(
+                self.insert_cost(child) for child in tree2.children
+            )
+        if tree1.children and not tree2.children:
+            return sum(
+                self.delete_cost(child) for child in tree1.children
+            ) + self.insert_cost(tree2)
+
+        # Both have children - use Hungarian algorithm for optimal matching
+        children1 = tree1.children
+        children2 = tree2.children
+
+        if not children1 and not children2:
+            return self.update_cost(tree1, tree2)
+
+        # Create cost matrix for Hungarian algorithm
+        n1, n2 = len(children1), len(children2)
+        max_size = max(n1, n2)
+
+        # Pad to square matrix
+        cost_matrix = np.full((max_size, max_size), float("inf"))
+
+        # Fill actual costs
+        for i in range(n1):
+            for j in range(n2):
+                # Cost of matching child i with child j
+                cost_matrix[i][j] = self._calculate_optimal_matching_cost(
+                    children1[i], children2[j]
+                )
+
+        # Cost of unmatched nodes (insert/delete)
+        for i in range(n1, max_size):
+            for j in range(n2):
+                cost_matrix[i][j] = self.insert_cost(children2[j])
+
+        for i in range(n1):
+            for j in range(n2, max_size):
+                cost_matrix[i][j] = self.delete_cost(children1[i])
+
+        # Solve assignment problem
+        row_indices, col_indices = linear_sum_assignment(cost_matrix)
+
+        # Calculate total cost
+        total_cost = self.update_cost(tree1, tree2)  # Cost of updating root nodes
+        for i, j in zip(row_indices, col_indices):
+            if i < n1 and j < n2:
+                total_cost += cost_matrix[i][j]
+            elif i < n1:  # Delete unmatched child from tree1
+                total_cost += self.delete_cost(children1[i])
+            elif j < n2:  # Insert unmatched child from tree2
+                total_cost += self.insert_cost(children2[j])
+
+        return total_cost
+    
+    def calculate_tree_edit_distance(self, json1: Dict[str, Any], json2: Dict[str, Any], original_zss=False) -> float:
         """
         Calculate tree edit distance between two JSON objects.
         
@@ -751,20 +808,24 @@ class SemanticJsonTreeConsistencyEvaluator:
         
         # Use Zhang-Shasha algorithm from zss
         # Check which version of zss API we're using
-        try:
-            # Newer zss versions
-            distance = zss.distance(
-                tree1, tree2,
-                get_children=lambda x: x.get_children(),
-                insert_cost=self.insert_cost,
-                remove_cost=self.delete_cost,
-                update_cost=self.update_cost
-            )
-        except TypeError as e:
-            raise TypeError(
-                f"Failed to calculate tree distance. Ensure zss is properly installed "
-                f"and trees have compatible structure: {str(e)}"
-            ) from e
+        
+        if original_zss:
+            try:
+                # Newer zss versions
+                distance = zss.distance(
+                    tree1, tree2,
+                    get_children=lambda x: x.get_children(),
+                    insert_cost=self.insert_cost,
+                    remove_cost=self.delete_cost,
+                    update_cost=self.update_cost
+                )
+            except TypeError as e:
+                raise TypeError(
+                    f"Failed to calculate tree distance. Ensure zss is properly installed "
+                    f"and trees have compatible structure: {str(e)}"
+                ) from e
+        else:
+            distance = self._calculate_optimal_matching_cost(tree1, tree2)
         
         # Calculate tree sizes for normalization
         size1 = self._count_nodes(tree1)
@@ -1003,7 +1064,6 @@ def evaluate_semantic_json_consistency(
     # Evaluate consistency
     return evaluator.evaluate_structural_consistency(parsed_outputs)
 
-
 if __name__ == "__main__":
     # Example usage
     json1 = {
@@ -1081,6 +1141,26 @@ if __name__ == "__main__":
                         "name": "running",
                         "frequency": 5
                     }
+                ]
+            },
+            {
+                "hobbies": [
+                    {
+                        "name": "coding",
+                        "frequency": 1
+                    },
+                    {
+                        "name": "running",
+                        "frequency": 5
+                    }
+                ]
+            }
+        ),
+        (
+            {
+                "hobbies": [
+                    "I like coding",
+                    "i love running"
                 ]
             },
             {
