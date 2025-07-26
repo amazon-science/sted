@@ -151,7 +151,8 @@ def compare_with_multiple_generations(
     ground_truth_list: List[Dict[str, Any]], 
     generated_responses_list: List[List[Dict[str, Any]]],
     methods: List[str] = ["ted", "bertscore", "deepdiff"],
-    model_id: str = 'all-MiniLM-L6-v2'
+    model_id: str = 'all-MiniLM-L6-v2',
+    output_dir: str="."
 ) -> Dict[str, Dict[str, Any]]:
     """
     Compare ground truth with multiple generations per sample.
@@ -213,7 +214,8 @@ def compare_with_multiple_generations(
         
         print(f"sample_stats: {sample_stats}")
         # save result into file
-        with open(f"results_{method}.json", "w") as f:
+        os.makedirs(output_dir, exist_ok=True)
+        with open(os.path.join(output_dir, f"results_{method}.json"), "w") as f:
             json.dump({"results": sample_stats}, f)
         
         # Overall statistics

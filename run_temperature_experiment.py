@@ -49,7 +49,9 @@ def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: 
         "--output-dir", output_dir,
         "--temperature", str(temperature),
         "--run-num", str(run_num),
-        "--sample-limit", str(40)
+        "--sample-limit", str(40),
+        "--model-id", "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "--include-schema"
     ]
     
     if include_schema:
@@ -71,7 +73,7 @@ def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: 
     
     return str(results_file)
 
-def calculate_similarity_metrics(generation_file: str, methods: List[str] = ["ted", "bertscore", "deepdiff"]) -> Dict[str, Any]:
+def calculate_similarity_metrics(generation_file: str, methods: List[str] = ["ted", "bertscore", "deepdiff"], output_dir: str=".") -> Dict[str, Any]:
     """
     Calculate similarity metrics for generated outputs using our similarity statistics approach.
     
@@ -92,7 +94,8 @@ def calculate_similarity_metrics(generation_file: str, methods: List[str] = ["te
         ground_truth_list, 
         generated_responses_list,
         methods=methods,
-        model_id='amazon.titan-embed-text-v2:0'
+        model_id='amazon.titan-embed-text-v2:0',
+        output_dir=output_dir
     )
     
     return results
@@ -454,9 +457,12 @@ def run_experiment(args):
                 run_num=args.run_num,
                 include_schema=args.include_schema
             )
+            
+        # get the directory of gen_results_file
+        result_dir = os.path.dirname(gen_results_file)
         
         # Calculate similarity metrics
-        similarity_results = calculate_similarity_metrics(gen_results_file, methods)
+        similarity_results = calculate_similarity_metrics(gen_results_file, methods, result_dir)
         
         # Extract temperature-focused metrics
         metrics = extract_temperature_metrics(similarity_results)
