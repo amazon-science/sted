@@ -32,6 +32,11 @@ from botocore.config import Config
 
 from deepdiff import DeepDiff
 
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+import concurrent.futures
+
+import itertools
+
 from transformers import logging
 logging.set_verbosity_error()
 
@@ -97,6 +102,23 @@ def getEmbeddings(text, model_id, bedrock_client, max_retries=10, initial_delay=
     # This should be unreachable with the retry logic above
     raise Exception("Max retries reached. Unable to get embeddings.")
 
+class StringSimilarityCache:
+    def __init__(self):
+        self.cache = {}
+    
+    def get_key(self, s1: str, s2: str) -> str:
+        return "|".join(sorted([s1, s2]))
+    
+    def get(self, s1: str, s2: str) -> Optional[float]:
+        return self.cache.get(self.get_key(s1, s2))
+    
+    def set(self, s1: str, s2: str, score: float):
+        self.cache[self.get_key(s1, s2)] = score
+    
+    def batch_set(self, pairs: List[Tuple[str, str]], scores: List[float]):
+        for (s1, s2), score in zip(pairs, scores):
+            self.set(s1, s2, score)
+
 class JsonNode:
     """Node representation for JSON tree structure."""
     
@@ -157,7 +179,7 @@ class SemanticJsonTreeConsistencyEvaluator:
     """Evaluator for JSON structural consistency using Tree Edit Distance with semantic similarity."""
     
     def __init__(self, 
-                 schema_aware: bool = False, 
+                 original_zss: bool = False,
                  path_weight_decay: float = 0.9,
                  type_change_cost: Dict[Tuple[str, str], float] = None,
                  required_fields: Set[str] = None,
@@ -168,7 +190,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         Initialize the evaluator with semantic capabilities.
         
         Args:
-            schema_aware: Whether to use schema information if available
+            original_zss: whether using original zss
             path_weight_decay: Weight decay factor for deeper paths (0-1)
             type_change_cost: Custom costs for type changes
             required_fields: Set of required field paths
@@ -176,10 +198,11 @@ class SemanticJsonTreeConsistencyEvaluator:
             chunk_size: Size of chunks for text splitting
             chunk_overlap: Overlap between chunks
         """
-        self.schema_aware = schema_aware
         self.path_weight_decay = path_weight_decay
         self.type_change_cost = type_change_cost or self._default_type_change_costs()
         self.required_fields = required_fields or set()
+        
+        self.cache = StringSimilarityCache()
         
         # Initialize embedding model if available
         self.embedding_model = None
@@ -218,6 +241,83 @@ class SemanticJsonTreeConsistencyEvaluator:
             "deepdiff": self.calculate_similarity_with_deepdiff
         }
         
+        self.original_zss = original_zss
+        self.batch_size_bertscore = 2000
+        
+    def set_original_zss(self, original_zss: bool=False):
+        self.original_zss = original_zss
+    
+    def collect_all_string_pairs(self, json_outputs: Union[Dict, List[Dict]], gt: Union[Dict, List[Dict], None] = None) -> List[Tuple[str, str]]:
+        # get all values from json_outputs
+        output_values = self.collect_all_values(json_outputs)
+        
+        pairs = []
+        seen = set()
+            
+        ref_values = self.collect_all_values(gt) if gt else output_values.copy()
+            
+        # create all pairs from output_values and gt_values
+        for item1 in ref_values:
+            for item2 in output_values:
+                # Sort the pair to ensure consistent ordering
+                pair_tuple = tuple(sorted([str(item1), str(item2)]))
+                if pair_tuple not in seen:
+                    seen.add(pair_tuple)
+                    pairs.append((item1, item2))
+        return pairs
+    
+    def collect_all_values(self, data: Union[Dict, List, Any]) -> List[Tuple[str, Any]]:
+        """
+        Collect all values from a nested dictionary/list structure.
+        
+        Args:
+            data: The input data structure (dict, list, or primitive)
+            include_keys: If True, also collect dictionary keys as values
+            
+        Returns:
+            List of tuples (path, value) where path shows the location of the value
+        """
+        values = []
+        def _collect_recursive(obj):
+            """Recursively collect values with their paths."""
+            if isinstance(obj, dict):
+                # Collect dictionary values
+                for key, value in obj.items():
+                    _collect_recursive(value)
+                    
+            elif isinstance(obj, list):
+                # Collect list elements
+                for idx, item in enumerate(obj):
+                    _collect_recursive(item)
+                    
+            else:
+                # Leaf value (string, number, boolean, None, etc.)
+                if isinstance(obj, str):
+                    values.append(obj)
+        
+        _collect_recursive(data)
+        return values
+    
+    def batch_compute_similarities(self, pairs: List[Tuple[str, str]]) -> Dict[Tuple[str, str], float]:
+        """Batch compute BERT scores for all unique pairs."""
+        uncached_pairs = [(s1, s2) for s1, s2 in pairs if self.cache.get(s1, s2) is None]
+    
+        if not uncached_pairs:
+            # Return cached values for requested pairs
+            return {(s1, s2): self.cache.get(s1, s2) for s1, s2 in pairs 
+                    if self.cache.get(s1, s2) is not None}
+        
+        batch_size = min(self.batch_size_bertscore, len(uncached_pairs))
+        # Process pairs by batch
+        for i in range(0, len(uncached_pairs), batch_size):
+            batch = uncached_pairs[i:i+batch_size]
+            refs, cands = zip(*batch)
+            P, R, F1 = bert_score(list(cands), list(refs), lang="en", verbose=False)
+            scores = [float(f.item()) for f in F1]
+            self.cache.batch_set(batch, scores)
+        
+        return self.cache.cache
+        
     def _default_type_change_costs(self) -> Dict[Tuple[str, str], float]:
         """Define default costs for type changes."""
         costs = {}
@@ -248,13 +348,14 @@ class SemanticJsonTreeConsistencyEvaluator:
         
         return costs
     
-    @lru_cache(maxsize=1000)
+    @lru_cache(maxsize=2000)
     def _get_embedding(self, text: str) -> Optional[np.ndarray]:
         """Get embedding for a text with caching."""
         
         if self.bedrock_client:
             try:
                 return getEmbeddings(text, self.model_id, self.bedrock_client)
+                #return [1,2,3,4,5]
             except Exception as e:
                 warnings.warn(f"Failed to get Bedrock embedding for '{text}': {e}")
                 return None
@@ -429,7 +530,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         normalized = re.sub(r'\[\d+\]', '[*]', path)
         return normalized
     
-    def _calculate_node_similarity(self, node1: JsonNode, node2: JsonNode, key_sim_threshold: float = 0.7) -> Dict[str, Any]:
+    def _calculate_node_similarity(self, node1: JsonNode, node2: JsonNode, key_sim_threshold: float = 0.5) -> Dict[str, Any]:
         """
         Calculate similarity metrics between two nodes.
         This shared method is used by both are_nodes_equal and update_cost.
@@ -461,10 +562,13 @@ class SemanticJsonTreeConsistencyEvaluator:
         key_sim = self._calculate_key_similarity(key1, key2)
         
         value_sim = 0.0
+                
+        #string_pairs = []
         if key_sim > key_sim_threshold:
             # Calculate value similarity for leaf nodes
             if not node1.children and not node2.children and type_match:
                 if node1.node_type == "string":
+                    #string_pairs.append((str(node1.value), str(node2.value)))
                     value_sim = self._compare_strings(str(node1.value), str(node2.value))
                 elif node1.node_type == "number":
                     value_sim = self._compare_numbers(float(node1.value), float(node2.value))
@@ -472,6 +576,7 @@ class SemanticJsonTreeConsistencyEvaluator:
                     value_sim = self._compare_arrays_unordered(list(node1.value), list(node2.value))
                 elif node1.value == node2.value:  # For boolean, null, etc.
                     value_sim = 1.0
+                
         return {
             "type_match": type_match,
             "path_match": path_match,
@@ -485,8 +590,14 @@ class SemanticJsonTreeConsistencyEvaluator:
     def _compare_strings(self, str1: str, str2: str) -> float:
         """Compare two strings with optional semantic similarity and chunking for long text."""
         # Quick equality check
+        
         if str1 == str2:
             return 1.0
+        
+        # Check cache first
+        cached = self.cache.get(str1, str2)
+        if cached is not None:
+            return cached
         
         if len(str1) < self.chunk_size and len(str2) < self.chunk_size:
             P, R, F1 = bert_score([str1], [str2], lang="en")
@@ -503,10 +614,15 @@ class SemanticJsonTreeConsistencyEvaluator:
         # Create similarity matrix between all chunks
         similarity_matrix = np.zeros((len(chunks1), len(chunks2)))
         
+        
+        #string_pairs = []
         for i, chunk1 in enumerate(chunks1):
             for j, chunk2 in enumerate(chunks2):
                 # Use appropriate method for chunk comparison
                 similarity_matrix[i, j] = self._compare_strings(chunk1, chunk2)
+                #string_pairs.append((chunk1, chunk2))
+        
+        #print(f"_compare_long_strings_hungarian: {len(string_pairs)}")
         
         row_ind, col_ind = linear_sum_assignment(-similarity_matrix)  # Negate for max similarity
         
@@ -621,12 +737,7 @@ class SemanticJsonTreeConsistencyEvaluator:
     
     def _compare_numbers(self, num1: float, num2: float) -> float:
         """Compare two numbers with tolerance."""
-        if num1 == num2:
-            return 1.0
-        else:
-            return 0
-        
-        #return 1 - abs(num1 - num2) / max(abs(num1), abs(num2))
+        return 0 if num1 != num2 else 1
             
     def update_cost(self, node1: JsonNode, node2: JsonNode) -> float:
         """
@@ -662,9 +773,10 @@ class SemanticJsonTreeConsistencyEvaluator:
         else:
             value_cost = 1.0  # No value cost if types are different or not leaf nodes
         
+        
         # Calculate key difference factor
         key_factor = 1 - sim["key_sim"]
-
+        """
         # Combine costs - ensure proper handling of identical nodes
         if sim["type_match"] and sim["is_leaf"] and sim["value_sim"] == 1.0 and sim["key_sim"] == 1.0:
             # Identical leaf nodes
@@ -676,6 +788,24 @@ class SemanticJsonTreeConsistencyEvaluator:
             # Normal case: combine type and value costs, scaled by key similarity
             base_cost = type_cost + value_cost * 0.5
             cost = base_cost * (1 + key_factor * 0.5)
+        """
+        
+        weights = {
+            'type': 0.4,
+            'value': 0.4,
+            'key': 0.2
+        }
+        
+        # 特殊情况处理
+        if sim["type_match"] and sim["is_leaf"] and sim["value_sim"] == 1.0 and sim["key_sim"] == 1.0:
+            return 0.0  # 完全相同
+        
+        # 加权平均
+        cost = (
+            weights['type'] * type_cost +
+            weights['value'] * value_cost +
+            weights['key'] * key_factor
+        )
         
         # Apply path-based weighting - consider both paths
         # Use the average of both path weights for symmetry
@@ -687,50 +817,60 @@ class SemanticJsonTreeConsistencyEvaluator:
         
         return cost
     
-    def _compare_arrays_unordered(self, arr1: List[JsonNode], arr2: List[JsonNode]) -> Tuple[float, List[Tuple[int, int]]]:
-        """
-        Compare arrays without considering order using optimal matching.
-        
-        Args:
-            arr1: First array of nodes
-            arr2: Second array of nodes
-            
-        Returns:
-            similarity_score
-        """
+    def _compare_arrays_unordered(self, arr1: List[Any], arr2: List[Any]) -> float:
+        """Compare arrays without considering order using optimal matching."""
+        if len(arr1) == 0 and len(arr2) == 0:
+            return 1.0  # Both empty arrays are identical
         if len(arr1) == 0 or len(arr2) == 0:
-            return 0.0, []
+            return 0.0  # One empty, one not
         
-        # Create cost matrix
+        # Create similarity matrix
         sim_matrix = np.zeros((len(arr1), len(arr2)))
         
         for i, item1 in enumerate(arr1):
             for j, item2 in enumerate(arr2):
-                # Cost is inverse of similarity
-                if isinstance(item1, str) and isinstance(item2, str):
-                    sim_matrix[i, j] = self._compare_strings(item1, item2)
-                elif isinstance(item1, dict) and isinstance(item2, dict):
-                    sim_matrix[i, j] = self.calculate_tree_edit_distance(item1, item2)
-                elif isinstance(item1, (int, float)) and isinstance(item2, (int, float)):
-                    sim_matrix[i, j] = self._compare_numbers(item1, item2)
+                # Handle different types appropriately
+                if type(item1) != type(item2):
+                    sim_matrix[i, j] = 0.0
+                elif isinstance(item1, str):
+                    sim_matrix[i, j] = self._compare_strings(str(item1), str(item2))
+                elif isinstance(item1, (int, float)):
+                    sim_matrix[i, j] = self._compare_numbers(float(item1), float(item2))
+                elif isinstance(item1, dict):
+                    # Recursive comparison for nested objects
+                    tree1 = self.json_to_tree(item1, f"[{i}]")
+                    tree2 = self.json_to_tree(item2, f"[{j}]")
+                    sim_matrix[i, j] = 1.0 - (self._calculate_optimal_matching_cost(tree1, tree2) / max(self._count_nodes(tree1), self._count_nodes(tree2)))
+                elif isinstance(item1, list):
+                    # Recursive array comparison
+                    sim_matrix[i, j] = self._compare_arrays_unordered(item1, item2)
+                elif item1 == item2:
+                    sim_matrix[i, j] = 1.0
                 else:
-                    sim_matrix[i, j] = 0 # cost is 1 if arr1 and arr2 have different type
+                    sim_matrix[i, j] = 0.0
         
-        # Pad matrix if needed
-        if len(arr1) != len(arr2):
+        # Use Hungarian algorithm for optimal matching
+        if sim_matrix.shape[0] != sim_matrix.shape[1]:
+            # Pad matrix for Hungarian algorithm
             max_len = max(len(arr1), len(arr2))
             padded_matrix = np.zeros((max_len, max_len))
             padded_matrix[:len(arr1), :len(arr2)] = sim_matrix
             sim_matrix = padded_matrix
         
-        # Find optimal assignment using Hungarian algorithm
         row_indices, col_indices = linear_sum_assignment(-sim_matrix)
         
-        # Calculate similarity and collect matching pairs        
-        total_similarity = [sim_matrix[i, j] for i, j in zip(row_indices, col_indices)]
-        normalized_similarity = sum(total_similarity) / max(len(arr1), len(arr2))
+        # Calculate normalized similarity
+        matched_similarities = [sim_matrix[i, j] for i, j in zip(row_indices, col_indices) 
+                            if i < len(arr1) and j < len(arr2)]
         
-        return normalized_similarity
+        if not matched_similarities:
+            return 0.0
+        
+        # Penalize for size differences
+        size_penalty = min(len(arr1), len(arr2)) / max(len(arr1), len(arr2))
+        avg_similarity = sum(matched_similarities) / len(matched_similarities)
+        
+        return avg_similarity * size_penalty
     
     def _calculate_optimal_matching_cost(
         self, tree1: JsonNode, tree2: JsonNode
@@ -756,7 +896,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         # Both have children - use Hungarian algorithm for optimal matching
         children1 = tree1.children
         children2 = tree2.children
-
+        
         if not children1 and not children2:
             return self.update_cost(tree1, tree2)
 
@@ -790,16 +930,11 @@ class SemanticJsonTreeConsistencyEvaluator:
         # Calculate total cost
         total_cost = self.update_cost(tree1, tree2)  # Cost of updating root nodes
         for i, j in zip(row_indices, col_indices):
-            if i < n1 and j < n2:
-                total_cost += cost_matrix[i][j]
-            elif i < n1:  # Delete unmatched child from tree1
-                total_cost += self.delete_cost(children1[i])
-            elif j < n2:  # Insert unmatched child from tree2
-                total_cost += self.insert_cost(children2[j])
-
+            total_cost += cost_matrix[i][j]
+        
         return total_cost
     
-    def calculate_tree_edit_distance(self, json1: Dict[str, Any], json2: Dict[str, Any], original_zss=False) -> float:
+    def calculate_tree_edit_distance(self, json1: Dict[str, Any], json2: Dict[str, Any]) -> float:
         """
         Calculate tree edit distance between two JSON objects.
         
@@ -817,7 +952,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         # Use Zhang-Shasha algorithm from zss
         # Check which version of zss API we're using
         
-        if original_zss:
+        if self.original_zss:
             try:
                 # Newer zss versions
                 distance = zss.distance(
@@ -838,11 +973,12 @@ class SemanticJsonTreeConsistencyEvaluator:
         # Calculate tree sizes for normalization
         size1 = self._count_nodes(tree1)
         size2 = self._count_nodes(tree2)
-        max_size = max(size1, size2)
-        
+        #max_size = max(size1, size2)
+
+        max_cost = size1 + size2
         # Normalize distance to [0, 1] range
-        if max_size > 0:
-            normalized_distance = distance / max_size
+        if max_cost > 0:
+            normalized_distance = distance / max_cost
         else:
             normalized_distance = 0.0
         
@@ -872,11 +1008,11 @@ class SemanticJsonTreeConsistencyEvaluator:
         normalized = re.sub(r'\[\d+\]', '[*]', path)
         return normalized
     
-    def calculate_bertscore(self, json1: Dict[str, Any], json2: Dict[str, Any]) -> float:
+    def calculate_bertscore(self, json1: Dict[str, Any], json2: Dict[str, Any], **kwargs) -> float:
         P, R, F1 = bert_score([str(json1)], [str(json2)], lang="en")
         return float(F1.item())
     
-    def calculate_similarity_with_deepdiff(self, json1: Dict[str, Any], json2: Dict[str, Any]) -> float:
+    def calculate_similarity_with_deepdiff(self, json1: Dict[str, Any], json2: Dict[str, Any], **kwargs) -> float:
         diff = DeepDiff(json1, json2, ignore_order=True, cache_size=5000, get_deep_distance=True)
         return 1- diff['deep_distance']
     
@@ -890,6 +1026,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         Returns:
             Dictionary with comprehensive consistency metrics
         """
+        
         n = len(json_outputs)
         if gt is None and n < 2:
             return {
@@ -897,9 +1034,15 @@ class SemanticJsonTreeConsistencyEvaluator:
                 "valid_count": n
             }
         
-        if gt:   
+        if gt:
+            all_pairs = self.collect_all_string_pairs(json_outputs, gt)
+            self.batch_compute_similarities(all_pairs)
+            
             similarity_values = [self.calculate_similarity_method[method_name](gt, json_output) for json_output in json_outputs]
         else:
+            all_pairs = self.collect_all_string_pairs(json_outputs)
+            self.batch_compute_similarities(all_pairs)
+            
             similarity_values = []
             for i in range(n-1):
                 for j in range(i+1, n):
@@ -1045,6 +1188,7 @@ def parse_json_outputs(outputs: List[Union[str, Dict]]) -> List[Dict]:
 
 if __name__ == "__main__":
     # Example usage
+    '''
     json1 = {
         "user_name": "John Doe",
         "user_age": 30,
@@ -1154,6 +1298,30 @@ if __name__ == "__main__":
                     }
                 ]
             }
+        ),
+        (
+            {
+                "name": "产品A",
+                "price": 100,
+                "category": "电子产品"
+            },
+            {
+                "price": 100,
+                "category": "电子产品",
+                "name": "产品A"
+            }
+        ),
+        (
+            {
+                "name": "产品A",
+                "price": 100,
+                "category": "电子产品"
+            },
+            {
+                "price": 100,
+                "category": "product",
+                "name": "产品A"
+            }
         )
     ]
     
@@ -1167,6 +1335,107 @@ if __name__ == "__main__":
     
     for (input1, input2) in test_cases:
         print(f"Input: {input1}, {input2}")
-        for method in ['ted', 'bertscore', 'deepdiff']:        
-            result_semantic = evaluator.evaluate_structural_consistency([input1, input2], method_name=method)
-            print(f"{method} - Consistency Metrics: {result_semantic['consistency_metrics']['mean_similarity']}")
+        for method in ['ted', 'bertscore', 'deepdiff']:
+            if method == "ted":
+                evaluator.set_original_zss(False)
+                result_semantic = evaluator.evaluate_structural_consistency([input1, input2], method_name=method)
+                print(f"{method}-optimal TED - Consistency Metrics: {result_semantic['consistency_metrics']['mean_similarity']}")
+                
+                evaluator.set_original_zss(True)
+                result_semantic = evaluator.evaluate_structural_consistency([input1, input2], method_name=method)
+                print(f"{method}-ORG TED - Consistency Metrics: {result_semantic['consistency_metrics']['mean_similarity']}")
+            else:
+                result_semantic = evaluator.evaluate_structural_consistency([input1, input2], method_name=method)
+                print(f"{method} Consistency Metrics: {result_semantic['consistency_metrics']['mean_similarity']}")
+    '''
+    evaluator = SemanticJsonTreeConsistencyEvaluator(
+        model_id='amazon.titan-embed-text-v2:0',
+    )
+    
+    #data = [[{'question': 'What threshold was used to reclassify flood fraction composites to binary in the analysis?', 'options': [{'answer': '20 percent', 'is_correct': True}, {'answer': '5 percent', 'is_correct': False}, {'answer': '10 percent', 'is_correct': False}, {'answer': '15 percent', 'is_correct': False}]}, {'question': 'Which percentile range was used for the OND 2024 flood exposure estimates?', 'options': [{'answer': '25-75th percentile', 'is_correct': True}, {'answer': '50-95th percentile', 'is_correct': False}, {'answer': '10-50th percentile', 'is_correct': False}, {'answer': '75-95th percentile', 'is_correct': False}]}, {'question': 'What population dataset was used in the analysis?', 'options': [{'answer': 'WorldPop (2020 UN Adjusted)', 'is_correct': True}, {'answer': 'WorldPop (2022 UN Adjusted)', 'is_correct': False}, {'answer': 'WorldPop (2019 UN Adjusted)', 'is_correct': False}, {'answer': 'WorldPop (2021 UN Adjusted)', 'is_correct': False}]}, {'question': 'What time period of FloodScan data was analyzed?', 'options': [{'answer': '1998-2022', 'is_correct': True}, {'answer': '2000-2022', 'is_correct': False}, {'answer': '1995-2022', 'is_correct': False}, {'answer': '2010-2022', 'is_correct': False}]}, {'question': 'Which seasonal forecast influenced the choice of percentile range for MAM 2024?', 'options': [{'answer': 'ECMWF prediction of above average precipitation', 'is_correct': True}, {'answer': 'ECMWF prediction of below average precipitation', 'is_correct': False}, {'answer': 'NOAA prediction of above average precipitation', 'is_correct': False}, {'answer': 'WMO prediction of above average precipitation', 'is_correct': False}]}], [{'question': 'What population dataset was used in combination with FloodScan data for the flood exposure analysis?', 'options': [{'answer': 'WorldPop (2020 UN Adjusted)', 'is_correct': True}, {'answer': 'UNFPA 2024 Dataset', 'is_correct': False}, {'answer': 'UN OCHA 2023 Population Data', 'is_correct': False}, {'answer': 'Somalia Census 2022', 'is_correct': False}]}, {'question': 'What threshold was used to reclassify the flood fraction composites to binary?', 'options': [{'answer': '20 percent', 'is_correct': True}, {'answer': '10 percent', 'is_correct': False}, {'answer': '15 percent', 'is_correct': False}, {'answer': '25 percent', 'is_correct': False}]}, {'question': 'Which percentile range was used for the OND 2024 flood exposure predictions?', 'options': [{'answer': '25-75th percentile', 'is_correct': True}, {'answer': '50-95th percentile', 'is_correct': False}, {'answer': '10-90th percentile', 'is_correct': False}, {'answer': '30-70th percentile', 'is_correct': False}]}, {'question': 'What years of historical FloodScan data were analyzed?', 'options': [{'answer': '1998-2022', 'is_correct': True}, {'answer': '2000-2022', 'is_correct': False}, {'answer': '1995-2022', 'is_correct': False}, {'answer': '2010-2022', 'is_correct': False}]}, {'question': 'What was the minimum flood fraction value threshold used in the masked analysis?', 'options': [{'answer': '0.05 percent', 'is_correct': True}, {'answer': '0.1 percent', 'is_correct': False}, {'answer': '0.5 percent', 'is_correct': False}, {'answer': '1 percent', 'is_correct': False}]}], [{'question': 'What threshold was used to reclassify flood fraction composites to binary in the analysis?', 'options': [{'answer': '20 percent', 'is_correct': True}, {'answer': '5 percent', 'is_correct': False}, {'answer': '10 percent', 'is_correct': False}, {'answer': '15 percent', 'is_correct': False}]}, {'question': 'Which percentile range was used for the OND 2024 flood exposure estimates?', 'options': [{'answer': '25-75th percentile', 'is_correct': True}, {'answer': '50-95th percentile', 'is_correct': False}, {'answer': '10-50th percentile', 'is_correct': False}, {'answer': '75-95th percentile', 'is_correct': False}]}, {'question': 'What population dataset was used in the flood exposure analysis?', 'options': [{'answer': 'WorldPop (2020 UN Adjusted)', 'is_correct': True}, {'answer': 'WorldPop (2022 UN Adjusted)', 'is_correct': False}, {'answer': 'WorldPop (2019 UN Adjusted)', 'is_correct': False}, {'answer': 'WorldPop (2021 UN Adjusted)', 'is_correct': False}]}, {'question': 'What time period of FloodScan data was analyzed in the study?', 'options': [{'answer': '1998-2022', 'is_correct': True}, {'answer': '2000-2022', 'is_correct': False}, {'answer': '1995-2022', 'is_correct': False}, {'answer': '2010-2022', 'is_correct': False}]}, {'question': 'Which seasonal forecast influenced the choice of percentile range for MAM 2024?', 'options': [{'answer': 'ECMWF prediction of above average precipitation', 'is_correct': True}, {'answer': 'ECMWF prediction of below average precipitation', 'is_correct': False}, {'answer': 'NOAA prediction of above average precipitation', 'is_correct': False}, {'answer': 'WMO prediction of average precipitation', 'is_correct': False}]}], [{'question': 'What threshold was used to reclassify flood fraction composites to binary in the analysis?', 'options': [{'answer': '20 percent', 'is_correct': True}, {'answer': '5 percent', 'is_correct': False}, {'answer': '10 percent', 'is_correct': False}, {'answer': '15 percent', 'is_correct': False}]}, {'question': 'Which percentile range was used for the OND 2024 flood exposure estimates?', 'options': [{'answer': '25-75th percentile', 'is_correct': True}, {'answer': '50-95th percentile', 'is_correct': False}, {'answer': '10-50th percentile', 'is_correct': False}, {'answer': '75-95th percentile', 'is_correct': False}]}, {'question': 'What population dataset was used in the flood exposure analysis?', 'options': [{'answer': 'WorldPop (2020 UN Adjusted)', 'is_correct': True}, {'answer': 'WorldPop (2022 UN Adjusted)', 'is_correct': False}, {'answer': 'UN OCHA Population Data 2023', 'is_correct': False}, {'answer': 'UNFPA Census Data 2021', 'is_correct': False}]}, {'question': 'What time period of FloodScan data was analyzed in the study?', 'options': [{'answer': '1998-2022', 'is_correct': True}, {'answer': '2000-2022', 'is_correct': False}, {'answer': '1995-2020', 'is_correct': False}, {'answer': '2010-2022', 'is_correct': False}]}, {'question': 'Which seasonal forecast influenced the choice of percentile range for MAM 2024?', 'options': [{'answer': 'ECMWF prediction of above average precipitation', 'is_correct': True}, {'answer': 'NOAA prediction of normal precipitation', 'is_correct': False}, {'answer': 'WMO forecast of below average rainfall', 'is_correct': False}, {'answer': 'Local meteorological department forecast', 'is_correct': False}]}], [{'question': 'What threshold was used to reclassify flood fraction composites to binary in the analysis?', 'options': [{'answer': '20 percent', 'is_correct': True}, {'answer': '5 percent', 'is_correct': False}, {'answer': '10 percent', 'is_correct': False}, {'answer': '15 percent', 'is_correct': False}]}, {'question': 'Which percentile range was used for the OND 2024 flood exposure predictions?', 'options': [{'answer': '25-75th percentile', 'is_correct': True}, {'answer': '50-95th percentile', 'is_correct': False}, {'answer': '10-50th percentile', 'is_correct': False}, {'answer': '75-95th percentile', 'is_correct': False}]}, {'question': 'What population dataset was used in the flood exposure analysis?', 'options': [{'answer': 'WorldPop (2020 UN Adjusted)', 'is_correct': True}, {'answer': 'WorldPop (2022 UN Adjusted)', 'is_correct': False}, {'answer': 'WorldPop (2019 UN Adjusted)', 'is_correct': False}, {'answer': 'WorldPop (2021 UN Adjusted)', 'is_correct': False}]}, {'question': 'What time period of FloodScan data was analyzed in the study?', 'options': [{'answer': '1998-2022', 'is_correct': True}, {'answer': '2000-2022', 'is_correct': False}, {'answer': '1995-2022', 'is_correct': False}, {'answer': '2010-2022', 'is_correct': False}]}, {'question': "Which percentile range was used for MAM 2024 flood exposure predictions due to ECMWF's forecast of above-average precipitation?", 'options': [{'answer': '50-95th percentile', 'is_correct': True}, {'answer': '25-75th percentile', 'is_correct': False}, {'answer': '75-100th percentile', 'is_correct': False}, {'answer': '40-85th percentile', 'is_correct': False}]}], [{'question': 'What population dataset was used in combination with FloodScan data for the flood exposure analysis?', 'options': [{'answer': 'WorldPop (2020 UN Adjusted)', 'is_correct': True}, {'answer': 'UNFPA 2024 Dataset', 'is_correct': False}, {'answer': 'UN OCHA 2023 Population Data', 'is_correct': False}, {'answer': 'Somalia Census 2022', 'is_correct': False}]}, {'question': 'What threshold was used to reclassify the flood fraction composites to binary?', 'options': [{'answer': '20 percent', 'is_correct': True}, {'answer': '10 percent', 'is_correct': False}, {'answer': '5 percent', 'is_correct': False}, {'answer': '15 percent', 'is_correct': False}]}, {'question': 'Which percentile range was used for the OND 2024 flood exposure predictions?', 'options': [{'answer': '25-75th percentile', 'is_correct': True}, {'answer': '50-95th percentile', 'is_correct': False}, {'answer': '10-90th percentile', 'is_correct': False}, {'answer': '30-70th percentile', 'is_correct': False}]}, {'question': 'What time period of historical FloodScan data was analyzed?', 'options': [{'answer': '1998-2022', 'is_correct': True}, {'answer': '2000-2023', 'is_correct': False}, {'answer': '1995-2020', 'is_correct': False}, {'answer': '2010-2022', 'is_correct': False}]}, {'question': 'Which seasonal forecast influenced the choice of percentile range for MAM 2024?', 'options': [{'answer': 'ECMWF prediction of above average precipitation', 'is_correct': True}, {'answer': 'NOAA prediction of normal rainfall', 'is_correct': False}, {'answer': 'WMO forecast of below average precipitation', 'is_correct': False}, {'answer': 'Local meteorological department prediction', 'is_correct': False}]}], [{'question': 'What threshold was used to reclassify flood fraction composites to binary in the analysis?', 'options': [{'answer': '20 percent', 'is_correct': True}, {'answer': '5 percent', 'is_correct': False}, {'answer': '10 percent', 'is_correct': False}, {'answer': '15 percent', 'is_correct': False}]}, {'question': 'Which percentile range was used for the OND 2024 flood exposure estimates?', 'options': [{'answer': '25-75th percentile', 'is_correct': True}, {'answer': '50-95th percentile', 'is_correct': False}, {'answer': '10-90th percentile', 'is_correct': False}, {'answer': '5-95th percentile', 'is_correct': False}]}, {'question': 'What population dataset was used in the flood exposure analysis?', 'options': [{'answer': 'WorldPop (2020 UN Adjusted)', 'is_correct': True}, {'answer': 'WorldPop (2022 UN Adjusted)', 'is_correct': False}, {'answer': 'UN OCHA Population Data 2024', 'is_correct': False}, {'answer': 'UNFPA Census Data 2020', 'is_correct': False}]}, {'question': 'What was the time period of the FloodScan data used in the analysis?', 'options': [{'answer': '1998-2022', 'is_correct': True}, {'answer': '2000-2024', 'is_correct': False}, {'answer': '1995-2020', 'is_correct': False}, {'answer': '2010-2022', 'is_correct': False}]}, {'question': 'Which seasonal forecast influenced the choice of percentile range for MAM 2024?', 'options': [{'answer': 'ECMWF prediction of above average precipitation', 'is_correct': True}, {'answer': 'NOAA prediction of normal rainfall', 'is_correct': False}, {'answer': 'WMO forecast of below average precipitation', 'is_correct': False}, {'answer': 'Local meteorological department forecast', 'is_correct': False}]}], [{'question': 'What population dataset was used in combination with FloodScan data for the flood exposure analysis?', 'options': [{'answer': 'WorldPop 2020 UN Adjusted', 'is_correct': True}, {'answer': 'UNFPA 2024 Dataset', 'is_correct': False}, {'answer': 'UN OCHA 2023 Population Data', 'is_correct': False}, {'answer': 'Somalia Census 2022', 'is_correct': False}]}, {'question': 'What threshold was used to reclassify the flood fraction composites to binary?', 'options': [{'answer': '20 percent', 'is_correct': True}, {'answer': '10 percent', 'is_correct': False}, {'answer': '5 percent', 'is_correct': False}, {'answer': '15 percent', 'is_correct': False}]}, {'question': 'Which percentile range was used for the OND 2024 flood exposure predictions?', 'options': [{'answer': '25-75th percentile', 'is_correct': True}, {'answer': '50-95th percentile', 'is_correct': False}, {'answer': '10-90th percentile', 'is_correct': False}, {'answer': '30-70th percentile', 'is_correct': False}]}, {'question': 'What time period of historical FloodScan data was analyzed?', 'options': [{'answer': '1998-2022', 'is_correct': True}, {'answer': '2000-2023', 'is_correct': False}, {'answer': '1995-2020', 'is_correct': False}, {'answer': '2010-2022', 'is_correct': False}]}, {'question': 'Which seasonal forecast influenced the choice of percentile range for MAM 2024?', 'options': [{'answer': 'ECMWF prediction of above average precipitation', 'is_correct': True}, {'answer': 'NOAA prediction of normal rainfall', 'is_correct': False}, {'answer': 'WMO forecast of below average precipitation', 'is_correct': False}, {'answer': 'Local meteorological department forecast', 'is_correct': False}]}], [{'question': 'What threshold was used to reclassify flood fraction composites to binary in the analysis?', 'options': [{'answer': '20 percent', 'is_correct': True}, {'answer': '5 percent', 'is_correct': False}, {'answer': '10 percent', 'is_correct': False}, {'answer': '15 percent', 'is_correct': False}]}, {'question': 'Which percentile range was used for the OND 2024 flood exposure estimates?', 'options': [{'answer': '25-75th percentile', 'is_correct': True}, {'answer': '50-95th percentile', 'is_correct': False}, {'answer': '10-50th percentile', 'is_correct': False}, {'answer': '75-95th percentile', 'is_correct': False}]}, {'question': 'What population dataset was used in the flood exposure analysis?', 'options': [{'answer': 'WorldPop (2020 UN Adjusted)', 'is_correct': True}, {'answer': 'WorldPop (2022 UN Adjusted)', 'is_correct': False}, {'answer': 'WorldPop (2019 UN Adjusted)', 'is_correct': False}, {'answer': 'WorldPop (2021 UN Adjusted)', 'is_correct': False}]}, {'question': 'What years of FloodScan data were included in the analysis?', 'options': [{'answer': '1998-2022', 'is_correct': True}, {'answer': '2000-2022', 'is_correct': False}, {'answer': '1995-2022', 'is_correct': False}, {'answer': '2010-2022', 'is_correct': False}]}, {'question': 'Which seasonal forecast influenced the choice of percentile range for MAM 2024?', 'options': [{'answer': 'ECMWF prediction of above average precipitation', 'is_correct': True}, {'answer': 'ECMWF prediction of below average precipitation', 'is_correct': False}, {'answer': 'Local weather station data', 'is_correct': False}, {'answer': 'Historical flooding patterns', 'is_correct': False}]}], [{'question': 'What threshold was used to reclassify flood fraction composites to binary in the analysis?', 'options': [{'answer': '20 percent', 'is_correct': True}, {'answer': '5 percent', 'is_correct': False}, {'answer': '10 percent', 'is_correct': False}, {'answer': '15 percent', 'is_correct': False}]}, {'question': 'Which percentile range was used for the OND 2024 flood exposure estimates?', 'options': [{'answer': '25-75th percentile', 'is_correct': True}, {'answer': '50-95th percentile', 'is_correct': False}, {'answer': '10-90th percentile', 'is_correct': False}, {'answer': '15-85th percentile', 'is_correct': False}]}, {'question': 'What population dataset was used in the analysis?', 'options': [{'answer': 'WorldPop (2020 UN Adjusted)', 'is_correct': True}, {'answer': 'WorldPop (2022 UN Adjusted)', 'is_correct': False}, {'answer': 'Somalia Census Data 2020', 'is_correct': False}, {'answer': 'UNFPA Population Database 2022', 'is_correct': False}]}, {'question': 'What time period of FloodScan data was analyzed?', 'options': [{'answer': '1998-2022', 'is_correct': True}, {'answer': '2000-2022', 'is_correct': False}, {'answer': '1995-2022', 'is_correct': False}, {'answer': '2010-2022', 'is_correct': False}]}, {'question': 'Which seasonal periods were analyzed in the flood exposure methodology?', 'options': [{'answer': 'March-April-May (MAM) and October-November-December (OND)', 'is_correct': True}, {'answer': 'January-February-March (JFM) and July-August-September (JAS)', 'is_correct': False}, {'answer': 'April-May-June (AMJ) and September-October-November (SON)', 'is_correct': False}, {'answer': 'February-March-April (FMA) and August-September-October (ASO)', 'is_correct': False}]}]]
+    
+    #values = evaluator.collect_all_values(data)
+    #print(values)
+    
+    json1 = {
+        "name": "产品A",
+        "price": 100,
+        "category": "电子产品"
+    }
+
+    json2 = {
+        "price": 100,
+        "category": "电子产品",
+        "name": "产品A"
+    }
+    
+    result_semantic = evaluator.evaluate_structural_consistency([json1], gt=json2, method_name="ted")
+    print(f"Optimal TED->result_semantic: {result_semantic}")
+    
+    evaluator.set_original_zss(True)
+    result_semantic = evaluator.evaluate_structural_consistency([json1], gt=json2, method_name="ted")
+    print(f"original TED->result_semantic: {result_semantic}")
+    
+    ## Semantic similarity Check
+    json4 = {
+        "product_name": "Product-A",
+        "price": 100,
+        "category": "Consumer Electronics",
+        "desc": "this product is good"
+    }
+
+    json5 = {
+        "name": "Product-A",
+        "price": 100,
+        "category": "Consumer Electronics",
+        "desc": "awsome product"
+    }
+    
+    print("Semantic similarity Check---------")
+    
+    evaluator.set_original_zss(False)
+    result_semantic = evaluator.evaluate_structural_consistency([json4], gt=json5, method_name="ted")
+    print(f"OPT TED->result_semantic: {result_semantic['consistency_metrics']['mean_similarity']}")
+    
+    evaluator.set_original_zss(True)
+    result_semantic = evaluator.evaluate_structural_consistency([json4], gt=json5, method_name="ted")
+    print(f"original TED->result_semantic: {result_semantic['consistency_metrics']['mean_similarity']}")
+    
+    evaluator.set_original_zss(True)
+    result_semantic = evaluator.evaluate_structural_consistency([json4], gt=json5, method_name="bertscore")
+    print(f"bertscore->result_semantic: {result_semantic['consistency_metrics']['mean_similarity']}")
+    
+    result_semantic = evaluator.evaluate_structural_consistency([json4], gt=json5, method_name="deepdiff")
+    print(f"deepdiff->result_semantic: {result_semantic['consistency_metrics']['mean_similarity']}")
+    
+    ## Schema similarity Check
+    json4 = {
+        "product_name": "Product-A",
+        "price": 100,
+        "category": "Consumer Electronics",
+        "desc": "this product is good"
+    }
+
+    json5 = {
+        "Product-A": {
+            "price": 100,
+            "category": "Consumer Electronics",
+            "desc": "this product is good"
+        }
+    }
+    
+    print("Schema similarity Check---------")
+    evaluator.set_original_zss(False)
+    result_semantic = evaluator.evaluate_structural_consistency([json4], gt=json5, method_name="ted")
+    print(f"OPT TED->result_semantic: {result_semantic['consistency_metrics']['mean_similarity']}")
+    
+    evaluator.set_original_zss(True)
+    result_semantic = evaluator.evaluate_structural_consistency([json4], gt=json5, method_name="ted")
+    print(f"original TED->result_semantic: {result_semantic['consistency_metrics']['mean_similarity']}")
+    
+    evaluator.set_original_zss(True)
+    result_semantic = evaluator.evaluate_structural_consistency([json4], gt=json5, method_name="bertscore")
+    print(f"bertscore->result_semantic: {result_semantic['consistency_metrics']['mean_similarity']}")
+    
+    result_semantic = evaluator.evaluate_structural_consistency([json4], gt=json5, method_name="deepdiff")
+    print(f"deepdiff->result_semantic: {result_semantic['consistency_metrics']['mean_similarity']}")

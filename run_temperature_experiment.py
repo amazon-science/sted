@@ -3,7 +3,8 @@
 Temperature-Stability Correlation Experiment
 
 This script runs a comprehensive experiment to analyze the relationship between
-temperature settings and output stability in LLM generations.
+temperature settings and standard deviation of mean similarity in LLM generations.
+It focuses on how temperature affects the variability of similarity scores.
 
 Usage:
     python run_temperature_experiment.py --data-dir extracted_sharegpt_data --output-dir ./temperature_experiment
@@ -21,6 +22,12 @@ from typing import List, Dict, Any
 import subprocess
 import pandas as pd
 from pathlib import Path
+from tqdm import tqdm
+
+from calculate_similarity_stats import (
+    load_generation_results, 
+    compare_with_multiple_generations
+)
 
 def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: int, include_schema: bool) -> str:
     """
@@ -37,11 +44,12 @@ def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: 
         Path to the generated results file
     """
     cmd = [
-        "python", "llm_gen_simple.py",
+        "python", "llm_gen.py",
         "--data-dir", data_dir,
         "--output-dir", output_dir,
         "--temperature", str(temperature),
-        "--run-num", str(run_num)
+        "--run-num", str(run_num),
+        "--sample-limit", str(40)
     ]
     
     if include_schema:
@@ -63,189 +71,205 @@ def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: 
     
     return str(results_file)
 
-def run_evaluation(input_file: str, output_dir: str) -> str:
+def calculate_similarity_metrics(generation_file: str, methods: List[str] = ["ted", "bertscore", "deepdiff"]) -> Dict[str, Any]:
     """
-    Run evaluation on generated outputs.
+    Calculate similarity metrics for generated outputs using our similarity statistics approach.
     
     Args:
-        input_file: Path to the generated results file
-        output_dir: Directory to save evaluation results
+        generation_file: Path to the generation results file
+        methods: List of similarity methods to use
         
     Returns:
-        Path to the evaluation results file
+        Dictionary with similarity metrics and statistics
     """
-    cmd = [
-        "python", "evaluate_generations.py",
-        "--input-file", input_file,
-        "--output-dir", output_dir,
-        "--metrics", "all"
-    ]
+    print(f"Calculating similarity metrics for {generation_file}...")
     
-    print(f"Running evaluation on {input_file}...")
-    subprocess.run(cmd, check=True)
+    # Load generation results
+    ground_truth_list, generated_responses_list = load_generation_results(generation_file)
     
-    # Find the most recent evaluation results file
-    eval_files = list(Path(output_dir).glob("evaluation_results_*.json"))
+    # Calculate similarity statistics with multiple generations
+    results = compare_with_multiple_generations(
+        ground_truth_list, 
+        generated_responses_list,
+        methods=methods,
+        model_id='amazon.titan-embed-text-v2:0'
+    )
     
-    if not eval_files:
-        raise FileNotFoundError("No evaluation results found")
-    
-    # Sort by creation time (most recent first)
-    eval_file = sorted(eval_files, key=lambda p: p.stat().st_mtime, reverse=True)[0]
-    
-    return str(eval_file)
+    return results
 
-def extract_metrics(eval_file: str) -> Dict[str, Any]:
+def extract_temperature_metrics(similarity_results: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Extract metrics from evaluation results file.
+    Extract key metrics from similarity results focusing on temperature-stability correlation.
     
     Args:
-        eval_file: Path to the evaluation results file
+        similarity_results: Results from calculate_similarity_metrics
         
     Returns:
-        Dictionary with extracted metrics
+        Dictionary with extracted metrics focused on standard deviation analysis
     """
-    with open(eval_file, 'r') as f:
-        data = json.load(f)
+    metrics = {}
     
-    results = data.get('results', [])
-    
-    # Initialize aggregated metrics
-    metrics = {
-        'semantic_similarity_mean': [],
-        'semantic_similarity_std': [],
-        'semantic_stability': [],
-        'cross_run_consistency': [],
-        'bleu_mean': [],
-        'rouge_l_mean': [],
-        'bert_score_mean': [],
-        'jaccard_mean': []
-    }
-    
-    # Extract metrics from each sample
-    for sample in results:
-        # Extract semantic metrics if available
-        if 'semantic_tree_metrics' in sample and sample['semantic_tree_metrics']:
-            if 'ground_truth_accuracy' in sample['semantic_tree_metrics']:
-                gt_metrics = sample['semantic_tree_metrics']['ground_truth_accuracy']
-                if 'semantic_similarity' in gt_metrics:
-                    metrics['semantic_similarity_mean'].append(gt_metrics['semantic_similarity'].get('mean', 0))
-                    metrics['semantic_similarity_std'].append(gt_metrics['semantic_similarity'].get('std', 0))
-                    metrics['semantic_stability'].append(gt_metrics['semantic_similarity'].get('stability', 0))
-            
-            if 'cross_run_consistency' in sample['semantic_tree_metrics'] and 'consistency_metrics' in sample['semantic_tree_metrics']['cross_run_consistency']:
-                consistency = sample['semantic_tree_metrics']['cross_run_consistency']['consistency_metrics']
-                metrics['cross_run_consistency'].append(consistency.get('mean_similarity', 0))
+    for method in similarity_results:
+        method_results = similarity_results[method]
         
-        # Extract NLP metrics if available
-        if 'nlp_metrics' in sample and sample['nlp_metrics']:
-            if 'accuracy_metrics' in sample['nlp_metrics']:
-                acc_metrics = sample['nlp_metrics']['accuracy_metrics']
-                
-                if 'bleu' in acc_metrics:
-                    metrics['bleu_mean'].append(acc_metrics['bleu'].get('mean', 0))
-                
-                if 'rouge_l' in acc_metrics:
-                    metrics['rouge_l_mean'].append(acc_metrics['rouge_l'].get('mean', 0))
-                
-                if 'bert_score' in acc_metrics:
-                    metrics['bert_score_mean'].append(acc_metrics['bert_score'].get('mean', 0))
-                
-                if 'jaccard' in acc_metrics:
-                    metrics['jaccard_mean'].append(acc_metrics['jaccard'].get('mean', 0))
-    
-    # Calculate averages
-    result = {}
-    for key, values in metrics.items():
-        if values:
-            result[key] = sum(values) / len(values)
+        # Extract overall statistics
+        overall_stats = method_results['overall_stats']
+        sample_level_stats = method_results['sample_level_stats']
+        
+        # Key metrics for temperature-stability analysis
+        metrics[f'{method}_mean_similarity'] = overall_stats['mean']
+        metrics[f'{method}_std_similarity'] = overall_stats['std']
+        metrics[f'{method}_mean_of_means'] = sample_level_stats['mean_of_means']
+        metrics[f'{method}_std_of_means'] = sample_level_stats['std_of_means']  # This is key for temperature correlation
+        metrics[f'{method}_mean_of_stds'] = sample_level_stats['mean_of_stds']
+        metrics[f'{method}_std_of_stds'] = sample_level_stats['std_of_stds']
+        
+        # Calculate coefficient of variation (normalized variability)
+        if overall_stats['mean'] > 0:
+            metrics[f'{method}_cv'] = overall_stats['std'] / overall_stats['mean']
         else:
-            result[key] = 0
+            metrics[f'{method}_cv'] = 0
+        
+        # Calculate stability score (inverse of variability)
+        metrics[f'{method}_stability'] = 1.0 / (1.0 + overall_stats['std'])
     
-    return result
+    return metrics
 
-def analyze_temperature_stability_relationship(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+def analyze_temperature_std_correlation(results: List[Dict[str, Any]], methods: List[str] = ["ted", "bertscore", "deepdiff"]) -> Dict[str, Any]:
     """
-    Analyze the relationship between temperature and stability.
+    Analyze the correlation between temperature and standard deviation of mean similarity.
     
     Args:
         results: List of dictionaries with temperature and metrics
+        methods: List of similarity methods used
         
     Returns:
-        Dictionary with analysis results
+        Dictionary with detailed correlation analysis results
     """
-    # Extract data for analysis
     temperatures = [r['temperature'] for r in results]
-    semantic_stabilities = [r['semantic_stability'] for r in results]
-    cross_run_consistencies = [r['cross_run_consistency'] for r in results]
-    semantic_similarities = [r['semantic_similarity_mean'] for r in results]
+    analysis_results = {}
     
-    # Calculate correlations
-    pearson_stability = stats.pearsonr(temperatures, semantic_stabilities)
-    spearman_stability = stats.spearmanr(temperatures, semantic_stabilities)
-    pearson_consistency = stats.pearsonr(temperatures, cross_run_consistencies)
-    spearman_consistency = stats.spearmanr(temperatures, cross_run_consistencies)
-    pearson_similarity = stats.pearsonr(temperatures, semantic_similarities)
-    spearman_similarity = stats.spearmanr(temperatures, semantic_similarities)
-    
-    # Fit linear regression for stability
-    slope, intercept, r_value, p_value, std_err = stats.linregress(temperatures, semantic_stabilities)
-    
-    # Fit polynomial regression for stability
-    poly_degree = min(3, len(temperatures) - 1)  # Avoid overfitting
-    poly_coeffs = np.polyfit(temperatures, semantic_stabilities, poly_degree)
-    poly_r_squared = np.corrcoef(temperatures, np.polyval(poly_coeffs, temperatures))[0, 1] ** 2
-    
-    return {
-        'correlations': {
-            'pearson_stability': {
-                'correlation': pearson_stability[0],
-                'p_value': pearson_stability[1]
-            },
-            'spearman_stability': {
-                'correlation': spearman_stability[0],
-                'p_value': spearman_stability[1]
-            },
-            'pearson_consistency': {
-                'correlation': pearson_consistency[0],
-                'p_value': pearson_consistency[1]
-            },
-            'spearman_consistency': {
-                'correlation': spearman_consistency[0],
-                'p_value': spearman_consistency[1]
-            },
-            'pearson_similarity': {
-                'correlation': pearson_similarity[0],
-                'p_value': pearson_similarity[1]
-            },
-            'spearman_similarity': {
-                'correlation': spearman_similarity[0],
-                'p_value': spearman_similarity[1]
+    for method in methods:
+        method_analysis = {}
+        
+        # Extract key metrics for this method
+        std_similarities = [r[f'{method}_std_similarity'] for r in results]
+        std_of_means = [r[f'{method}_std_of_means'] for r in results]
+        mean_of_stds = [r[f'{method}_mean_of_stds'] for r in results]
+        cv_values = [r[f'{method}_cv'] for r in results]
+        stability_scores = [r[f'{method}_stability'] for r in results]
+        mean_similarities = [r[f'{method}_mean_similarity'] for r in results]
+        
+        # Calculate correlations for different variability metrics
+        correlations = {}
+        
+        # Temperature vs Standard deviation of similarities
+        if len(std_similarities) > 1:
+            pearson_std = stats.pearsonr(temperatures, std_similarities)
+            spearman_std = stats.spearmanr(temperatures, std_similarities)
+            correlations['temp_vs_std_similarity'] = {
+                'pearson': {'r': pearson_std[0], 'p': pearson_std[1]},
+                'spearman': {'r': spearman_std[0], 'p': spearman_std[1]}
             }
-        },
-        'linear_regression': {
-            'slope': slope,
-            'intercept': intercept,
-            'r_squared': r_value ** 2,
-            'p_value': p_value,
-            'std_err': std_err,
-            'equation': f"stability = {slope:.4f} * temperature + {intercept:.4f}"
-        },
-        'polynomial_regression': {
-            'coefficients': poly_coeffs.tolist(),
-            'degree': poly_degree,
-            'r_squared': poly_r_squared
+        
+        # Temperature vs Standard deviation of means (key metric)
+        if len(std_of_means) > 1:
+            pearson_std_means = stats.pearsonr(temperatures, std_of_means)
+            spearman_std_means = stats.spearmanr(temperatures, std_of_means)
+            correlations['temp_vs_std_of_means'] = {
+                'pearson': {'r': pearson_std_means[0], 'p': pearson_std_means[1]},
+                'spearman': {'r': spearman_std_means[0], 'p': spearman_std_means[1]}
+            }
+        
+        # Temperature vs Mean of standard deviations
+        if len(mean_of_stds) > 1:
+            pearson_mean_stds = stats.pearsonr(temperatures, mean_of_stds)
+            spearman_mean_stds = stats.spearmanr(temperatures, mean_of_stds)
+            correlations['temp_vs_mean_of_stds'] = {
+                'pearson': {'r': pearson_mean_stds[0], 'p': pearson_mean_stds[1]},
+                'spearman': {'r': spearman_mean_stds[0], 'p': spearman_mean_stds[1]}
+            }
+        
+        # Temperature vs Coefficient of Variation
+        if len(cv_values) > 1:
+            pearson_cv = stats.pearsonr(temperatures, cv_values)
+            spearman_cv = stats.spearmanr(temperatures, cv_values)
+            correlations['temp_vs_cv'] = {
+                'pearson': {'r': pearson_cv[0], 'p': pearson_cv[1]},
+                'spearman': {'r': spearman_cv[0], 'p': spearman_cv[1]}
+            }
+        
+        # Temperature vs Stability scores
+        if len(stability_scores) > 1:
+            pearson_stability = stats.pearsonr(temperatures, stability_scores)
+            spearman_stability = stats.spearmanr(temperatures, stability_scores)
+            correlations['temp_vs_stability'] = {
+                'pearson': {'r': pearson_stability[0], 'p': pearson_stability[1]},
+                'spearman': {'r': spearman_stability[0], 'p': spearman_stability[1]}
+            }
+        
+        # Temperature vs Mean similarity (accuracy)
+        if len(mean_similarities) > 1:
+            pearson_mean = stats.pearsonr(temperatures, mean_similarities)
+            spearman_mean = stats.spearmanr(temperatures, mean_similarities)
+            correlations['temp_vs_mean_similarity'] = {
+                'pearson': {'r': pearson_mean[0], 'p': pearson_mean[1]},
+                'spearman': {'r': spearman_mean[0], 'p': spearman_mean[1]}
+            }
+        
+        # Linear regression for key metric (std of means)
+        if len(std_of_means) > 1:
+            slope, intercept, r_value, p_value, std_err = stats.linregress(temperatures, std_of_means)
+            linear_regression = {
+                'slope': slope,
+                'intercept': intercept,
+                'r_squared': r_value ** 2,
+                'p_value': p_value,
+                'std_err': std_err,
+                'equation': f"std_of_means = {slope:.4f} * temperature + {intercept:.4f}"
+            }
+        else:
+            linear_regression = {}
+        
+        # Polynomial regression for std of means
+        if len(std_of_means) > 2:
+            poly_degree = min(2, len(temperatures) - 1)
+            poly_coeffs = np.polyfit(temperatures, std_of_means, poly_degree)
+            poly_predictions = np.polyval(poly_coeffs, temperatures)
+            poly_r_squared = np.corrcoef(std_of_means, poly_predictions)[0, 1] ** 2
+            polynomial_regression = {
+                'coefficients': poly_coeffs.tolist(),
+                'degree': poly_degree,
+                'r_squared': poly_r_squared
+            }
+        else:
+            polynomial_regression = {}
+        
+        method_analysis = {
+            'correlations': correlations,
+            'linear_regression': linear_regression,
+            'polynomial_regression': polynomial_regression,
+            'summary_stats': {
+                'std_similarity_range': [min(std_similarities), max(std_similarities)] if std_similarities else [0, 0],
+                'std_of_means_range': [min(std_of_means), max(std_of_means)] if std_of_means else [0, 0],
+                'cv_range': [min(cv_values), max(cv_values)] if cv_values else [0, 0],
+                'stability_range': [min(stability_scores), max(stability_scores)] if stability_scores else [0, 0]
+            }
         }
-    }
+        
+        analysis_results[method] = method_analysis
+    
+    return analysis_results
 
-def create_visualizations(results: List[Dict[str, Any]], output_dir: str, analysis: Dict[str, Any]):
+def create_visualizations(results: List[Dict[str, Any]], output_dir: str, analysis: Dict[str, Any], methods: List[str] = ["ted", "bertscore", "deepdiff"]):
     """
-    Create visualizations of the temperature-stability relationship.
+    Create visualizations focusing on temperature vs standard deviation of mean similarity.
     
     Args:
         results: List of dictionaries with temperature and metrics
         output_dir: Directory to save visualizations
         analysis: Dictionary with analysis results
+        methods: List of similarity methods used
     """
     os.makedirs(output_dir, exist_ok=True)
     
@@ -254,83 +278,138 @@ def create_visualizations(results: List[Dict[str, Any]], output_dir: str, analys
     
     # Set up the plotting style
     sns.set(style="whitegrid")
+    
+    # Create a comprehensive figure with subplots for each method
+    fig, axes = plt.subplots(len(methods), 3, figsize=(18, 6*len(methods)))
+    if len(methods) == 1:
+        axes = axes.reshape(1, -1)
+    
+    for i, method in enumerate(methods):
+        # 1. Temperature vs Standard Deviation of Means (key plot)
+        ax1 = axes[i, 0]
+        std_of_means_col = f'{method}_std_of_means'
+        if std_of_means_col in df.columns:
+            sns.regplot(x='temperature', y=std_of_means_col, data=df, 
+                       scatter_kws={'alpha':0.7}, line_kws={'color':'red'}, ax=ax1)
+            ax1.set_title(f'{method.upper()}: Temperature vs Std of Means')
+            ax1.set_xlabel('Temperature')
+            ax1.set_ylabel('Standard Deviation of Means')
+            
+            # Add regression equation if available
+            if method in analysis and 'linear_regression' in analysis[method]:
+                lr = analysis[method]['linear_regression']
+                if 'equation' in lr:
+                    ax1.annotate(f"{lr['equation']}\nR² = {lr['r_squared']:.4f}", 
+                                xy=(0.05, 0.95), xycoords='axes fraction',
+                                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8),
+                                verticalalignment='top')
+        
+        # 2. Temperature vs Overall Standard Deviation
+        ax2 = axes[i, 1]
+        std_similarity_col = f'{method}_std_similarity'
+        if std_similarity_col in df.columns:
+            sns.regplot(x='temperature', y=std_similarity_col, data=df, 
+                       scatter_kws={'alpha':0.7}, line_kws={'color':'blue'}, ax=ax2)
+            ax2.set_title(f'{method.upper()}: Temperature vs Overall Std')
+            ax2.set_xlabel('Temperature')
+            ax2.set_ylabel('Overall Standard Deviation')
+        
+        # 3. Temperature vs Coefficient of Variation
+        ax3 = axes[i, 2]
+        cv_col = f'{method}_cv'
+        if cv_col in df.columns:
+            sns.regplot(x='temperature', y=cv_col, data=df, 
+                       scatter_kws={'alpha':0.7}, line_kws={'color':'green'}, ax=ax3)
+            ax3.set_title(f'{method.upper()}: Temperature vs CV')
+            ax3.set_xlabel('Temperature')
+            ax3.set_ylabel('Coefficient of Variation')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'temperature_std_correlation_detailed.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # Create a summary plot comparing all methods for std of means
     plt.figure(figsize=(12, 8))
+    colors = ['red', 'blue', 'green', 'orange', 'purple']
     
-    # 1. Scatter plot with regression line for stability
-    plt.subplot(2, 2, 1)
-    sns.regplot(x='temperature', y='semantic_stability', data=df, scatter_kws={'alpha':0.7}, line_kws={'color':'red'})
-    plt.title('Temperature vs. Semantic Stability')
-    plt.xlabel('Temperature')
-    plt.ylabel('Semantic Stability')
+    for i, method in enumerate(methods):
+        std_of_means_col = f'{method}_std_of_means'
+        if std_of_means_col in df.columns:
+            plt.plot(df['temperature'], df[std_of_means_col], 'o-', 
+                    color=colors[i % len(colors)], label=f'{method.upper()}', linewidth=2, markersize=6)
     
-    # Add regression equation
-    equation = analysis['linear_regression']['equation']
-    r_squared = analysis['linear_regression']['r_squared']
-    plt.annotate(f"{equation}\nR² = {r_squared:.4f}", 
-                xy=(0.05, 0.05), xycoords='axes fraction',
-                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
+    plt.xlabel('Temperature', fontsize=12)
+    plt.ylabel('Standard Deviation of Means', fontsize=12)
+    plt.title('Temperature vs Standard Deviation of Mean Similarity\n(Comparison Across Methods)', fontsize=14)
+    plt.legend(fontsize=10)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'temperature_std_means_comparison.png'), dpi=300)
+    plt.close()
     
-    # 2. Scatter plot with regression line for cross-run consistency
-    plt.subplot(2, 2, 2)
-    sns.regplot(x='temperature', y='cross_run_consistency', data=df, scatter_kws={'alpha':0.7}, line_kws={'color':'blue'})
-    plt.title('Temperature vs. Cross-Run Consistency')
-    plt.xlabel('Temperature')
-    plt.ylabel('Cross-Run Consistency')
+    # Create correlation heatmap for each method
+    for method in methods:
+        method_cols = [col for col in df.columns if col.startswith(method) or col == 'temperature']
+        if len(method_cols) > 2:
+            plt.figure(figsize=(10, 8))
+            correlation_df = df[method_cols].corr()
+            sns.heatmap(correlation_df, annot=True, cmap='coolwarm', vmin=-1, vmax=1, 
+                       square=True, linewidths=0.5)
+            plt.title(f'{method.upper()}: Correlation Matrix')
+            plt.tight_layout()
+            plt.savefig(os.path.join(output_dir, f'{method}_correlation_matrix.png'), dpi=300)
+            plt.close()
     
-    # 3. Dual y-axis plot for stability and accuracy
-    fig, ax1 = plt.subplots(figsize=(10, 6))
+    # Create a dual-axis plot showing mean similarity vs std of means
+    fig, ax1 = plt.subplots(figsize=(12, 8))
     
-    color = 'tab:red'
-    ax1.set_xlabel('Temperature')
-    ax1.set_ylabel('Semantic Stability', color=color)
-    ax1.plot(df['temperature'], df['semantic_stability'], 'o-', color=color)
-    ax1.tick_params(axis='y', labelcolor=color)
+    for i, method in enumerate(methods):
+        mean_col = f'{method}_mean_similarity'
+        std_col = f'{method}_std_of_means'
+        
+        if mean_col in df.columns and std_col in df.columns:
+            color = colors[i % len(colors)]
+            
+            # Plot mean similarity on left axis
+            ax1.plot(df['temperature'], df[mean_col], 'o-', color=color, 
+                    label=f'{method.upper()} Mean', linewidth=2, markersize=6)
     
+    ax1.set_xlabel('Temperature', fontsize=12)
+    ax1.set_ylabel('Mean Similarity (Accuracy)', color='black', fontsize=12)
+    ax1.tick_params(axis='y', labelcolor='black')
+    
+    # Create second y-axis for std of means
     ax2 = ax1.twinx()
-    color = 'tab:blue'
-    ax2.set_ylabel('Semantic Similarity (Accuracy)', color=color)
-    ax2.plot(df['temperature'], df['semantic_similarity_mean'], 's-', color=color)
-    ax2.tick_params(axis='y', labelcolor=color)
     
-    plt.title('Temperature vs. Stability and Accuracy')
-    fig.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'temperature_stability_accuracy.png'), dpi=300)
+    for i, method in enumerate(methods):
+        std_col = f'{method}_std_of_means'
+        
+        if std_col in df.columns:
+            color = colors[i % len(colors)]
+            
+            # Plot std of means on right axis with dashed line
+            ax2.plot(df['temperature'], df[std_col], 's--', color=color, 
+                    label=f'{method.upper()} Std', linewidth=2, markersize=6, alpha=0.7)
     
-    # 4. Heatmap of correlations between metrics
-    plt.figure(figsize=(10, 8))
-    correlation_columns = ['temperature', 'semantic_stability', 'cross_run_consistency', 
-                          'semantic_similarity_mean', 'bleu_mean', 'rouge_l_mean', 
-                          'bert_score_mean', 'jaccard_mean']
-    correlation_df = df[correlation_columns].corr()
-    sns.heatmap(correlation_df, annot=True, cmap='coolwarm', vmin=-1, vmax=1)
-    plt.title('Correlation Between Metrics')
+    ax2.set_ylabel('Standard Deviation of Means (Variability)', color='gray', fontsize=12)
+    ax2.tick_params(axis='y', labelcolor='gray')
+    
+    # Combine legends
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='center right', fontsize=10)
+    
+    plt.title('Temperature vs Accuracy and Variability\n(Dual-Axis Comparison)', fontsize=14)
+    plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'metric_correlations.png'), dpi=300)
-    
-    # 5. Line plot comparing different metrics across temperatures
-    plt.figure(figsize=(12, 6))
-    metrics = ['semantic_stability', 'cross_run_consistency', 'semantic_similarity_mean', 
-              'bleu_mean', 'rouge_l_mean', 'bert_score_mean', 'jaccard_mean']
-    
-    for metric in metrics:
-        plt.plot(df['temperature'], df[metric], 'o-', label=metric)
-    
-    plt.xlabel('Temperature')
-    plt.ylabel('Metric Value')
-    plt.title('Comparison of Metrics Across Temperatures')
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'metrics_comparison.png'), dpi=300)
-    
-    # Save all figures
-    plt.savefig(os.path.join(output_dir, 'temperature_stability.png'), dpi=300)
+    plt.savefig(os.path.join(output_dir, 'temperature_accuracy_vs_variability.png'), dpi=300)
+    plt.close()
     
     print(f"Visualizations saved to {output_dir}")
 
 def run_experiment(args):
     """
-    Run the temperature-stability correlation experiment.
+    Run the temperature-standard deviation correlation experiment.
     
     Args:
         args: Command-line arguments
@@ -338,78 +417,146 @@ def run_experiment(args):
     # Create output directories
     os.makedirs(args.output_dir, exist_ok=True)
     generations_dir = os.path.join(args.output_dir, "generations")
-    evaluations_dir = os.path.join(args.output_dir, "evaluations")
     visualizations_dir = os.path.join(args.output_dir, "visualizations")
     os.makedirs(generations_dir, exist_ok=True)
-    os.makedirs(evaluations_dir, exist_ok=True)
     
     # Define temperatures to test
     if args.temperatures:
         temperatures = args.temperatures
     else:
-        temperatures = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        temperatures = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+    
+    # Define similarity methods to use
+    methods = ["ted", "bertscore", "deepdiff"]
     
     results = []
     
     # Run generation and evaluation for each temperature
-    for temp in temperatures:
-        # Run generation
-        gen_results_file = run_generation(
-            data_dir=args.data_dir,
-            output_dir=generations_dir,
-            temperature=temp,
-            run_num=args.run_num,
-            include_schema=args.include_schema
-        )
+    for temp in tqdm(temperatures, desc="Processing temperatures"):
+        print(f"\n=== Processing Temperature {temp} ===")
         
-        # Run evaluation
-        eval_results_file = run_evaluation(
-            input_file=gen_results_file,
-            output_dir=evaluations_dir
-        )
+        # Check if we already have generation results for this temperature
+        temp_str = f"temp_{temp:.2f}".replace('.', '_')
+        existing_results = list(Path(generations_dir).glob(f"llm_gen_results_*{temp_str}*"))
         
-        # Extract metrics
-        metrics = extract_metrics(eval_results_file)
+        gen_results_file = None
+        if existing_results:
+            result_dir = sorted(existing_results, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+            print(f"Found existing results for temperature {temp}. Using {result_dir}")
+            gen_results_file = str(result_dir / "all_results.json")
+        
+        if gen_results_file is None or not os.path.exists(gen_results_file) or args.force_regenerate:
+            # Run generation
+            gen_results_file = run_generation(
+                data_dir=args.data_dir,
+                output_dir=generations_dir,
+                temperature=temp,
+                run_num=args.run_num,
+                include_schema=args.include_schema
+            )
+        
+        # Calculate similarity metrics
+        similarity_results = calculate_similarity_metrics(gen_results_file, methods)
+        
+        # Extract temperature-focused metrics
+        metrics = extract_temperature_metrics(similarity_results)
         metrics['temperature'] = temp
         results.append(metrics)
+        
+        print(f"Temperature {temp} completed. Key metrics:")
+        for method in methods:
+            std_of_means = metrics.get(f'{method}_std_of_means', 0)
+            mean_similarity = metrics.get(f'{method}_mean_similarity', 0)
+            print(f"  {method.upper()}: Mean={mean_similarity:.4f}, Std of Means={std_of_means:.4f}")
     
-    # Analyze the relationship between temperature and stability
-    analysis = analyze_temperature_stability_relationship(results)
+    # Analyze the relationship between temperature and standard deviation
+    analysis = analyze_temperature_std_correlation(results, methods)
     
     # Create visualizations
-    create_visualizations(results, visualizations_dir, analysis)
+    create_visualizations(results, visualizations_dir, analysis, methods)
     
     # Save results and analysis
-    results_file = os.path.join(args.output_dir, "temperature_stability_results.json")
+    results_file = os.path.join(args.output_dir, "temperature_std_correlation_results.json")
     with open(results_file, 'w') as f:
         json.dump({
             'results': results,
             'analysis': analysis,
             'parameters': {
                 'temperatures': temperatures,
+                'methods': methods,
                 'run_num': args.run_num,
                 'include_schema': args.include_schema,
                 'data_dir': args.data_dir
             }
         }, f, indent=2)
     
-    print(f"Results saved to {results_file}")
+    print(f"\nResults saved to {results_file}")
     
     # Print summary of findings
-    print("\n=== Temperature-Stability Correlation Analysis ===")
-    print(f"Pearson correlation: {analysis['correlations']['pearson_stability']['correlation']:.4f} (p-value: {analysis['correlations']['pearson_stability']['p_value']:.4f})")
-    print(f"Spearman correlation: {analysis['correlations']['spearman_stability']['correlation']:.4f} (p-value: {analysis['correlations']['spearman_stability']['p_value']:.4f})")
-    print(f"Linear regression: {analysis['linear_regression']['equation']}")
-    print(f"R-squared (linear): {analysis['linear_regression']['r_squared']:.4f}")
-    print(f"R-squared (polynomial): {analysis['polynomial_regression']['r_squared']:.4f}")
+    print("\n" + "="*80)
+    print("TEMPERATURE vs STANDARD DEVIATION CORRELATION ANALYSIS")
+    print("="*80)
+    
+    for method in methods:
+        if method in analysis:
+            method_analysis = analysis[method]
+            print(f"\n{method.upper()} Results:")
+            
+            # Key correlation: Temperature vs Std of Means
+            if 'temp_vs_std_of_means' in method_analysis['correlations']:
+                corr = method_analysis['correlations']['temp_vs_std_of_means']
+                print(f"  Temperature vs Std of Means:")
+                print(f"    Pearson r = {corr['pearson']['r']:.4f} (p = {corr['pearson']['p']:.4f})")
+                print(f"    Spearman r = {corr['spearman']['r']:.4f} (p = {corr['spearman']['p']:.4f})")
+            
+            # Linear regression results
+            if 'linear_regression' in method_analysis and method_analysis['linear_regression']:
+                lr = method_analysis['linear_regression']
+                print(f"  Linear Regression:")
+                print(f"    {lr['equation']}")
+                print(f"    R² = {lr['r_squared']:.4f} (p = {lr['p_value']:.4f})")
+            
+            # Summary statistics
+            if 'summary_stats' in method_analysis:
+                stats_summary = method_analysis['summary_stats']
+                std_range = stats_summary['std_of_means_range']
+                print(f"  Std of Means Range: [{std_range[0]:.4f}, {std_range[1]:.4f}]")
+    
+    # Overall summary
+    print(f"\n{'SUMMARY:'}")
+    print(f"Analyzed {len(temperatures)} temperature points from {min(temperatures)} to {max(temperatures)}")
+    print(f"Used {len(methods)} similarity methods: {', '.join(methods)}")
+    print(f"Generated {args.run_num} samples per temperature")
+    
+    # Find the method with strongest correlation
+    strongest_correlations = {}
+    for method in methods:
+        if method in analysis and 'temp_vs_std_of_means' in analysis[method]['correlations']:
+            corr_data = analysis[method]['correlations']['temp_vs_std_of_means']
+            strongest_correlations[method] = abs(corr_data['pearson']['r'])
+    
+    if strongest_correlations:
+        best_method = max(strongest_correlations.keys(), key=lambda k: strongest_correlations[k])
+        best_corr = analysis[best_method]['correlations']['temp_vs_std_of_means']['pearson']['r']
+        print(f"\nStrongest correlation found with {best_method.upper()}: r = {best_corr:.4f}")
+        
+        if abs(best_corr) > 0.7:
+            print("Strong correlation detected!")
+        elif abs(best_corr) > 0.5:
+            print("Moderate correlation detected.")
+        elif abs(best_corr) > 0.3:
+            print("Weak correlation detected.")
+        else:
+            print("Little to no correlation detected.")
 
 def main():
-    parser = argparse.ArgumentParser(description="Run temperature-stability correlation experiment.")
+    parser = argparse.ArgumentParser(description="Run temperature vs standard deviation correlation experiment.")
     parser.add_argument("--data-dir", type=str, required=True, help="Directory containing the data files.")
     parser.add_argument("--output-dir", type=str, default="./temperature_experiment", help="Directory to save experiment results.")
     parser.add_argument("--run-num", type=int, default=10, help="Number of runs per temperature.")
     parser.add_argument("--include-schema", action="store_true", help="Include JSON schema in the prompt.")
     parser.add_argument("--temperatures", type=float, nargs="+", help="List of temperatures to test. Default: 0.0 to 1.0 in 0.1 increments.")
+    parser.add_argument("--force-regenerate", action="store_true", help="Force regeneration even if results already exist.")
     args = parser.parse_args()
     
     run_experiment(args)
