@@ -29,7 +29,7 @@ from calculate_similarity_stats import (
     compare_with_multiple_generations
 )
 
-def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: int, include_schema: bool) -> str:
+def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: int, include_schema: bool, model_id: str, sample_limit: int=40) -> str:
     """
     Run LLM generation with specified parameters.
     
@@ -49,9 +49,8 @@ def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: 
         "--output-dir", output_dir,
         "--temperature", str(temperature),
         "--run-num", str(run_num),
-        "--sample-limit", str(40),
-        "--model-id", "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
-        "--include-schema"
+        "--sample-limit", str(sample_limit),
+        "--model-id", model_id
     ]
     
     if include_schema:
@@ -443,6 +442,10 @@ def run_experiment(args):
         existing_results = list(Path(generations_dir).glob(f"llm_gen_results_*{temp_str}*"))
         
         gen_results_file = None
+        
+        # get the result file with the same temperature
+        
+        
         if existing_results:
             result_dir = sorted(existing_results, key=lambda p: p.stat().st_mtime, reverse=True)[0]
             print(f"Found existing results for temperature {temp}. Using {result_dir}")
@@ -563,6 +566,7 @@ def main():
     parser.add_argument("--include-schema", action="store_true", help="Include JSON schema in the prompt.")
     parser.add_argument("--temperatures", type=float, nargs="+", help="List of temperatures to test. Default: 0.0 to 1.0 in 0.1 increments.")
     parser.add_argument("--force-regenerate", action="store_true", help="Force regeneration even if results already exist.")
+    parser.add_argument("--model-id", type=str, default="us.anthropic.claude-3-5-sonnet-20241022-v2:0", help="Model id")
     args = parser.parse_args()
     
     run_experiment(args)

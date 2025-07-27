@@ -131,6 +131,7 @@ class JsonNode:
             value: The value of the node (for leaf nodes)
             node_type: The type of the node ('object', 'array', or value type)
         """
+        print(f"JsonNode-> label: {label}, value: {value}")
         self.label = label
         self.value = value
         self.children = []
@@ -221,7 +222,8 @@ class SemanticJsonTreeConsistencyEvaluator:
             
             self.bedrock_client = session.client(
                 'bedrock-runtime',
-                config=bedrock_config
+                config=bedrock_config,
+                region_name="us-west-2"
             )
         else:
             self.embedding_model = SentenceTransformer(self.model_id)
@@ -298,7 +300,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         _collect_recursive(data)
         return values
     
-    def batch_compute_similarities(self, pairs: List[Tuple[str, str]]) -> Dict[Tuple[str, str], float]:
+    def batch_compute_similarities(self, pairs: List[Tuple[str, str]], method='cosine') -> Dict[Tuple[str, str], float]:
         """Batch compute BERT scores for all unique pairs."""
         uncached_pairs = [(s1, s2) for s1, s2 in pairs if self.cache.get(s1, s2) is None]
     
@@ -312,8 +314,16 @@ class SemanticJsonTreeConsistencyEvaluator:
         for i in range(0, len(uncached_pairs), batch_size):
             batch = uncached_pairs[i:i+batch_size]
             refs, cands = zip(*batch)
-            P, R, F1 = bert_score(list(cands), list(refs), lang="en", verbose=False)
-            scores = [float(f.item()) for f in F1]
+            #P, R, F1 = bert_score(list(cands), list(refs), lang="en", verbose=False)
+            #scores = [float(f.item()) for f in F1]
+            if method == "bertscore":
+                P, R, F1 = bert_score(list(cands), list(refs), lang="en", verbose=False)
+                scores = [float(f.item()) for f in F1]
+            else:
+                scores = [self._calculate_semantic_similarity(s1, s2) for s1, s2 in zip(list(cands), list(refs))]
+                print(f"scores: {scores}")
+                
+            
             self.cache.batch_set(batch, scores)
         
         return self.cache.cache
@@ -408,6 +418,7 @@ class SemanticJsonTreeConsistencyEvaluator:
             return 0.0
             
         similarity = dot_product / (norm1 * norm2)
+        
         return float(np.clip(similarity, -1.0, 1.0))
     
     def _calculate_key_similarity(self, key1: str, key2: str) -> float:
@@ -434,7 +445,6 @@ class SemanticJsonTreeConsistencyEvaluator:
             A JsonNode representing the root of the tree
         """
         full_path = path if path else "root"
-        
         if isinstance(json_obj, dict):
             # Create a node for the object
             node = JsonNode(full_path, node_type="object")
@@ -560,6 +570,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         
         # Calculate key similarity
         key_sim = self._calculate_key_similarity(key1, key2)
+        print(f"{key1}, {key2}: {key_sim}")
         
         value_sim = 0.0
                 
@@ -587,7 +598,7 @@ class SemanticJsonTreeConsistencyEvaluator:
             "is_leaf": not node1.children and not node2.children
         }
     
-    def _compare_strings(self, str1: str, str2: str) -> float:
+    def _compare_strings(self, str1: str, str2: str, method="cosine") -> float:
         """Compare two strings with optional semantic similarity and chunking for long text."""
         # Quick equality check
         
@@ -597,11 +608,16 @@ class SemanticJsonTreeConsistencyEvaluator:
         # Check cache first
         cached = self.cache.get(str1, str2)
         if cached is not None:
+            #print(f"str1: {str1}, str2: {str2}, sim: {cached}")
             return cached
         
         if len(str1) < self.chunk_size and len(str2) < self.chunk_size:
-            P, R, F1 = bert_score([str1], [str2], lang="en")
-            return float(F1.item())
+            if method == "bertscore":
+                P, R, F1 = bert_score([str1], [str2], lang="en")
+                sim = float(F1.item())
+            else:
+                sim = self._calculate_semantic_similarity(str1, str2)
+            return scores
         else:
             return self._compare_long_strings_hungarian(str1, str2)
     
@@ -755,6 +771,7 @@ class SemanticJsonTreeConsistencyEvaluator:
             node1.node_type == node2.node_type and 
             node1.value == node2.value and
             len(node1.children) == len(node2.children)):
+            print(f"update_cost: {node1.label}, {node2.label} cost: 0")
             return 0.0  # Identical nodes have zero update cost
         
         # Get similarity metrics from shared calculation
@@ -814,7 +831,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         avg_path_weight = (path_weight1 + path_weight2) / 2.0
         
         cost *= avg_path_weight
-        
+        print(f"update_cost: {node1.label}, {node2.label}  cost: {cost}")
         return cost
     
     def _compare_arrays_unordered(self, arr1: List[Any], arr2: List[Any]) -> float:
@@ -932,6 +949,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         for i, j in zip(row_indices, col_indices):
             total_cost += cost_matrix[i][j]
         
+        #print(f"{tree1.label}-{tree1.value}, {tree2.label}-{tree2.value}, total_cost: {total_cost}")
         return total_cost
     
     def calculate_tree_edit_distance(self, json1: Dict[str, Any], json2: Dict[str, Any]) -> float:
@@ -1041,6 +1059,9 @@ class SemanticJsonTreeConsistencyEvaluator:
             similarity_values = [self.calculate_similarity_method[method_name](gt, json_output) for json_output in json_outputs]
         else:
             all_pairs = self.collect_all_string_pairs(json_outputs)
+            
+            #print(f"all_pairs: {all_pairs}")
+            
             self.batch_compute_similarities(all_pairs)
             
             similarity_values = []
