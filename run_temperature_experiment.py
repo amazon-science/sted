@@ -29,7 +29,7 @@ from calculate_similarity_stats import (
     compare_with_multiple_generations
 )
 
-def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: int, include_schema: bool) -> str:
+def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: int, include_schema: bool, model_id: str, sample_limit: int=40) -> str:
     """
     Run LLM generation with specified parameters.
     
@@ -49,7 +49,8 @@ def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: 
         "--output-dir", output_dir,
         "--temperature", str(temperature),
         "--run-num", str(run_num),
-        "--sample-limit", str(40)
+        "--sample-limit", str(sample_limit),
+        "--model-id", model_id
     ]
     
     if include_schema:
@@ -71,7 +72,7 @@ def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: 
     
     return str(results_file)
 
-def calculate_similarity_metrics(generation_file: str, methods: List[str] = ["ted", "bertscore", "deepdiff"]) -> Dict[str, Any]:
+def calculate_similarity_metrics(generation_file: str, methods: List[str] = ["ted", "bertscore", "deepdiff"], output_dir: str=".", embedding_model="amazon.titan-embed-text-v2:0") -> Dict[str, Any]:
     """
     Calculate similarity metrics for generated outputs using our similarity statistics approach.
     
@@ -92,7 +93,8 @@ def calculate_similarity_metrics(generation_file: str, methods: List[str] = ["te
         ground_truth_list, 
         generated_responses_list,
         methods=methods,
-        model_id='amazon.titan-embed-text-v2:0'
+        model_id=embedding_model,
+        output_dir=output_dir
     )
     
     return results
@@ -424,7 +426,7 @@ def run_experiment(args):
     if args.temperatures:
         temperatures = args.temperatures
     else:
-        temperatures = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+        temperatures = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
     
     # Define similarity methods to use
     methods = ["ted", "bertscore", "deepdiff"]
@@ -435,11 +437,12 @@ def run_experiment(args):
     for temp in tqdm(temperatures, desc="Processing temperatures"):
         print(f"\n=== Processing Temperature {temp} ===")
         
-        # Check if we already have generation results for this temperature
+        # Check if we already have generation results for this temperature and this model
         temp_str = f"temp_{temp:.2f}".replace('.', '_')
-        existing_results = list(Path(generations_dir).glob(f"llm_gen_results_*{temp_str}*"))
+        existing_results = list(Path(generations_dir).glob(f"llm_gen_results_{args.model_id}_*{temp_str}*"))
         
         gen_results_file = None
+                
         if existing_results:
             result_dir = sorted(existing_results, key=lambda p: p.stat().st_mtime, reverse=True)[0]
             print(f"Found existing results for temperature {temp}. Using {result_dir}")
@@ -452,102 +455,52 @@ def run_experiment(args):
                 output_dir=generations_dir,
                 temperature=temp,
                 run_num=args.run_num,
-                include_schema=args.include_schema
+                include_schema=args.include_schema,
+                model_id=args.model_id
             )
-        
-        # Calculate similarity metrics
-        similarity_results = calculate_similarity_metrics(gen_results_file, methods)
-        
-        # Extract temperature-focused metrics
-        metrics = extract_temperature_metrics(similarity_results)
-        metrics['temperature'] = temp
-        results.append(metrics)
-        
-        print(f"Temperature {temp} completed. Key metrics:")
-        for method in methods:
-            std_of_means = metrics.get(f'{method}_std_of_means', 0)
-            mean_similarity = metrics.get(f'{method}_mean_similarity', 0)
-            print(f"  {method.upper()}: Mean={mean_similarity:.4f}, Std of Means={std_of_means:.4f}")
-    
-    # Analyze the relationship between temperature and standard deviation
-    analysis = analyze_temperature_std_correlation(results, methods)
-    
-    # Create visualizations
-    create_visualizations(results, visualizations_dir, analysis, methods)
-    
-    # Save results and analysis
-    results_file = os.path.join(args.output_dir, "temperature_std_correlation_results.json")
-    with open(results_file, 'w') as f:
-        json.dump({
-            'results': results,
-            'analysis': analysis,
-            'parameters': {
-                'temperatures': temperatures,
-                'methods': methods,
-                'run_num': args.run_num,
-                'include_schema': args.include_schema,
-                'data_dir': args.data_dir
-            }
-        }, f, indent=2)
-    
-    print(f"\nResults saved to {results_file}")
-    
-    # Print summary of findings
-    print("\n" + "="*80)
-    print("TEMPERATURE vs STANDARD DEVIATION CORRELATION ANALYSIS")
-    print("="*80)
-    
-    for method in methods:
-        if method in analysis:
-            method_analysis = analysis[method]
-            print(f"\n{method.upper()} Results:")
             
-            # Key correlation: Temperature vs Std of Means
-            if 'temp_vs_std_of_means' in method_analysis['correlations']:
-                corr = method_analysis['correlations']['temp_vs_std_of_means']
-                print(f"  Temperature vs Std of Means:")
-                print(f"    Pearson r = {corr['pearson']['r']:.4f} (p = {corr['pearson']['p']:.4f})")
-                print(f"    Spearman r = {corr['spearman']['r']:.4f} (p = {corr['spearman']['p']:.4f})")
-            
-            # Linear regression results
-            if 'linear_regression' in method_analysis and method_analysis['linear_regression']:
-                lr = method_analysis['linear_regression']
-                print(f"  Linear Regression:")
-                print(f"    {lr['equation']}")
-                print(f"    R² = {lr['r_squared']:.4f} (p = {lr['p_value']:.4f})")
-            
-            # Summary statistics
-            if 'summary_stats' in method_analysis:
-                stats_summary = method_analysis['summary_stats']
-                std_range = stats_summary['std_of_means_range']
-                print(f"  Std of Means Range: [{std_range[0]:.4f}, {std_range[1]:.4f}]")
-    
-    # Overall summary
-    print(f"\n{'SUMMARY:'}")
-    print(f"Analyzed {len(temperatures)} temperature points from {min(temperatures)} to {max(temperatures)}")
-    print(f"Used {len(methods)} similarity methods: {', '.join(methods)}")
-    print(f"Generated {args.run_num} samples per temperature")
-    
-    # Find the method with strongest correlation
-    strongest_correlations = {}
-    for method in methods:
-        if method in analysis and 'temp_vs_std_of_means' in analysis[method]['correlations']:
-            corr_data = analysis[method]['correlations']['temp_vs_std_of_means']
-            strongest_correlations[method] = abs(corr_data['pearson']['r'])
-    
-    if strongest_correlations:
-        best_method = max(strongest_correlations.keys(), key=lambda k: strongest_correlations[k])
-        best_corr = analysis[best_method]['correlations']['temp_vs_std_of_means']['pearson']['r']
-        print(f"\nStrongest correlation found with {best_method.upper()}: r = {best_corr:.4f}")
         
-        if abs(best_corr) > 0.7:
-            print("Strong correlation detected!")
-        elif abs(best_corr) > 0.5:
-            print("Moderate correlation detected.")
-        elif abs(best_corr) > 0.3:
-            print("Weak correlation detected.")
-        else:
-            print("Little to no correlation detected.")
+        if args.exe_evaluation:
+            # get the directory of gen_results_file
+            result_dir = os.path.dirname(gen_results_file)
+            
+            # Calculate similarity metrics
+            similarity_results = calculate_similarity_metrics(gen_results_file, methods, result_dir)
+            
+            # Extract temperature-focused metrics
+            metrics = extract_temperature_metrics(similarity_results)
+            metrics['temperature'] = temp
+            results.append(metrics)
+            
+            print(f"Temperature {temp} completed. Key metrics:")
+            for method in methods:
+                std_of_means = metrics.get(f'{method}_std_of_means', 0)
+                mean_similarity = metrics.get(f'{method}_mean_similarity', 0)
+                print(f"  {method.upper()}: Mean={mean_similarity:.4f}, Std of Means={std_of_means:.4f}")
+    
+    if args.exe_evaluation:
+        # Analyze the relationship between temperature and standard deviation
+        analysis = analyze_temperature_std_correlation(results, methods)
+        
+        # Create visualizations
+        create_visualizations(results, visualizations_dir, analysis, methods)
+        
+        # Save results and analysis
+        results_file = os.path.join(args.output_dir, "temperature_std_correlation_results.json")
+        with open(results_file, 'w') as f:
+            json.dump({
+                'results': results,
+                'analysis': analysis,
+                'parameters': {
+                    'temperatures': temperatures,
+                    'methods': methods,
+                    'run_num': args.run_num,
+                    'include_schema': args.include_schema,
+                    'data_dir': args.data_dir
+                }
+            }, f, indent=2)
+        
+        print(f"\nResults saved to {results_file}")
 
 def main():
     parser = argparse.ArgumentParser(description="Run temperature vs standard deviation correlation experiment.")
@@ -557,6 +510,9 @@ def main():
     parser.add_argument("--include-schema", action="store_true", help="Include JSON schema in the prompt.")
     parser.add_argument("--temperatures", type=float, nargs="+", help="List of temperatures to test. Default: 0.0 to 1.0 in 0.1 increments.")
     parser.add_argument("--force-regenerate", action="store_true", help="Force regeneration even if results already exist.")
+    parser.add_argument("--model-id", type=str, default="us.anthropic.claude-3-5-sonnet-20241022-v2:0", help="Model id")
+    parser.add_argument("--embedding-model-id", type=str, default="amazon.titan-embed-text-v2:0", help="Embedding model id")
+    parser.add_argument("--exe-evaluation", type=str, default=True, help="Execute evaluation")
     args = parser.parse_args()
     
     run_experiment(args)

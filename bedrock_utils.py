@@ -144,27 +144,26 @@ def inference_with_converse_api(bedrock_client,
     if system_prompts:
         params["system"] = [{"text": system_prompts}]
     
-    # Additional inference parameters to use.
-    if "nova" in model_id:
-        # Send the message.
-        response = bedrock_client.converse(**params)
-    else:
+    if max_tokens:
+        params["inferenceConfig"]["maxTokens"] = max_tokens
+    
+    if top_p:
+        params["inferenceConfig"]["topP"] = top_p
+    
+    if top_k is not None and 'claude' in model_id:
         params["additionalModelRequestFields"] = {
-            "max_tokens": max_tokens
+            "top_k": top_k
         }
-        if top_k is not None:
-            params["additionalModelRequestFields"]['top_k'] = top_k
-        elif top_p is not None and thinking_config is None:
-            params["additionalModelRequestFields"]["top_p"] = top_p
-            
-        if thinking_config:
-            params["additionalModelRequestFields"]['thinking'] = thinking_config
-            print(f"Temperature must be set to 1 and top_p must be unset")
-            params["inferenceConfig"]["temperature"] = 1
-            
+        
+    if thinking_config:
+        params["additionalModelRequestFields"]['thinking'] = thinking_config
+        print(f"Temperature must be set to 1 and top_p must be unset")
+        params["inferenceConfig"]["temperature"] = 1
+        
 
-        # Send the message.
-        response = bedrock_client.converse(**params)
+    # Send the message.
+    response = bedrock_client.converse(**params)
+    
     if return_content:
         return response['output']['message']['content']
     else:
