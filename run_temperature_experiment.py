@@ -456,7 +456,8 @@ def run_experiment(args):
                 temperature=temp,
                 run_num=args.run_num,
                 include_schema=args.include_schema,
-                model_id=args.model_id
+                model_id=args.model_id,
+                sample_limit=args.sample_limit
             )
             
         
@@ -512,7 +513,8 @@ def main():
     parser.add_argument("--force-regenerate", action="store_true", help="Force regeneration even if results already exist.")
     parser.add_argument("--model-id", type=str, default="us.anthropic.claude-3-5-sonnet-20241022-v2:0", help="Model id")
     parser.add_argument("--embedding-model-id", type=str, default="amazon.titan-embed-text-v2:0", help="Embedding model id")
-    parser.add_argument("--exe-evaluation", type=str, default=True, help="Execute evaluation")
+    parser.add_argument("--exe-evaluation", action="store_true", help="Execute evaluation")
+    parser.add_argument("--sample-limit", type=int, default=0, help="Limit the number of samples to process.")
     args = parser.parse_args()
     
     run_experiment(args)
