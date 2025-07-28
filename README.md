@@ -90,5 +90,5 @@ temperature_experiment/
 #### Example Background Execution
 ```bash
 # Run experiment in background with logging
-nohup uv run run_temperature_experiment.py --data-dir extracted_sharegpt_data --include-schema --model-id us.anthropic.claude-3-5-haiku-20241022-v1:0 > output.log 2> error.log &
+nohup uv run run_temperature_experiment.py --data-dir sharegpt_data --temperatures 0.0 0.3 0.6 0.9 --run-num 2 --model-id us.mistral.pixtral-large-2502-v1:0 --force-regenerate --sample-limit 2 > output.log 2> error.log &
 ```
