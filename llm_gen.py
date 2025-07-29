@@ -21,9 +21,48 @@ import numpy as np
 from typing import List, Dict, Any, Optional, Union, Callable, Set, Tuple
 import sys
 from tqdm import tqdm
+import re
 
 # Add the project root to the path to import modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+def extract_json_from_string(input_string):
+    """
+    Extract JSON data from a string with a prefix.
+    Handles both object {} and array [] formats without modification.
+    """
+    # Find the first { or [
+    match = re.search(r'[{[]', input_string)
+    if not match:
+        raise ValueError("No JSON data found in the string")
+    
+    start_pos = match.start()
+    start_char = match.group()
+    
+    # Determine the matching closing character
+    end_char = '}' if start_char == '{' else ']'
+    
+    # Find the matching closing bracket/brace
+    count = 0
+    end_pos = -1
+    
+    for i in range(start_pos, len(input_string)):
+        if input_string[i] == start_char:
+            count += 1
+        elif input_string[i] == end_char:
+            count -= 1
+            if count == 0:
+                end_pos = i
+                break
+    
+    if end_pos == -1:
+        raise ValueError("No matching closing bracket/brace found")
+    
+    # Extract the JSON string
+    json_string = input_string[start_pos:end_pos + 1]
+    
+    # Parse and return the JSON
+    return json.loads(json_string)
 
 def read_sharegpt(dataset_dir="data"):
     """
@@ -80,26 +119,14 @@ def _single_inference(client, model_id, messages, system_prompts=None, max_token
         
         print(f"Response received for task {task_id}: {len(response)} items")
         response_text = response[0].get('text', '{}')
+        print(f"original response: {response_text}")
+        
+        # remove space or new lines in ends of response_text
+        response_text = response_text.strip()
         
         # Parse the response with safer error handling
         try:
-            if response_text.startswith("```json"):
-                response_text = response_text[7:-3]  # Remove backticks and 'json'
-            if isinstance(response_text, str):
-                #parsed_response = ast.literal_eval(response_text)  # Convert string to dict if necessary
-                parsed_response = json.loads(response_text)
-            elif isinstance(response_text, bytes):
-                response_text = response_text.decode('utf-8')  # Decode bytes to string
-                #parsed_response = ast.literal_eval(response_text)  # Convert string to dict if necessary
-                parsed_response = json.loads(response_text)
-            elif isinstance(response_text, dict):
-                parsed_response = response_text
-            else:
-                print(f"Unexpected response type: {type(response_text)}")
-                return {}
-                
-            if task_id is not None:
-                print(f"Task {task_id} completed successfully")
+            parsed_response = extract_json_from_string(response_text)
             return parsed_response
         except (SyntaxError, ValueError) as parse_error:
             print(f"Error parsing response for task {task_id}: {parse_error}")
@@ -319,6 +346,7 @@ def run_inference(client, model_id, messages, system_prompts=None, max_tokens=80
     print(f"Completed {run_num} requests in {elapsed_time:.2f} seconds")
     print(f"Average time per request: {elapsed_time/run_num:.2f} seconds")
     
+    print(f"final responses: {responses}")
     return responses
 
 # Function to recursively convert objects to JSON-serializable types

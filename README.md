@@ -7,6 +7,8 @@ We use the dataset below:
 
 Run the command below to prepare dataset
 ```bash
+uv pip install -r requirements.txt
+
 uv run download_sharegpt_data.py --output-dir sharegpt_data
 ```
 
@@ -90,5 +92,5 @@ temperature_experiment/
 #### Example Background Execution
 ```bash
 # Run experiment in background with logging
-nohup uv run run_temperature_experiment.py --data-dir sharegpt_data --temperatures 0.0 0.3 0.6 0.9 --run-num 2 --model-id us.mistral.pixtral-large-2502-v1:0 --force-regenerate --sample-limit 2 > output.log 2> error.log &
+nohup uv run run_temperature_experiment.py --data-dir sharegpt_data --run-num 10 --force-regenerate --sample-limit 40 > output.log 2> error.log &
 ```
