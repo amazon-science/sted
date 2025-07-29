@@ -24,6 +24,8 @@ import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 
+from datetime import datetime
+
 from calculate_similarity_stats import (
     load_generation_results, 
     compare_with_multiple_generations
@@ -418,8 +420,12 @@ def run_experiment(args):
     """
     # Create output directories
     os.makedirs(args.output_dir, exist_ok=True)
-    generations_dir = os.path.join(args.output_dir, "generations")
-    visualizations_dir = os.path.join(args.output_dir, "visualizations")
+    
+    # get the string of current time 
+    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    generations_dir = os.path.join(args.output_dir, f"generations")
+    visualizations_dir = os.path.join(args.output_dir, f"visualizations-{current_time}")
     os.makedirs(generations_dir, exist_ok=True)
     
     # Define temperatures to test
@@ -439,7 +445,7 @@ def run_experiment(args):
         
         # Check if we already have generation results for this temperature and this model
         temp_str = f"temp_{temp:.2f}".replace('.', '_')
-        existing_results = list(Path(generations_dir).glob(f"llm_gen_results_{args.model_id}_*{temp_str}*"))
+        existing_results = list(Path(generations_dir).glob(f"llm_gen_results_*{temp_str}*"))
         
         gen_results_file = None
                 

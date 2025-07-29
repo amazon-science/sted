@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # Configure boto3 with retry settings
 boto_config = Config(
     retries={
-        'max_attempts': 10,
+        'max_attempts': 20,
         'mode': 'adaptive'
     },
     max_pool_connections=50  # Increase connection pool size
@@ -116,7 +116,7 @@ async def async_generate_message(
 
     return response_body
 
-@retry_with_count(max_attempts=10, delay=5)
+@retry_with_count(max_attempts=20, delay=10)
 def inference_with_converse_api(bedrock_client,
                           model_id,
                           messages,
