@@ -398,6 +398,7 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", type=str, default="./generations", help="Directory to save generation results.")
     parser.add_argument("--sample-limit", type=int, default=-1, help="Limit the number of samples to process.")
     parser.add_argument("--include-schema", action="store_true", help="Include JSON schema in the prompt to guide the output structure.")
+    parser.add_argument("--max-tokens", type=int, default=8000, help="Limit the number of max_tokens of LLM generation.")
     args = parser.parse_args()
     
     # Create a client with appropriate configuration
@@ -497,7 +498,7 @@ if __name__ == "__main__":
             model_id=model_id,
             messages=[message],
             system_prompts=system_prompt,
-            max_tokens=8000,
+            max_tokens=args.max_tokens,
             temperature=args.temperature,
             top_p=args.top_p,
             top_k=args.top_k,

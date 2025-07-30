@@ -31,7 +31,7 @@ from calculate_similarity_stats import (
     compare_with_multiple_generations
 )
 
-def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: int, include_schema: bool, model_id: str, sample_limit: int=40) -> str:
+def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: int, include_schema: bool, model_id: str, sample_limit: int=40, max_tokens: int=8000) -> str:
     """
     Run LLM generation with specified parameters.
     
@@ -52,7 +52,8 @@ def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: 
         "--temperature", str(temperature),
         "--run-num", str(run_num),
         "--sample-limit", str(sample_limit),
-        "--model-id", model_id
+        "--model-id", model_id,
+        "--max-tokens", str(max_tokens)
     ]
     
     if include_schema:
@@ -463,7 +464,8 @@ def run_experiment(args):
                 run_num=args.run_num,
                 include_schema=args.include_schema,
                 model_id=args.model_id,
-                sample_limit=args.sample_limit
+                sample_limit=args.sample_limit,
+                max_tokens=args.max_tokens
             )
             
         
@@ -521,6 +523,7 @@ def main():
     parser.add_argument("--embedding-model-id", type=str, default="amazon.titan-embed-text-v2:0", help="Embedding model id")
     parser.add_argument("--exe-evaluation", action="store_true", help="Execute evaluation")
     parser.add_argument("--sample-limit", type=int, default=0, help="Limit the number of samples to process.")
+    parser.add_argument("--max-tokens", type=int, default=8000, help="Limit the number of max_tokens of LLM generation.")
     args = parser.parse_args()
     
     run_experiment(args)
