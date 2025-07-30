@@ -497,7 +497,7 @@ if __name__ == "__main__":
             model_id=model_id,
             messages=[message],
             system_prompts=system_prompt,
-            max_tokens=8000,
+            max_tokens=4096,
             temperature=args.temperature,
             top_p=args.top_p,
             top_k=args.top_k,
