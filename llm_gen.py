@@ -22,42 +22,27 @@ from typing import List, Dict, Any, Optional, Union, Callable, Set, Tuple
 import sys
 from tqdm import tqdm
 import re
-import tiktoken
 
 # Add the project root to the path to import modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-def count_tokens(text, model_name="claude"):
+def estimate_tokens(text):
     """
-    Count tokens in text using tiktoken.
-    Uses cl100k_base encoding as a reasonable approximation for most models.
+    Estimate token count using character-based approximation.
+    Uses conservative 3:1 ratio (3 chars = 1 token) to avoid underestimation.
     """
-    try:
-        enc = tiktoken.get_encoding("cl100k_base")
-        return len(enc.encode(text))
-    except Exception as e:
-        # Fallback to character-based estimation (rough approximation: 4 chars = 1 token)
-        return len(text) // 4
+    return len(text) // 3
 
-def truncate_text_to_tokens(text, max_tokens, model_name="claude"):
+def truncate_text_by_chars(text, max_tokens):
     """
-    Truncate text to fit within max_tokens limit.
+    Truncate text to fit within estimated max_tokens limit.
+    Uses conservative character-based estimation.
     """
-    try:
-        enc = tiktoken.get_encoding("cl100k_base")
-        tokens = enc.encode(text)
-        if len(tokens) <= max_tokens:
-            return text
-        
-        # Truncate tokens and decode back to text
-        truncated_tokens = tokens[:max_tokens]
-        return enc.decode(truncated_tokens)
-    except Exception as e:
-        # Fallback to character-based truncation
-        estimated_chars = max_tokens * 4
-        if len(text) <= estimated_chars:
-            return text
-        return text[:estimated_chars] + "... [TRUNCATED]"
+    # Use conservative 3:1 ratio for truncation
+    max_chars = max_tokens * 3
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "... [TRUNCATED]"
 
 def extract_json_from_string(input_string):
     """
@@ -431,6 +416,7 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", type=str, default="./generations", help="Directory to save generation results.")
     parser.add_argument("--sample-limit", type=int, default=-1, help="Limit the number of samples to process.")
     parser.add_argument("--include-schema", action="store_true", help="Include JSON schema in the prompt to guide the output structure.")
+    parser.add_argument("--max-tokens", type=int, default=8000, help="Maximum tokens for LLM generation.")
     parser.add_argument("--max-context-tokens", type=int, default=32767, help="Maximum context tokens to use (default: 32767 for 32k models).")
     parser.add_argument("--skip-long-samples", action="store_true", help="Skip samples that exceed token limit instead of truncating.")
     args = parser.parse_args()
@@ -500,33 +486,33 @@ if __name__ == "__main__":
             print(f"gt_value: {gt_value}")
             gt_dict = {"error": "Invalid JSON", "raw_value": gt_value}
         
-        # Check token count before processing
-        total_tokens = count_tokens(system_prompt + user_prompt + gt_value)
-        print(f"Estimated total tokens: {total_tokens}")
+        # Check estimated token count before processing
+        total_estimated_tokens = estimate_tokens(system_prompt + user_prompt + gt_value)
+        print(f"Estimated total tokens: {total_estimated_tokens}")
         
         # Use command line argument for max context length
         MAX_CONTEXT_TOKENS = args.max_context_tokens
         
-        if total_tokens > MAX_CONTEXT_TOKENS:
-            print(f"WARNING: Sample {sample_id} exceeds token limit ({total_tokens} > {MAX_CONTEXT_TOKENS})")
+        if total_estimated_tokens > MAX_CONTEXT_TOKENS:
+            print(f"WARNING: Sample {sample_id} exceeds estimated token limit ({total_estimated_tokens} > {MAX_CONTEXT_TOKENS})")
             
             if args.skip_long_samples:
                 print(f"Skipping sample {sample_id} due to --skip-long-samples flag")
                 continue
             
             # Try to truncate the user prompt while keeping system prompt and ground truth
-            system_tokens = count_tokens(system_prompt)
-            gt_tokens = count_tokens(gt_value)
-            available_tokens = MAX_CONTEXT_TOKENS - system_tokens - gt_tokens - 1000  # Buffer for schema
+            system_estimated_tokens = estimate_tokens(system_prompt)
+            gt_estimated_tokens = estimate_tokens(gt_value)
+            available_tokens = MAX_CONTEXT_TOKENS - system_estimated_tokens - gt_estimated_tokens - 1000  # Buffer for schema
             
             if available_tokens < 1000:
                 print(f"ERROR: Sample {sample_id} cannot be processed - system prompt and ground truth too long")
-                print(f"System tokens: {system_tokens}, GT tokens: {gt_tokens}")
+                print(f"System estimated tokens: {system_estimated_tokens}, GT estimated tokens: {gt_estimated_tokens}")
                 continue
             
-            print(f"Truncating user prompt from {count_tokens(user_prompt)} to ~{available_tokens} tokens")
-            user_prompt = truncate_text_to_tokens(user_prompt, available_tokens)
-            print(f"After truncation: {count_tokens(user_prompt)} tokens")
+            print(f"Truncating user prompt from {estimate_tokens(user_prompt)} to ~{available_tokens} estimated tokens")
+            user_prompt = truncate_text_by_chars(user_prompt, available_tokens)
+            print(f"After truncation: {estimate_tokens(user_prompt)} estimated tokens")
         
         # Determine whether to use the original prompt or a modified one with schema
         if not args.include_schema:
@@ -543,19 +529,19 @@ if __name__ == "__main__":
             )
             
             # Check if the modified prompt with schema exceeds limits
-            modified_total_tokens = count_tokens(system_prompt + modified_user_prompt)
-            if modified_total_tokens > MAX_CONTEXT_TOKENS:
-                print(f"WARNING: Modified prompt with schema exceeds limit ({modified_total_tokens} tokens)")
+            modified_total_estimated_tokens = estimate_tokens(system_prompt + modified_user_prompt)
+            if modified_total_estimated_tokens > MAX_CONTEXT_TOKENS:
+                print(f"WARNING: Modified prompt with schema exceeds estimated limit ({modified_total_estimated_tokens} tokens)")
                 # Try to truncate the user part of the modified prompt
                 schema_part = modified_user_prompt[len(user_prompt):]
-                schema_tokens = count_tokens(schema_part)
-                available_for_user = MAX_CONTEXT_TOKENS - count_tokens(system_prompt) - schema_tokens - 1000
+                schema_estimated_tokens = estimate_tokens(schema_part)
+                available_for_user = MAX_CONTEXT_TOKENS - estimate_tokens(system_prompt) - schema_estimated_tokens - 1000
                 
                 if available_for_user < 500:
                     print(f"ERROR: Cannot fit schema - falling back to original prompt")
                     modified_user_prompt = user_prompt
                 else:
-                    truncated_user = truncate_text_to_tokens(user_prompt, available_for_user)
+                    truncated_user = truncate_text_by_chars(user_prompt, available_for_user)
                     modified_user_prompt = create_prompt_with_schema(
                         user_prompt=truncated_user,
                         ground_truth_dict=gt_dict
@@ -574,12 +560,12 @@ if __name__ == "__main__":
                 f.write(modified_user_prompt)
             print(f"Saved modified prompt to {prompt_output_path}")
         
-        # Final token count check
-        final_tokens = count_tokens(system_prompt + modified_user_prompt)
-        print(f"Final estimated tokens: {final_tokens}")
+        # Final estimated token count check
+        final_estimated_tokens = estimate_tokens(system_prompt + modified_user_prompt)
+        print(f"Final estimated tokens: {final_estimated_tokens}")
         
-        if final_tokens > MAX_CONTEXT_TOKENS:
-            print(f"ERROR: Sample {sample_id} still exceeds token limit after truncation. Skipping.")
+        if final_estimated_tokens > MAX_CONTEXT_TOKENS:
+            print(f"ERROR: Sample {sample_id} still exceeds estimated token limit after truncation. Skipping.")
             continue
         
         responses = run_inference(
