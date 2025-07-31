@@ -149,13 +149,41 @@ def extract_temperature_metrics(similarity_results: Dict[str, Any]) -> Dict[str,
     
     return metrics
 
-def analyze_temperature_std_correlation(results: List[Dict[str, Any]], methods: List[str] = ["ted", "bertscore", "deepdiff"]) -> Dict[str, Any]:
+def detect_outliers(data, method='iqr', threshold=1.5):
+    """
+    Detect outliers in data using IQR or Z-score method.
+    
+    Args:
+        data: Array of data points
+        method: 'iqr' or 'zscore'
+        threshold: Threshold for outlier detection
+        
+    Returns:
+        Boolean array indicating outliers
+    """
+    data = np.array(data)
+    
+    if method == 'iqr':
+        Q1 = np.percentile(data, 25)
+        Q3 = np.percentile(data, 75)
+        IQR = Q3 - Q1
+        lower_bound = Q1 - threshold * IQR
+        upper_bound = Q3 + threshold * IQR
+        return (data < lower_bound) | (data > upper_bound)
+    elif method == 'zscore':
+        z_scores = np.abs(stats.zscore(data))
+        return z_scores > threshold
+    else:
+        return np.zeros(len(data), dtype=bool)
+
+def analyze_temperature_std_correlation(results: List[Dict[str, Any]], methods: List[str] = ["ted", "bertscore", "deepdiff"], remove_outliers: bool = True) -> Dict[str, Any]:
     """
     Analyze the correlation between temperature and standard deviation of mean similarity.
     
     Args:
         results: List of dictionaries with temperature and metrics
         methods: List of similarity methods used
+        remove_outliers: Whether to remove outliers before correlation analysis
         
     Returns:
         Dictionary with detailed correlation analysis results
@@ -180,22 +208,76 @@ def analyze_temperature_std_correlation(results: List[Dict[str, Any]], methods: 
         std_normalized_cv = [r.get(f'{method}_std_normalized_cv', 0.0) for r in results]
         std_normalized_relative = [r.get(f'{method}_std_normalized_relative', 0.0) for r in results]
         
-        # Calculate correlations for different variability metrics
+        # Outlier detection and removal if requested
+        if remove_outliers:
+            # Detect outliers in key metrics
+            cc_outliers = detect_outliers(consistency_coefficients, method='iqr', threshold=1.5)
+            std_means_outliers = detect_outliers(std_of_means, method='iqr', threshold=1.5)
+            
+            # Combine outlier masks (outlier if flagged by any key metric)
+            combined_outliers = cc_outliers | std_means_outliers
+            outlier_count = np.sum(combined_outliers)
+            
+            if outlier_count > 0:
+                print(f"\n⚠️  {method.upper()}: Detected {outlier_count} outliers, removing from correlation analysis")
+                
+                # Create clean datasets without outliers
+                clean_mask = ~combined_outliers
+                temperatures_clean = [t for i, t in enumerate(temperatures) if clean_mask[i]]
+                std_pairwise_similarities_clean = [s for i, s in enumerate(std_pairwise_similarities) if clean_mask[i]]
+                std_of_means_clean = [s for i, s in enumerate(std_of_means) if clean_mask[i]]
+                mean_of_stds_clean = [s for i, s in enumerate(mean_of_stds) if clean_mask[i]]
+                cv_values_clean = [s for i, s in enumerate(cv_values) if clean_mask[i]]
+                stability_scores_clean = [s for i, s in enumerate(stability_scores) if clean_mask[i]]
+                mean_pairwise_similarities_clean = [s for i, s in enumerate(mean_pairwise_similarities) if clean_mask[i]]
+                consistency_coefficients_clean = [s for i, s in enumerate(consistency_coefficients) if clean_mask[i]]
+                stability_scores_new_clean = [s for i, s in enumerate(stability_scores_new) if clean_mask[i]]
+                std_normalized_cv_clean = [s for i, s in enumerate(std_normalized_cv) if clean_mask[i]]
+                std_normalized_relative_clean = [s for i, s in enumerate(std_normalized_relative) if clean_mask[i]]
+            else:
+                # No outliers detected, use original data
+                temperatures_clean = temperatures
+                std_pairwise_similarities_clean = std_pairwise_similarities
+                std_of_means_clean = std_of_means
+                mean_of_stds_clean = mean_of_stds
+                cv_values_clean = cv_values
+                stability_scores_clean = stability_scores
+                mean_pairwise_similarities_clean = mean_pairwise_similarities
+                consistency_coefficients_clean = consistency_coefficients
+                stability_scores_new_clean = stability_scores_new
+                std_normalized_cv_clean = std_normalized_cv
+                std_normalized_relative_clean = std_normalized_relative
+        else:
+            # Use original data without outlier removal
+            temperatures_clean = temperatures
+            std_pairwise_similarities_clean = std_pairwise_similarities
+            std_of_means_clean = std_of_means
+            mean_of_stds_clean = mean_of_stds
+            cv_values_clean = cv_values
+            stability_scores_clean = stability_scores
+            mean_pairwise_similarities_clean = mean_pairwise_similarities
+            consistency_coefficients_clean = consistency_coefficients
+            stability_scores_new_clean = stability_scores_new
+            std_normalized_cv_clean = std_normalized_cv
+            std_normalized_relative_clean = std_normalized_relative
+            outlier_count = 0
+        
+        # Calculate correlations for different variability metrics using clean data
         correlations = {}
         
         # Temperature vs Standard deviation of pairwise similarities
-        if len(std_pairwise_similarities) > 1:
-            pearson_std = stats.pearsonr(temperatures, std_pairwise_similarities)
-            spearman_std = stats.spearmanr(temperatures, std_pairwise_similarities)
+        if len(std_pairwise_similarities_clean) > 1:
+            pearson_std = stats.pearsonr(temperatures_clean, std_pairwise_similarities_clean)
+            spearman_std = stats.spearmanr(temperatures_clean, std_pairwise_similarities_clean)
             correlations['temp_vs_std_pairwise_similarity'] = {
                 'pearson': {'r': pearson_std[0], 'p': pearson_std[1]},
                 'spearman': {'r': spearman_std[0], 'p': spearman_std[1]}
             }
         
         # Temperature vs Standard deviation of means (key metric)
-        if len(std_of_means) > 1:
-            pearson_std_means = stats.pearsonr(temperatures, std_of_means)
-            spearman_std_means = stats.spearmanr(temperatures, std_of_means)
+        if len(std_of_means_clean) > 1:
+            pearson_std_means = stats.pearsonr(temperatures_clean, std_of_means_clean)
+            spearman_std_means = stats.spearmanr(temperatures_clean, std_of_means_clean)
             correlations['temp_vs_std_of_means'] = {
                 'pearson': {'r': pearson_std_means[0], 'p': pearson_std_means[1]},
                 'spearman': {'r': spearman_std_means[0], 'p': spearman_std_means[1]}
@@ -1112,6 +1194,9 @@ def main():
     parser.add_argument("--embedding-model-id", type=str, default="amazon.titan-embed-text-v2:0", help="Embedding model id")
     parser.add_argument("--exe-evaluation", action="store_true", help="Execute evaluation")
     parser.add_argument("--sample-limit", type=int, default=0, help="Limit the number of samples to process.")
+    parser.add_argument("--remove-outliers", action="store_true", help="Remove outliers before correlation analysis")
+    parser.add_argument("--outlier-method", type=str, default="iqr", choices=["iqr", "zscore"], help="Method for outlier detection")
+    parser.add_argument("--outlier-threshold", type=float, default=1.5, help="Threshold for outlier detection")
     args = parser.parse_args()
     
     run_experiment(args)
