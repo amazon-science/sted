@@ -16,6 +16,7 @@ from tqdm import tqdm
 import argparse
 from pathlib import Path
 import time
+import os
 
 from semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
 #from semantic_json_tree_consistency_v2 import CachedSemanticEvaluator
@@ -167,7 +168,7 @@ def compare_with_multiple_generations(
         Dictionary with detailed statistics for each method
     """
     
-    evaluator = SemanticJsonTreeConsistencyEvaluator(model_id=model_id)
+    evaluator = SemanticJsonTreeConsistencyEvaluator(model_id=model_id, path_weight_decay=1.0)
     results = {}
     
     for method in methods:
@@ -180,7 +181,13 @@ def compare_with_multiple_generations(
         for i, (gt, responses) in enumerate(tqdm(zip(ground_truth_list, generated_responses_list),
                                                 total=len(ground_truth_list),
                                                 desc=f"Processing {method}")):
-            sample_similarities = []            
+            sample_similarities = []
+            
+            # skip if all elements of responses are empty
+            if not any(responses):
+                print(f"Skipping sample {i} because all responses are empty")
+                continue
+                      
             all_pairs = evaluator.collect_all_string_pairs(responses, gt)
             
             evaluator.batch_compute_similarities(all_pairs)
@@ -188,26 +195,50 @@ def compare_with_multiple_generations(
             start = time.time()
             for response in responses:
                 if method == "ted":
-                    similarity = evaluator.calculate_tree_edit_distance(gt, response)
+                    # Tree Edit Distance (use raw distance for consistency evaluation)
+                    distance = evaluator.calculate_tree_edit_distance(gt, response)
+                    sample_similarities.append(distance)
                 elif method == "bertscore":
                     similarity = evaluator.calculate_bertscore(gt, response)
+                    sample_similarities.append(similarity)
                 elif method == "deepdiff":
                     similarity = evaluator.calculate_similarity_with_deepdiff(gt, response)
+                    sample_similarities.append(similarity)
                 else:
                     raise ValueError(f"Unknown method: {method}")
-                
-                sample_similarities.append(similarity)
             
             print(f"{method} - sample_similarities: {sample_similarities}")
             print(f"Processing sample {len(response)} response with {method} took average {(time.time() - start)/len(response)} seconds")
             #sample_similarities = evaluator.evaluate_structural_consistency(responses, gt, method)
             if sample_similarities:
+                sample_mean = np.mean(sample_similarities)
+                sample_std = np.std(sample_similarities)
+                sample_min = np.min(sample_similarities)
+                sample_max = np.max(sample_similarities)
+                sample_range = sample_max - sample_min
+                
+                # Calculate normalized standard deviations for this sample
+                # Coefficient of Variation (CV) - normalized by mean
+                if sample_mean > 1e-10:
+                    sample_cv = sample_std / sample_mean
+                else:
+                    sample_cv = 0.0
+                
+                # Range-normalized std - normalized by the sample's range
+                if sample_range > 1e-10:
+                    sample_std_normalized = sample_std / sample_range
+                else:
+                    sample_std_normalized = 0.0
+                
                 sample_stats.append({
                     'sample_id': i,
-                    'mean': np.mean(sample_similarities),
-                    'std': np.std(sample_similarities),
-                    'min': np.min(sample_similarities),
-                    'max': np.max(sample_similarities),
+                    'mean': sample_mean,
+                    'std': sample_std,
+                    'std_cv': sample_cv,  # Coefficient of variation for this sample
+                    'std_normalized': sample_std_normalized,  # Range-normalized std for this sample
+                    'min': sample_min,
+                    'max': sample_max,
+                    'range': sample_range,
                     'count': len(sample_similarities)
                 })
                 all_similarities.extend(sample_similarities)
@@ -223,13 +254,44 @@ def compare_with_multiple_generations(
         sample_means = [s['mean'] for s in sample_stats]
         sample_stds = [s['std'] for s in sample_stats]
         
+        # Extract per-sample normalized metrics
+        sample_cvs = [s['std_cv'] for s in sample_stats]
+        sample_stds_normalized = [s['std_normalized'] for s in sample_stats]
+        
+        # Calculate additional consistency metrics
+        mean_pairwise_similarity = float(np.mean(all_similarities))  # Average similarity between output pairs
+        std_pairwise_similarity = float(np.mean(sample_stds))  # Average std of pairwise similarities per sample
+        
+        # Consistency Coefficient: combines pairwise similarity and variance penalty
+        if mean_pairwise_similarity > 1e-10:
+            consistency_coefficient = mean_pairwise_similarity * (1 - min(std_pairwise_similarity, mean_pairwise_similarity) / mean_pairwise_similarity)
+        else:
+            consistency_coefficient = 0.0
+        
+        # Stability Score: inverse of pairwise similarity std
+        stability_score = 1.0 / (1.0 + std_pairwise_similarity)
+        
+        # Range and quartile metrics (essential for distribution analysis)
+        q1 = float(np.percentile(all_similarities, 25))
+        q3 = float(np.percentile(all_similarities, 75))
+        iqr = q3 - q1
+        similarity_range = float(np.max(all_similarities) - np.min(all_similarities))
+        
         results[method] = {
             'overall_stats': {
-                'mean': float(np.mean(all_similarities)),
-                'std': float(np.std(all_similarities)),
+                'mean': mean_pairwise_similarity,  # Average pairwise similarity between outputs
+                'std': std_pairwise_similarity,  # Average std of pairwise similarities per sample
+                'std_normalized_cv': float(np.mean(sample_cvs)),  # Mean of coefficient of variation
+                'std_normalized_relative': float(np.mean(sample_stds_normalized)),  # Mean of range-normalized std
+                'consistency_coefficient': consistency_coefficient,  # Key composite metric
+                'stability_score': stability_score,  # Inverse of std
                 'min': float(np.min(all_similarities)),
                 'max': float(np.max(all_similarities)),
                 'median': float(np.median(all_similarities)),
+                'q1': q1,
+                'q3': q3,
+                'iqr': iqr,
+                'range': similarity_range,
                 'count': len(all_similarities)
             },
             'sample_level_stats': {
