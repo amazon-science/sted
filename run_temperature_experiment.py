@@ -31,7 +31,7 @@ from calculate_similarity_stats import (
     compare_with_multiple_generations
 )
 
-def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: int, include_schema: bool, model_id: str, sample_limit: int=40) -> str:
+def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: int, include_schema: bool, model_id: str, sample_limit: int=40, max_context_tokens: int=32767, skip_long_samples: bool=False) -> str:
     """
     Run LLM generation with specified parameters.
     
@@ -52,11 +52,15 @@ def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: 
         "--temperature", str(temperature),
         "--run-num", str(run_num),
         "--sample-limit", str(sample_limit),
-        "--model-id", model_id
+        "--model-id", model_id,
+        "--max-context-tokens", str(max_context_tokens)
     ]
     
     if include_schema:
         cmd.append("--include-schema")
+    
+    if skip_long_samples:
+        cmd.append("--skip-long-samples")
     
     print(f"Running generation with temperature {temperature}...")
     subprocess.run(cmd, check=True)
@@ -463,7 +467,9 @@ def run_experiment(args):
                 run_num=args.run_num,
                 include_schema=args.include_schema,
                 model_id=args.model_id,
-                sample_limit=args.sample_limit
+                sample_limit=args.sample_limit,
+                max_context_tokens=getattr(args, 'max_context_tokens', 32767),
+                skip_long_samples=getattr(args, 'skip_long_samples', False)
             )
             
         
@@ -521,6 +527,8 @@ def main():
     parser.add_argument("--embedding-model-id", type=str, default="amazon.titan-embed-text-v2:0", help="Embedding model id")
     parser.add_argument("--exe-evaluation", action="store_true", help="Execute evaluation")
     parser.add_argument("--sample-limit", type=int, default=0, help="Limit the number of samples to process.")
+    parser.add_argument("--max-context-tokens", type=int, default=32767, help="Maximum context tokens to use (default: 32767 for 32k models).")
+    parser.add_argument("--skip-long-samples", action="store_true", help="Skip samples that exceed token limit instead of truncating.")
     args = parser.parse_args()
     
     run_experiment(args)

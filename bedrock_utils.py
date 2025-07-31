@@ -116,7 +116,7 @@ async def async_generate_message(
 
     return response_body
 
-@retry_with_count(max_attempts=20, delay=10)
+@retry_with_count(max_attempts=100, delay=10)
 def inference_with_converse_api(bedrock_client,
                           model_id,
                           messages,
