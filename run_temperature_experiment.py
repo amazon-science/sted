@@ -433,7 +433,8 @@ def run_experiment(args):
     if args.temperatures:
         temperatures = args.temperatures
     else:
-        temperatures = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        # temperatures = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        temperatures = np.arange(0.0, 1.0, 0.05)
     
     # Define similarity methods to use
     methods = ["ted", "bertscore", "deepdiff"]
