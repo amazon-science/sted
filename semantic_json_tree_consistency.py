@@ -36,6 +36,7 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import concurrent.futures
 
 import itertools
+import math
 
 from transformers import logging
 logging.set_verbosity_error()
@@ -44,6 +45,11 @@ def getEmbeddings(text, model_id, bedrock_client, max_retries=10, initial_delay=
     """
     Get embeddings from Bedrock with proper retry and connection handling
     """
+    # Validate input text
+    if not text or not text.strip():
+        warnings.warn(f"Empty or whitespace-only text provided for embedding: '{text}'")
+        return np.zeros(output_embedding_length)
+    
     def exponential_delay(attempt):
         # Add jitter to prevent thundering herd
         jitter = 0.1 * initial_delay * np.random.random()
@@ -131,7 +137,6 @@ class JsonNode:
             value: The value of the node (for leaf nodes)
             node_type: The type of the node ('object', 'array', or value type)
         """
-        print(f"JsonNode-> label: {label}, value: {value}")
         self.label = label
         self.value = value
         self.children = []
@@ -243,6 +248,12 @@ class SemanticJsonTreeConsistencyEvaluator:
             "deepdiff": self.calculate_similarity_with_deepdiff
         }
         
+        self.weights = {
+            'type': 0.1,
+            'value': 0.8,
+            'key': 0.1
+        }
+        
         self.original_zss = original_zss
         self.batch_size_bertscore = 2000
         
@@ -321,7 +332,6 @@ class SemanticJsonTreeConsistencyEvaluator:
                 scores = [float(f.item()) for f in F1]
             else:
                 scores = [self._calculate_semantic_similarity(s1, s2) for s1, s2 in zip(list(cands), list(refs))]
-                print(f"scores: {scores}")
                 
             
             self.cache.batch_set(batch, scores)
@@ -398,6 +408,8 @@ class SemanticJsonTreeConsistencyEvaluator:
     
     def _calculate_semantic_similarity(self, text1: str, text2: str) -> float:
         """Calculate semantic similarity between two texts using embeddings."""
+        if text1 == text2:
+            return 1.0
         
         emb1 = self._get_embedding(text1)
         emb2 = self._get_embedding(text2)
@@ -420,17 +432,6 @@ class SemanticJsonTreeConsistencyEvaluator:
         similarity = dot_product / (norm1 * norm2)
         
         return float(np.clip(similarity, -1.0, 1.0))
-    
-    def _calculate_key_similarity(self, key1: str, key2: str) -> float:
-        """Calculate similarity between two keys using both exact and semantic matching."""
-        # Exact match
-        if key1 == key2:
-            return 1.0
-                
-        # Calculate semantic similarity
-        semantic_sim = self._calculate_semantic_similarity(key1, key2)
-        
-        return semantic_sim
     
     def json_to_tree(self, json_obj: Any, path: str = "", parent_path: str = "") -> JsonNode:
         """
@@ -540,7 +541,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         normalized = re.sub(r'\[\d+\]', '[*]', path)
         return normalized
     
-    def _calculate_node_similarity(self, node1: JsonNode, node2: JsonNode, key_sim_threshold: float = 0.5) -> Dict[str, Any]:
+    def _calculate_node_similarity(self, node1: JsonNode, node2: JsonNode, key_sim_threshold: float = 0.8) -> Dict[str, Any]:
         """
         Calculate similarity metrics between two nodes.
         This shared method is used by both are_nodes_equal and update_cost.
@@ -569,10 +570,9 @@ class SemanticJsonTreeConsistencyEvaluator:
         path_match = path1 == path2
         
         # Calculate key similarity
-        key_sim = self._calculate_key_similarity(key1, key2)
-        print(f"{key1}, {key2}: {key_sim}")
+        key_sim = self._calculate_semantic_similarity(key1, key2)
         
-        value_sim = 0.0
+        value_cost = 1.0
                 
         #string_pairs = []
         if key_sim > key_sim_threshold:
@@ -580,19 +580,20 @@ class SemanticJsonTreeConsistencyEvaluator:
             if not node1.children and not node2.children and type_match:
                 if node1.node_type == "string":
                     #string_pairs.append((str(node1.value), str(node2.value)))
-                    value_sim = self._compare_strings(str(node1.value), str(node2.value))
+                    value_cost = 1 - self._compare_strings(str(node1.value), str(node2.value))
                 elif node1.node_type == "number":
-                    value_sim = self._compare_numbers(float(node1.value), float(node2.value))
+                    value_cost = 1 - self._compare_numbers(float(node1.value), float(node2.value))
                 elif node1.node_type == "array":
-                    value_sim = self._compare_arrays_unordered(list(node1.value), list(node2.value))
+                    value_cost = self._compare_arrays_unordered(list(node1.value), list(node2.value), node1.label, node2.label)
                 elif node1.value == node2.value:  # For boolean, null, etc.
-                    value_sim = 1.0
-                
+                    value_cost = 0.0
+        
+        #print(f"node1.node_type: {node1.node_type}, value_sim: {value_sim}") 
         return {
             "type_match": type_match,
             "path_match": path_match,
             "key_sim": key_sim,
-            "value_sim": value_sim,
+            "value_cost": value_cost,
             "key1": key1,
             "key2": key2,
             "is_leaf": not node1.children and not node2.children
@@ -617,9 +618,34 @@ class SemanticJsonTreeConsistencyEvaluator:
                 sim = float(F1.item())
             else:
                 sim = self._calculate_semantic_similarity(str1, str2)
-            return scores
+                # Apply domain penalty for unrelated content
+                sim = self._apply_domain_penalty(str1, str2, sim)
+            return sim
         else:
             return self._compare_long_strings_hungarian(str1, str2)
+    
+    def _apply_domain_penalty(self, str1: str, str2: str, similarity: float) -> float:
+        """
+        Apply domain-specific penalty for unrelated content.
+        
+        Args:
+            str1: First string
+            str2: Second string  
+            similarity: Base similarity score
+            
+        Returns:
+            Adjusted similarity score
+        """
+        # Simple implementation - can be enhanced with domain-specific logic
+        if not str1.strip() or not str2.strip():
+            return 0.0
+        
+        # Apply penalty for very different string lengths
+        len_ratio = min(len(str1), len(str2)) / max(len(str1), len(str2))
+        if len_ratio < 0.3:  # Very different lengths
+            similarity *= 0.8
+            
+        return similarity
     
     def _compare_long_strings_hungarian(self, str1: str, str2: str) -> float:
         """Compare long strings by breaking them into chunks and using Hungarian algorithm for optimal matching."""
@@ -771,12 +797,12 @@ class SemanticJsonTreeConsistencyEvaluator:
             node1.node_type == node2.node_type and 
             node1.value == node2.value and
             len(node1.children) == len(node2.children)):
-            print(f"update_cost: {node1.label}, {node2.label} cost: 0")
+            #print(f"update_cost: {node1.label}->{node1.value}, {node2.label}->{node2.value} cost: 0")
             return 0.0  # Identical nodes have zero update cost
         
         # Get similarity metrics from shared calculation
         sim = self._calculate_node_similarity(node1, node2)
-        
+        #print(f"update_cost-> sim: {sim}")
         # Base cost for type change
         type_cost = self.type_change_cost.get(
             (node1.node_type, node2.node_type), 
@@ -786,42 +812,26 @@ class SemanticJsonTreeConsistencyEvaluator:
         # Calculate value cost
         if sim["type_match"] and sim["is_leaf"]:
             # For leaf nodes with same type, use the value similarity
-            value_cost = 1.0 - sim["value_sim"]
+            value_cost = sim['value_cost']
         else:
             value_cost = 1.0  # No value cost if types are different or not leaf nodes
         
         
         # Calculate key difference factor
-        key_factor = 1 - sim["key_sim"]
-        """
-        # Combine costs - ensure proper handling of identical nodes
-        if sim["type_match"] and sim["is_leaf"] and sim["value_sim"] == 1.0 and sim["key_sim"] == 1.0:
-            # Identical leaf nodes
-            cost = 0.0
-        elif sim["type_match"] and sim["is_leaf"] and sim["value_sim"] == 1.0:
-            # Same type, same value, but different keys
-            cost = key_factor * 0.3
-        else:
-            # Normal case: combine type and value costs, scaled by key similarity
-            base_cost = type_cost + value_cost * 0.5
-            cost = base_cost * (1 + key_factor * 0.5)
-        """
-        
-        weights = {
-            'type': 0.4,
-            'value': 0.4,
-            'key': 0.2
-        }
+        key_cost = 1 - sim["key_sim"]
         
         # 特殊情况处理
-        if sim["type_match"] and sim["is_leaf"] and sim["value_sim"] == 1.0 and sim["key_sim"] == 1.0:
+        if sim["type_match"] and sim["is_leaf"] and sim["value_cost"] == 0 and sim["key_sim"] == 1.0:
+            #print(f"update_cost: {node1.label}->{node1.value}, {node2.label}->{node2.value} cost: 0")
             return 0.0  # 完全相同
+        
+        #print(f"type_cost: {type_cost}, value_cost: {value_cost}, key_cost: {key_cost}")
         
         # 加权平均
         cost = (
-            weights['type'] * type_cost +
-            weights['value'] * value_cost +
-            weights['key'] * key_factor
+            self.weights['type'] * type_cost +
+            self.weights['value'] * value_cost +
+            self.weights['key'] * key_cost
         )
         
         # Apply path-based weighting - consider both paths
@@ -831,63 +841,91 @@ class SemanticJsonTreeConsistencyEvaluator:
         avg_path_weight = (path_weight1 + path_weight2) / 2.0
         
         cost *= avg_path_weight
-        print(f"update_cost: {node1.label}, {node2.label}  cost: {cost}")
+        #print(f"update_cost: {node1.label}->{node1.value}, {node2.label}->{node2.value}  cost: {cost}")
         return cost
     
-    def _compare_arrays_unordered(self, arr1: List[Any], arr2: List[Any]) -> float:
+    def _compare_arrays_unordered(self, arr1: List[Any], arr2: List[Any], arr1_label: str, arr2_label: str) -> float:
         """Compare arrays without considering order using optimal matching."""
         if len(arr1) == 0 and len(arr2) == 0:
-            return 1.0  # Both empty arrays are identical
+            return 0  # Both empty arrays are identical
         if len(arr1) == 0 or len(arr2) == 0:
-            return 0.0  # One empty, one not
+            return 1  # One empty, one not
         
         # Create similarity matrix
-        sim_matrix = np.zeros((len(arr1), len(arr2)))
+        cost_matrix = np.ones((len(arr1), len(arr2)))
+        
+        #print(f"arr1: {arr1}")
+        #print(f"arr2: {arr2}")
         
         for i, item1 in enumerate(arr1):
             for j, item2 in enumerate(arr2):
                 # Handle different types appropriately
+                #print(f"_compare_arrays_unordered-> {item1}, {item2}")
                 if type(item1) != type(item2):
-                    sim_matrix[i, j] = 0.0
+                    cost_matrix[i, j] = 1.0
                 elif isinstance(item1, str):
-                    sim_matrix[i, j] = self._compare_strings(str(item1), str(item2))
+                    cost_matrix[i, j] = 1-self._compare_strings(str(item1), str(item2))
                 elif isinstance(item1, (int, float)):
-                    sim_matrix[i, j] = self._compare_numbers(float(item1), float(item2))
+                    cost_matrix[i, j] = 1-self._compare_numbers(float(item1), float(item2))
                 elif isinstance(item1, dict):
                     # Recursive comparison for nested objects
-                    tree1 = self.json_to_tree(item1, f"[{i}]")
-                    tree2 = self.json_to_tree(item2, f"[{j}]")
-                    sim_matrix[i, j] = 1.0 - (self._calculate_optimal_matching_cost(tree1, tree2) / max(self._count_nodes(tree1), self._count_nodes(tree2)))
+                    tree1 = self.json_to_tree(item1, f"{arr1_label}")
+                    tree2 = self.json_to_tree(item2, f"{arr2_label}")
+                    #sim_matrix[i, j] = 1.0 - (self._calculate_optimal_matching_cost(tree1, tree2) / max(self._count_nodes(tree1), self._count_nodes(tree2)))
+                    cost_matrix[i, j] = self._calculate_optimal_matching_cost(tree1, tree2)
                 elif isinstance(item1, list):
                     # Recursive array comparison
-                    sim_matrix[i, j] = self._compare_arrays_unordered(item1, item2)
-                elif item1 == item2:
-                    sim_matrix[i, j] = 1.0
+                    cost_matrix[i, j] = self._compare_arrays_unordered(item1, item2, arr1_label, arr2_label)
+                elif item1 and item1 == item2:
+                    cost_matrix[i, j] = 0.0
                 else:
-                    sim_matrix[i, j] = 0.0
+                    cost_matrix[i, j] = 1.0
+                #print(f"_compare_arrays_unordered-> {cost_matrix[i, j]}\n------")
         
+        #print(f"cost_matrix: {cost_matrix}")
         # Use Hungarian algorithm for optimal matching
-        if sim_matrix.shape[0] != sim_matrix.shape[1]:
+        if cost_matrix.shape[0] != cost_matrix.shape[1]:
             # Pad matrix for Hungarian algorithm
             max_len = max(len(arr1), len(arr2))
-            padded_matrix = np.zeros((max_len, max_len))
-            padded_matrix[:len(arr1), :len(arr2)] = sim_matrix
+            padded_matrix = np.ones((max_len, max_len))
+            padded_matrix[:len(arr1), :len(arr2)] = cost_matrix
             sim_matrix = padded_matrix
         
-        row_indices, col_indices = linear_sum_assignment(-sim_matrix)
+        row_indices, col_indices = linear_sum_assignment(cost_matrix)
         
-        # Calculate normalized similarity
-        matched_similarities = [sim_matrix[i, j] for i, j in zip(row_indices, col_indices) 
-                            if i < len(arr1) and j < len(arr2)]
+        # Calculate total cost including unmatched elements
+        total_cost = 0
+        matched_elements = 0
         
-        if not matched_similarities:
-            return 0.0
+        len1, len2 = len(arr1), len(arr2)
         
-        # Penalize for size differences
-        size_penalty = min(len(arr1), len(arr2)) / max(len(arr1), len(arr2))
-        avg_similarity = sum(matched_similarities) / len(matched_similarities)
+        # Create a square cost matrix for Hungarian algorithm
+        max_len = max(len1, len2)
+        square_matrix = np.ones((max_len, max_len))  # Initialize with 1s (full cost for unmatched)
+        square_matrix[:len1, :len2] = cost_matrix
         
-        return avg_similarity * size_penalty
+        for i, j in zip(row_indices, col_indices):
+            if i < len1 and j < len2:
+                # This is a matched pair from the original arrays
+                total_cost += square_matrix[i, j]
+                matched_elements += 1
+            elif i < len1:
+                # Element from arr1 that couldn't be matched (deleted)
+                total_cost += 1.0  # Full deletion cost
+            elif j < len2:
+                # Element from arr2 that couldn't be matched (inserted)
+                total_cost += 1.0  # Full insertion cost
+        
+        # Also account for any unmatched elements not covered by the assignment
+        # (This handles cases where one array is larger)
+        unmatched_from_arr1 = len1 - matched_elements
+        unmatched_from_arr2 = len2 - matched_elements
+        total_cost += max(0, unmatched_from_arr1) + max(0, unmatched_from_arr2)
+        
+        # Normalize by the maximum array length
+        normalized_cost = total_cost / max_len if max_len > 0 else 0
+        
+        return normalized_cost
     
     def _calculate_optimal_matching_cost(
         self, tree1: JsonNode, tree2: JsonNode
@@ -949,7 +987,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         for i, j in zip(row_indices, col_indices):
             total_cost += cost_matrix[i][j]
         
-        #print(f"{tree1.label}-{tree1.value}, {tree2.label}-{tree2.value}, total_cost: {total_cost}")
+        #print(f"total_cost: {total_cost}")
         return total_cost
     
     def calculate_tree_edit_distance(self, json1: Dict[str, Any], json2: Dict[str, Any]) -> float:
@@ -988,28 +1026,35 @@ class SemanticJsonTreeConsistencyEvaluator:
         else:
             distance = self._calculate_optimal_matching_cost(tree1, tree2)
         
+        #print(f"distance: {distance}")
+       
         # Calculate tree sizes for normalization
         size1 = self._count_nodes(tree1)
         size2 = self._count_nodes(tree2)
-        #max_size = max(size1, size2)
-
-        max_cost = size1 + size2
-        # Normalize distance to [0, 1] range
-        if max_cost > 0:
-            normalized_distance = distance / max_cost
-        else:
-            normalized_distance = 0.0
         
-        # Convert to similarity score (1 - normalized distance)
+        max_cost = size1 + size2
+        
+        # Convert distance to similarity
+        if max_cost == 0:
+            return 1.0  # Identical empty structures
+        
+        # Normalize distance and convert to similarity
+        normalized_distance = distance / max_cost
         similarity = 1.0 - normalized_distance
         
-        return similarity
+        # Ensure similarity is in [0, 1] range
+        return max(0.0, min(1.0, similarity))
         
     def _count_nodes(self, node: JsonNode) -> int:
         """Count the number of nodes in a tree."""
-        count = 1  # Count the current node
+        count = 1 if node.value else 0 # Count the current node
         for child in node.get_children():
             count += self._count_nodes(child)
+        
+        if node.node_type == "array" and len(node.value) > 0 and isinstance(node.value[0],dict):
+            for el in node.value:
+                el_tree = self.json_to_tree(el)
+                count += self._count_nodes(el_tree)
         return count
     
     def _normalize_to_field_path(self, path: str) -> str:
@@ -1082,13 +1127,13 @@ class SemanticJsonTreeConsistencyEvaluator:
         consistency_coefficient = avg_similarity * (1 - normalized_std)
         
         # Calculate quartile-based metrics
-        quartile_metrics = self._calculate_quartile_metrics(similarity_values)
+        #quartile_metrics = self._calculate_quartile_metrics(similarity_values)
         
         # Calculate entropy-based consistency (if scipy is available)
-        entropy_score = self._calculate_similarity_entropy(similarity_values)
+        #entropy_score = self._calculate_similarity_entropy(similarity_values)
         
         # Calculate Gini coefficient for consistency
-        gini_coefficient = self._calculate_gini_coefficient(similarity_values)
+        #gini_coefficient = self._calculate_gini_coefficient(similarity_values)
         
         # Prepare comprehensive report
         report = {
@@ -1102,20 +1147,12 @@ class SemanticJsonTreeConsistencyEvaluator:
                 "min_similarity": min_similarity,
                 "max_similarity": max_similarity,
                 "similarity_range": similarity_range,
-                "consistency_coefficient": consistency_coefficient,
-                "perfect_consistency": avg_similarity > 0.99 and std_similarity < 0.01
-            },
-            
-            # Advanced statistical metrics
-            "statistical_metrics": {
-                "quartiles": quartile_metrics,
-                "entropy": entropy_score,
-                "gini_coefficient": gini_coefficient
+                #"consistency_coefficient": consistency_coefficient,
             }
         }
         
         return report
-        
+    '''
     def _calculate_quartile_metrics(self, similarities: List[float]) -> Dict[str, float]:
         """Calculate quartile-based metrics from similarity scores."""
         if not similarities:
@@ -1174,7 +1211,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         denominator = n * sum(sorted_sims)
         
         return numerator / denominator if denominator != 0 else 0.0
-
+    '''
 def parse_json_outputs(outputs: List[Union[str, Dict]]) -> List[Dict]:
     """
     Parse a list of JSON outputs that might be strings or dictionaries.
