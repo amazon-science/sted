@@ -15,6 +15,25 @@
 - Semantic equivalence is preserved despite surface variations
 - Focus on meaning preservation rather than exact matching
 
+### Synthetic Human Judgment Approach
+
+**Note**: This experiment uses **synthetic data as a proxy for human judgment**. Rather than collecting expensive human annotations, we generate controlled datasets with known consistency patterns that reflect how humans would intuitively judge consistency. This approach allows us to:
+
+- **Control for specific consistency patterns** (order changes, schema variations, semantic equivalence)
+- **Generate large-scale evaluation datasets** without annotation costs
+- **Test theoretical predictions** about human-aligned consistency
+- **Validate method behavior** against expected human intuitions
+
+The synthetic datasets are designed based on established cognitive principles of human consistency judgment, making them a reliable proxy for actual human annotations in this controlled experimental setting.
+
+**Advantages of Synthetic Human Judgment Approach**:
+- **Scalability**: Generate thousands of samples without annotation costs
+- **Controllability**: Precise control over consistency patterns and edge cases
+- **Reproducibility**: Deterministic datasets enable exact replication
+- **Cost-effectiveness**: Eliminates expensive human annotation studies
+- **Theoretical validation**: Direct testing of method behavior against known patterns
+- **Rapid iteration**: Quick generation of new test cases for method refinement
+
 ### Research Hypothesis
 
 **STED (Semantic Tree Edit Distance) should demonstrate human-aligned consistency evaluation by:**
@@ -35,7 +54,7 @@
 // Order Changed
 {"age": 30, "skills": ["Java", "SQL", "Python"], "name": "John"}
 ```
-**Human Judgment**: Consistent (order doesn't affect meaning)
+**Synthetic Human Judgment**: Consistent (order doesn't affect meaning)
 **Expected STED**: Stable (low std deviation)
 
 #### 2. **Schema Change Dataset**
@@ -47,7 +66,7 @@
 // Flat Format  
 {"user_name": "John", "user_age": 30, "user_skills": ["Python", "Java"]}
 ```
-**Human Judgment**: Consistent (same information, different structure)
+**Synthetic Human Judgment**: Consistent (same information, different structure)
 **Expected STED**: Moderately stable (some structural differences)
 
 #### 3. **Words/Expression Change - Same Meaning Dataset**
@@ -59,7 +78,7 @@
 // Synonymous
 {"status": "enabled", "role": "admin", "location": "NYC"}
 ```
-**Human Judgment**: Consistent (synonymous terms)
+**Synthetic Human Judgment**: Consistent (synonymous terms)
 **Expected STED**: Stable (semantic similarity preserved)
 
 #### 4. **Words/Expression Change - Different Meaning Dataset**
@@ -71,28 +90,37 @@
 // Different Meaning
 {"status": "inactive", "role": "user", "salary": 45000}
 ```
-**Human Judgment**: Inconsistent (different meanings)
+**Synthetic Human Judgment**: Inconsistent (different meanings)
 **Expected STED**: Unstable (high std deviation)
 
 ### Evaluation Metrics
 
 #### Primary Metrics
 
-1. **Consistency Stability**: `mean_of_stds` across samples
-   - **Formula**: `mean([std(sample_similarities) for each sample])`
-   - **Interpretation**: Lower values = more stable/consistent evaluation
-   - **Human-Aligned**: Should be low for semantically equivalent variations
+1. **Consistency Coefficient** (Most Important)
+   - **Formula**: `mean([sample_mean * (1 - min((sample_std/sample_mean)^1.5, 1.0)) for each sample])`
+   - **Interpretation**: Combines accuracy and stability; higher values = better overall consistency
+   - **Range**: 0-1 scale where 1.0 = perfect consistency
+   - **Advantage**: Penalizes both low accuracy and high variability
 
-2. **Human-Aligned Accuracy**: Average similarity with ground truth
-   - **Formula**: `mean([similarity(output, ground_truth) for each output])`
-   - **Interpretation**: Higher values = better accuracy
-   - **Validation**: Correlation with human judgment annotations
+2. **Normalized Coefficient of Variation** (Stability Focus)
+   - **Formula**: `mean([sample_std / sample_mean for each sample])`
+   - **Interpretation**: Scale-independent measure of relative variability; lower = more stable
+   - **Range**: 0+ where 0 = perfect stability
+   - **Advantage**: Comparable across different similarity ranges
+
+3. **Stability Score** (Interpretability)
+   - **Formula**: `1.0 / (1.0 + mean_of_stds)`
+   - **Interpretation**: Intuitive stability measure; higher = more stable
+   - **Range**: 0-1 scale where 1.0 = perfect stability
+   - **Advantage**: Easy to interpret and compare
 
 #### Secondary Metrics
 
-3. **Coefficient of Variation**: `std/mean` for normalized comparison
-4. **Consistency Coefficient**: Combined accuracy and stability measure
-5. **Range-Normalized Std**: Scale-invariant stability measure
+4. **Mean of Standard Deviations**: `mean_of_stds` - raw stability measure
+5. **Range-Normalized Standard Deviation**: Scale-invariant stability measure  
+6. **Inter-Quartile Range (IQR)**: Distribution spread analysis
+7. **Temperature Correlation**: Validation of temperature-stability relationships
 
 ### Expected Results Matrix
 
