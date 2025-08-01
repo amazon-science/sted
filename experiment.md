@@ -58,7 +58,7 @@ The synthetic datasets are designed based on established cognitive principles of
 **Expected STED**: Stable (low std deviation)
 
 #### 2. **Schema Change Dataset**
-**Description**: Same semantic content in different structural formats
+**Description**: Same semantic content in different structural formats (structural inconsistency)
 ```json
 // Nested Format
 {"user": {"personal": {"name": "John", "age": 30}, "skills": ["Python", "Java"]}}
@@ -66,8 +66,10 @@ The synthetic datasets are designed based on established cognitive principles of
 // Flat Format  
 {"user_name": "John", "user_age": 30, "user_skills": ["Python", "Java"]}
 ```
-**Synthetic Human Judgment**: Consistent (same information, different structure)
-**Expected STED**: Moderately stable (some structural differences)
+**Synthetic Human Judgment**: Inconsistent (different structural levels, despite same content)
+**Expected STED**: Unstable (high std deviation due to structural changes)
+
+**Note**: STED should only be stable when key-value pairs remain at the same structural level. When nesting levels change (e.g., `user.personal.name` vs `user_name`), this represents a structural inconsistency that should be detected.
 
 #### 3. **Words/Expression Change - Same Meaning Dataset**
 **Description**: Synonymous terms and equivalent expressions
@@ -127,18 +129,22 @@ The synthetic datasets are designed based on established cognitive principles of
 | Dataset Type | STED (Proposed) | BERTScore | DeepDiff |
 |--------------|----------------|-----------|----------|
 | **Order Change** | ✅ Stable (Low Std) | ❌ Unstable (High Std) | ❌ Unstable (High Std) |
-| **Schema Change** | ✅ Moderately Stable | ❌ Unstable (High Std) | ❌ Unstable (High Std) |
+| **Schema Change** | ✅ Unstable (High Std) | ❌ Unstable (High Std) | ❌ Unstable (High Std) |
 | **Same Meaning Words** | ✅ Stable (Low Std) | ✅ Stable (Low Std) | ❌ Unstable (High Std) |
 | **Different Meaning Words** | ✅ Unstable (High Std) | ✅ Unstable (High Std) | ✅ Unstable (High Std) |
+
+**Key Insight**: STED correctly identifies structural inconsistencies (Schema Change) as unstable, while being robust to meaningless variations (Order Change). This demonstrates superior discrimination between structural changes that matter vs. surface changes that don't.
 
 ### Validation Hypotheses
 
 #### H1: STED Human-Alignment Superiority
 **STED will show the most human-aligned consistency patterns:**
 - Low variability on order changes (humans don't care about order)
-- Low variability on schema changes (humans focus on content)
+- **High variability on schema changes (structural inconsistency should be detected)**
 - Low variability on synonymous content (humans understand semantics)
-- High variability only on genuinely different content
+- High variability on genuinely different content
+
+**Key Distinction**: STED correctly identifies that changing structural levels (e.g., `user.name` → `user_name`) represents a meaningful inconsistency, even when semantic content is preserved.
 
 #### H2: Traditional Method Limitations
 **DeepDiff will be most unstable:**
