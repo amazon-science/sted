@@ -1126,6 +1126,8 @@ class SemanticJsonTreeConsistencyEvaluator:
                     elif old_value is None or new_value is None:
                         # Null comparison
                         value_similarity = 1.0 if old_value == new_value else 0.0
+                    elif isinstance(old_value, (list, dict)) and isinstance(new_value, (list, dict)):
+                        value_similarity = self.calculate_similarity_with_deepdiff(old_value, new_value)
                     else:
                         # Fallback for other types (convert to string and compare)
                         value_similarity = self._compare_strings(str(old_value), str(new_value))
@@ -1309,9 +1311,9 @@ if __name__ == "__main__":
     
     json3 = [{'question': 'What data sources were used to analyze flood conditions in Somalia?', 'options': [{'answer': 'Daily FloodScan (1998-2022) and WorldPop (2020 UN Adjusted) raster data', 'is_correct': True}, {'answer': 'ECMWF seasonal forecast data only', 'is_correct': False}, {'answer': 'UN OCHA population estimates', 'is_correct': False}, {'answer': 'UNFPA demographic data', 'is_correct': False}]}, {'question': 'How were the flood fraction composites processed?', 'options': [{'answer': 'Reclassified to binary using a 20 percent flood fraction threshold and masked to remove values < 0.05 percent', 'is_correct': True}, {'answer': 'Completely removed from the analysis', 'is_correct': False}, {'answer': 'Converted directly to population exposure estimates', 'is_correct': False}, {'answer': 'Aggregated without any processing', 'is_correct': False}]}, {'question': 'What seasonal periods were analyzed for flood exposure?', 'options': [{'answer': 'March-April-May (MAM) and October-November-December (OND) seasons', 'is_correct': True}, {'answer': 'January-February and June-July', 'is_correct': False}, {'answer': 'Only MAM season', 'is_correct': False}, {'answer': 'Only OND season', 'is_correct': False}]}, {'question': 'How were the flood exposure ranges estimated?', 'options': [{'answer': 'Using percentiles for MAM (50th-95th) and OND (25th-75th) seasons', 'is_correct': True}, {'answer': 'Using fixed percentage across all districts', 'is_correct': False}, {'answer': 'Based solely on ECMWF seasonal forecast', 'is_correct': False}, {'answer': 'Randomly generated estimates', 'is_correct': False}]}, {'question': 'What was the final step in calculating population flood exposure?', 'options': [{'answer': 'Applying percent exposure to the 2024 population dataset and aggregating to administrative level 1', 'is_correct': True}, {'answer': 'Directly using historical flood data', 'is_correct': False}, {'answer': 'Multiplying by a fixed population coefficient', 'is_correct': False}, {'answer': 'Removing all low-risk districts', 'is_correct': False}]}]
     
-    json1 = [{"name": "John", "age": 30, "city": "NYC"}]
-    json2 = [{"name": "wang", "age": 30, "city": "LA"}]
-    json3 = [{"name": "Jane", "age": 10, "city": "NYC"}]
+    #json1 = [{"name": "John", "age": 30, "city": "NYC"}]
+    #json2 = [{"name": "wang", "age": 30, "city": "LA"}]
+    #json3 = [{"name": "Jane", "age": 10, "city": "NYC"}]
     
     
     result_semantic1 = evaluator.calculate_similarity_with_deepdiff(json1, json2)
