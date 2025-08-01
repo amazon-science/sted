@@ -149,7 +149,7 @@ def load_generation_results(file_path: str) -> Tuple[List[Dict[str, Any]], List[
 
 
 def compare_with_multiple_generations(
-    ground_truth_list: List[Dict[str, Any]], 
+    ground_truth_list, 
     generated_responses_list: List[List[Dict[str, Any]]],
     methods: List[str] = ["ted", "bertscore", "deepdiff"],
     model_id: str = 'all-MiniLM-L6-v2',
@@ -254,44 +254,48 @@ def compare_with_multiple_generations(
         sample_means = [s['mean'] for s in sample_stats]
         sample_stds = [s['std'] for s in sample_stats]
         
-        # Extract per-sample normalized metrics
+        # Extract per-sample normalized metrics (only what we need)
         sample_cvs = [s['std_cv'] for s in sample_stats]
-        sample_stds_normalized = [s['std_normalized'] for s in sample_stats]
         
-        # Calculate additional consistency metrics
-        mean_pairwise_similarity = float(np.mean(all_similarities))  # Average similarity between output pairs
-        std_pairwise_similarity = float(np.mean(sample_stds))  # Average std of pairwise similarities per sample
+        # Calculate basic statistics
+        mean_pairwise_similarity = float(np.mean(all_similarities))
+        std_pairwise_similarity = float(np.mean(sample_stds))
         
-        # Consistency Coefficient: combines pairwise similarity and variance penalty
-        if mean_pairwise_similarity > 1e-10:
-            consistency_coefficient = mean_pairwise_similarity * (1 - min(std_pairwise_similarity, mean_pairwise_similarity) / mean_pairwise_similarity)
-        else:
-            consistency_coefficient = 0.0
+        # === PRIMARY METRIC #1: Consistency Coefficient ===
+        # Combines accuracy (mean) with stability (penalizes high variance)
+        sample_consistency_coefficients = []
+        for stats in sample_stats:
+            sample_mean = stats['mean']
+            sample_std = stats['std']
+            
+            if sample_mean > 1e-10:
+                sample_cv = sample_std / sample_mean
+                variance_penalty = min(sample_cv ** 1.5, 1.0)
+                sample_cc = sample_mean * (1 - variance_penalty)
+            else:
+                sample_cc = 0.0
+            
+            sample_consistency_coefficients.append(sample_cc)
         
-        # Stability Score: inverse of pairwise similarity std
+        consistency_coefficient = float(np.mean(sample_consistency_coefficients))
+        
+        # === PRIMARY METRIC #2: Normalized CV ===
+        std_normalized_cv = float(np.mean(sample_cvs))
+        
+        # === PRIMARY METRIC #3: Stability Score ===
         stability_score = 1.0 / (1.0 + std_pairwise_similarity)
         
-        # Range and quartile metrics (essential for distribution analysis)
-        q1 = float(np.percentile(all_similarities, 25))
-        q3 = float(np.percentile(all_similarities, 75))
-        iqr = q3 - q1
-        similarity_range = float(np.max(all_similarities) - np.min(all_similarities))
-        
+        # Minimal supporting statistics
         results[method] = {
             'overall_stats': {
-                'mean': mean_pairwise_similarity,  # Average pairwise similarity between outputs
-                'std': std_pairwise_similarity,  # Average std of pairwise similarities per sample
-                'std_normalized_cv': float(np.mean(sample_cvs)),  # Mean of coefficient of variation
-                'std_normalized_relative': float(np.mean(sample_stds_normalized)),  # Mean of range-normalized std
-                'consistency_coefficient': consistency_coefficient,  # Key composite metric
-                'stability_score': stability_score,  # Inverse of std
+                'mean': mean_pairwise_similarity,
+                'std': std_pairwise_similarity,
+                'consistency_coefficient': consistency_coefficient,  # PRIMARY METRIC #1
+                'std_normalized_cv': std_normalized_cv,  # PRIMARY METRIC #2
+                'stability_score': stability_score,  # PRIMARY METRIC #3
                 'min': float(np.min(all_similarities)),
                 'max': float(np.max(all_similarities)),
                 'median': float(np.median(all_similarities)),
-                'q1': q1,
-                'q3': q3,
-                'iqr': iqr,
-                'range': similarity_range,
                 'count': len(all_similarities)
             },
             'sample_level_stats': {
@@ -299,8 +303,7 @@ def compare_with_multiple_generations(
                 'std_of_means': float(np.std(sample_means)),
                 'mean_of_stds': float(np.mean(sample_stds)),
                 'std_of_stds': float(np.std(sample_stds))
-            },
-            'per_sample_stats': sample_stats
+            }
         }
     
     return results
@@ -308,19 +311,19 @@ def compare_with_multiple_generations(
 
 def print_comparison_table(results: Dict[str, Dict[str, Any]]):
     """
-    Print a formatted comparison table of the results.
+    Print a streamlined comparison table focusing on primary metrics only.
     
     Args:
         results: Results dictionary from comparison functions
     """
     print("\n" + "="*80)
-    print("SIMILARITY COMPARISON RESULTS")
+    print("🎯 PRIMARY METRICS COMPARISON")
     print("="*80)
     
-    # Create comparison table
     methods = list(results.keys())
     
-    print(f"\n{'Method':<12} {'Mean':<8} {'Std':<8} {'Min':<8} {'Max':<8} {'Median':<8} {'Count':<8}")
+    print(f"{'Method':<12} {'Consistency':<15} {'Normalized':<15} {'Stability':<15}")
+    print(f"{'':12} {'Coefficient':<15} {'CV':<15} {'Score':<15}")
     print("-" * 80)
     
     for method in methods:
@@ -328,27 +331,78 @@ def print_comparison_table(results: Dict[str, Dict[str, Any]]):
         
         # Handle different result structures
         if 'overall_stats' in stats:
-            # Multiple generations format
             s = stats['overall_stats']
         else:
-            # Single generation format
             s = stats
             
-        print(f"{method:<12} {s['mean']:<8.4f} {s['std']:<8.4f} {s['min']:<8.4f} "
-              f"{s['max']:<8.4f} {s['median']:<8.4f} {s['count']:<8}")
+        print(f"{method:<12} {s.get('consistency_coefficient', 0.0):<15.4f} "
+              f"{s.get('std_normalized_cv', 0.0):<15.4f} "
+              f"{s.get('stability_score', 0.0):<15.4f}")
     
-    # If we have sample-level stats, show those too
-    if any('sample_level_stats' in results[method] for method in methods):
-        print(f"\n{'Method':<12} {'Mean of':<10} {'Std of':<10} {'Mean of':<10} {'Std of':<10}")
-        print(f"{'':12} {'Means':<10} {'Means':<10} {'Stds':<10} {'Stds':<10}")
-        print("-" * 80)
-        
-        for method in methods:
-            if 'sample_level_stats' in results[method]:
-                s = results[method]['sample_level_stats']
-                print(f"{method:<12} {s['mean_of_means']:<10.4f} {s['std_of_means']:<10.4f} "
-                      f"{s['mean_of_stds']:<10.4f} {s['std_of_stds']:<10.4f}")
+    print(f"\n💡 Higher Consistency Coefficient = Better")
+    print(f"   Lower Normalized CV = More Stable")
+    print(f"   Higher Stability Score = More Stable")
+    print("="*80)
 
+
+def save_comparison_summary(results: Dict[str, Dict[str, Any]], output_dir: str):
+    """
+    Save comparison summary to both text and JSON files.
+    
+    Args:
+        results: Results dictionary
+        output_dir: Output directory path
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Save text summary
+    summary_file = os.path.join(output_dir, "primary_metrics_comparison.txt")
+    with open(summary_file, 'w') as f:
+        f.write("="*80 + "\n")
+        f.write("🎯 PRIMARY METRICS COMPARISON\n")
+        f.write("="*80 + "\n\n")
+        
+        f.write(f"{'Method':<12} {'Consistency':<15} {'Normalized':<15} {'Stability':<15}\n")
+        f.write(f"{'':12} {'Coefficient':<15} {'CV':<15} {'Score':<15}\n")
+        f.write("-" * 80 + "\n")
+        
+        summary_data = {}
+        for method in results.keys():
+            stats = results[method]
+            
+            if 'overall_stats' in stats:
+                s = stats['overall_stats']
+            else:
+                s = stats
+                
+            cc = s.get('consistency_coefficient', 0.0)
+            cv = s.get('std_normalized_cv', 0.0)
+            stability = s.get('stability_score', 0.0)
+            
+            f.write(f"{method:<12} {cc:<15.4f} {cv:<15.4f} {stability:<15.4f}\n")
+            
+            summary_data[method] = {
+                'consistency_coefficient': cc,
+                'normalized_cv': cv,
+                'stability_score': stability
+            }
+        
+        f.write(f"\n💡 INTERPRETATION:\n")
+        f.write(f"   • Higher Consistency Coefficient = Better\n")
+        f.write(f"   • Lower Normalized CV = More Stable\n")
+        f.write(f"   • Higher Stability Score = More Stable\n")
+        f.write("="*80 + "\n")
+    
+    # Save JSON summary
+    json_file = os.path.join(output_dir, "primary_metrics_comparison.json")
+    with open(json_file, 'w') as f:
+        json.dump({
+            'primary_metrics': summary_data,
+            'timestamp': time.strftime("%Y-%m-%d %H:%M:%S")
+        }, f, indent=2)
+    
+    print(f"Comparison summary saved to: {summary_file}")
+    print(f"Comparison JSON saved to: {json_file}")
 
 def save_results(results: Dict[str, Dict[str, Any]], output_file: str):
     """
@@ -412,6 +466,10 @@ def main():
         
         # Print results
         print_comparison_table(results)
+        
+        # Save comparison summary
+        output_dir = os.path.dirname(args.output) if args.output else "."
+        save_comparison_summary(results, output_dir)
         
         # Save results if output file specified
         if args.output:

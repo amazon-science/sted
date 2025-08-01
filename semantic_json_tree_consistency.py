@@ -780,6 +780,24 @@ class SemanticJsonTreeConsistencyEvaluator:
     def _compare_numbers(self, num1: float, num2: float) -> float:
         """Compare two numbers with tolerance."""
         return 0 if num1 != num2 else 1
+    
+    def _count_json_elements(self, json_obj: Any) -> int:
+        """
+        Count the total number of elements in a JSON structure.
+        Used for normalizing structural penalties.
+        
+        Args:
+            json_obj: JSON object to count elements in
+            
+        Returns:
+            Total number of elements (keys, values, array items)
+        """
+        if isinstance(json_obj, dict):
+            return len(json_obj) + sum(self._count_json_elements(v) for v in json_obj.values())
+        elif isinstance(json_obj, list):
+            return len(json_obj) + sum(self._count_json_elements(item) for item in json_obj)
+        else:
+            return 1  # Primitive value counts as 1 element
             
     def update_cost(self, node1: JsonNode, node2: JsonNode) -> float:
         """
@@ -841,7 +859,6 @@ class SemanticJsonTreeConsistencyEvaluator:
         avg_path_weight = (path_weight1 + path_weight2) / 2.0
         
         cost *= avg_path_weight
-        #print(f"update_cost: {node1.label}->{node1.value}, {node2.label}->{node2.value}  cost: {cost}")
         return cost
     
     def _compare_arrays_unordered(self, arr1: List[Any], arr2: List[Any], arr1_label: str, arr2_label: str) -> float:
@@ -854,13 +871,9 @@ class SemanticJsonTreeConsistencyEvaluator:
         # Create similarity matrix
         cost_matrix = np.ones((len(arr1), len(arr2)))
         
-        #print(f"arr1: {arr1}")
-        #print(f"arr2: {arr2}")
-        
         for i, item1 in enumerate(arr1):
             for j, item2 in enumerate(arr2):
                 # Handle different types appropriately
-                #print(f"_compare_arrays_unordered-> {item1}, {item2}")
                 if type(item1) != type(item2):
                     cost_matrix[i, j] = 1.0
                 elif isinstance(item1, str):
@@ -871,7 +884,6 @@ class SemanticJsonTreeConsistencyEvaluator:
                     # Recursive comparison for nested objects
                     tree1 = self.json_to_tree(item1, f"{arr1_label}")
                     tree2 = self.json_to_tree(item2, f"{arr2_label}")
-                    #sim_matrix[i, j] = 1.0 - (self._calculate_optimal_matching_cost(tree1, tree2) / max(self._count_nodes(tree1), self._count_nodes(tree2)))
                     cost_matrix[i, j] = self._calculate_optimal_matching_cost(tree1, tree2)
                 elif isinstance(item1, list):
                     # Recursive array comparison
@@ -880,9 +892,7 @@ class SemanticJsonTreeConsistencyEvaluator:
                     cost_matrix[i, j] = 0.0
                 else:
                     cost_matrix[i, j] = 1.0
-                #print(f"_compare_arrays_unordered-> {cost_matrix[i, j]}\n------")
         
-        #print(f"cost_matrix: {cost_matrix}")
         # Use Hungarian algorithm for optimal matching
         if cost_matrix.shape[0] != cost_matrix.shape[1]:
             # Pad matrix for Hungarian algorithm
@@ -1025,9 +1035,7 @@ class SemanticJsonTreeConsistencyEvaluator:
                 ) from e
         else:
             distance = self._calculate_optimal_matching_cost(tree1, tree2)
-        
-        #print(f"distance: {distance}")
-       
+            
         # Calculate tree sizes for normalization
         size1 = self._count_nodes(tree1)
         size2 = self._count_nodes(tree2)
@@ -1075,9 +1083,122 @@ class SemanticJsonTreeConsistencyEvaluator:
         P, R, F1 = bert_score([str(json1)], [str(json2)], lang="en")
         return float(F1.item())
     
-    def calculate_similarity_with_deepdiff(self, json1: Dict[str, Any], json2: Dict[str, Any], **kwargs) -> float:
-        diff = DeepDiff(json1, json2, ignore_order=True, cache_size=5000, get_deep_distance=True)
-        return 1- diff['deep_distance']
+    def calculate_similarity_with_deepdiff(self, json1: [Dict[str, Any], List], json2: [Dict[str, Any], List], **kwargs) -> float:
+        """
+        Calculate similarity using DeepDiff with enhanced value comparison.
+        Uses semantic similarity for strings and proper comparison for numbers.
+        
+        Args:
+            json1: First JSON object
+            json2: Second JSON object
+            
+        Returns:
+            Similarity score between 0 and 1 (1 = identical, 0 = completely different)
+        """
+        try:
+            # Use DeepDiff to find structural differences
+            diff = DeepDiff(json1, json2, ignore_order=True, cache_size=5000)
+            
+            # If no differences found, return perfect similarity
+            if not diff:
+                return 1.0
+            
+            # Calculate similarity based on different types of changes
+            total_similarity_score = 0.0
+            total_comparisons = 0
+            
+            # Handle value changes with semantic comparison
+            if 'values_changed' in diff:
+                for path, change in diff['values_changed'].items():
+                    old_value = change['old_value']
+                    new_value = change['new_value']
+                    
+                    # Use appropriate comparison method based on value types
+                    if isinstance(old_value, str) and isinstance(new_value, str):
+                        # Use semantic string comparison
+                        value_similarity = self._compare_strings(old_value, new_value)
+                    elif isinstance(old_value, (int, float)) and isinstance(new_value, (int, float)):
+                        # Use number comparison
+                        value_similarity = self._compare_numbers(float(old_value), float(new_value))
+                    elif isinstance(old_value, bool) and isinstance(new_value, bool):
+                        # Boolean comparison
+                        value_similarity = 1.0 if old_value == new_value else 0.0
+                    elif old_value is None or new_value is None:
+                        # Null comparison
+                        value_similarity = 1.0 if old_value == new_value else 0.0
+                    elif isinstance(old_value, (list, dict)) and isinstance(new_value, (list, dict)):
+                        value_similarity = self.calculate_similarity_with_deepdiff(old_value, new_value)
+                    else:
+                        # Fallback for other types (convert to string and compare)
+                        value_similarity = self._compare_strings(str(old_value), str(new_value))
+                    
+                    total_similarity_score += value_similarity
+                    total_comparisons += 1
+            
+            # Handle structural changes (additions/removals) - these get lower similarity
+            structural_changes = 0
+            
+            if 'dictionary_item_added' in diff:
+                structural_changes += len(diff['dictionary_item_added'])
+            
+            if 'dictionary_item_removed' in diff:
+                structural_changes += len(diff['dictionary_item_removed'])
+            
+            if 'iterable_item_added' in diff:
+                structural_changes += len(diff['iterable_item_added'])
+            
+            if 'iterable_item_removed' in diff:
+                structural_changes += len(diff['iterable_item_removed'])
+            
+            if 'type_changes' in diff:
+                # Type changes are significant structural differences
+                structural_changes += len(diff['type_changes']) * 2
+            
+            # Calculate overall similarity using a change-ratio approach
+            if total_comparisons == 0 and structural_changes == 0:
+                return 1.0  # No changes found
+            
+            # Count total comparable elements in both JSONs
+            total_elements_json1 = self._count_json_elements(json1)
+            total_elements_json2 = self._count_json_elements(json2)
+            
+            # Use the larger JSON size as the base for comparison
+            # This ensures we account for all elements in the comparison
+            base_elements = max(total_elements_json1, total_elements_json2)
+            
+            if base_elements == 0:
+                return 1.0
+            
+            # Calculate similarity based on the proportion of changes
+            total_changes = total_comparisons + structural_changes
+            
+            # If we have value changes, use their average similarity
+            # If we have only structural changes, they contribute 0 similarity
+            if total_comparisons > 0:
+                avg_change_similarity_value = total_similarity_score / total_comparisons
+            else:
+                avg_change_similarity_value = 0.0  # Only structural changes
+            
+            
+            # Calculate change ratios
+            change_ratio_value = min(total_comparisons / base_elements, 1.0)
+            change_ratio_schema = min(structural_changes / base_elements, 1.0)
+            
+            avg_change_similarity_value = (1-change_ratio_value) * avg_change_similarity_value
+            schema_similarity_value = 1 - change_ratio_schema
+            
+            # Overall similarity calculation:
+            overall_similarity = avg_change_similarity_value * 0.3 + schema_similarity_value * 0.7
+            
+            # Ensure similarity is in valid range
+            return max(0.0, min(1.0, overall_similarity))
+            
+        except Exception as e:
+            # If DeepDiff fails, fall back to simple comparison
+            warnings.warn(f"DeepDiff calculation failed: {e}")
+            return 1.0 if json1 == json2 else 0.0
+    
+
     
     def evaluate_structural_consistency(self, json_outputs: List[Dict[str, Any]], gt: Dict[str, Any]=None, method_name: str="ted") -> Dict[str, Any]:
         """
@@ -1105,8 +1226,6 @@ class SemanticJsonTreeConsistencyEvaluator:
         else:
             all_pairs = self.collect_all_string_pairs(json_outputs)
             
-            #print(f"all_pairs: {all_pairs}")
-            
             self.batch_compute_similarities(all_pairs)
             
             similarity_values = []
@@ -1126,15 +1245,6 @@ class SemanticJsonTreeConsistencyEvaluator:
         normalized_std = min(std_similarity, avg_similarity) / avg_similarity if avg_similarity > 0 else 0
         consistency_coefficient = avg_similarity * (1 - normalized_std)
         
-        # Calculate quartile-based metrics
-        #quartile_metrics = self._calculate_quartile_metrics(similarity_values)
-        
-        # Calculate entropy-based consistency (if scipy is available)
-        #entropy_score = self._calculate_similarity_entropy(similarity_values)
-        
-        # Calculate Gini coefficient for consistency
-        #gini_coefficient = self._calculate_gini_coefficient(similarity_values)
-        
         # Prepare comprehensive report
         report = {
             "timestamp": datetime.datetime.now().isoformat(),
@@ -1147,71 +1257,11 @@ class SemanticJsonTreeConsistencyEvaluator:
                 "min_similarity": min_similarity,
                 "max_similarity": max_similarity,
                 "similarity_range": similarity_range,
-                #"consistency_coefficient": consistency_coefficient,
             }
         }
         
         return report
-    '''
-    def _calculate_quartile_metrics(self, similarities: List[float]) -> Dict[str, float]:
-        """Calculate quartile-based metrics from similarity scores."""
-        if not similarities:
-            return {"q1": 0.0, "median": 0.0, "q3": 0.0, "iqr": 0.0}
-        
-        sorted_sims = sorted(similarities)
-        n = len(sorted_sims)
-        
-        q1_idx = max(0, n // 4)
-        median_idx = max(0, n // 2)
-        q3_idx = max(0, (3 * n) // 4)
-        
-        q1 = sorted_sims[q1_idx]
-        median = sorted_sims[median_idx]
-        q3 = sorted_sims[q3_idx]
-        iqr = q3 - q1
-        
-        return {
-            "q1": q1,
-            "median": median,
-            "q3": q3,
-            "iqr": iqr
-        }
-    
-    def _calculate_similarity_entropy(self, similarities: List[float], bins: int = 10) -> float:
-        """Calculate entropy of similarity distribution as a measure of consistency."""
-        if not similarities or len(similarities) < 2:
-            return 0.0
-        
-        try:
-            # Create histogram of similarities
-            hist, _ = np.histogram(similarities, bins=bins, range=(0, 1), density=True)
-            
-            # Add small epsilon to avoid log(0)
-            hist = hist + 1e-10
-            hist = hist / hist.sum()
-            
-            # Calculate entropy
-            entropy = -np.sum(hist * np.log2(hist))
-            return float(entropy)
-        except Exception as e:
-            print(f"Error calculating entropy: {e}")
-            return 0.0
-    
-    def _calculate_gini_coefficient(self, similarities: List[float]) -> float:
-        """Calculate Gini coefficient for similarity scores."""
-        if not similarities:
-            return 0.0
-        
-        # Sort similarities
-        sorted_sims = sorted(similarities)
-        n = len(sorted_sims)
-        
-        # Calculate Gini coefficient
-        numerator = sum((2 * i - n - 1) * sim for i, sim in enumerate(sorted_sims, 1))
-        denominator = n * sum(sorted_sims)
-        
-        return numerator / denominator if denominator != 0 else 0.0
-    '''
+
 def parse_json_outputs(outputs: List[Union[str, Dict]]) -> List[Dict]:
     """
     Parse a list of JSON outputs that might be strings or dictionaries.
@@ -1246,166 +1296,6 @@ def parse_json_outputs(outputs: List[Union[str, Dict]]) -> List[Dict]:
 
 if __name__ == "__main__":
     # Example usage
-    '''
-    json1 = {
-        "user_name": "John Doe",
-        "user_age": 30,
-        "email_address": "john.doe@example.com",
-        "home_address": {
-            "street_name": "123 Main St",
-            "city_name": "New York",
-            "postal_code": "10001"
-        },
-        "interests": ["reading", "swimming", "coding"],
-        "is_active": True,
-        "account_balance": 1500.50
-    }
-    
-    json2 = {
-        "name": "John Doe",  # Semantically similar to "user_name"
-        "age": 31,  # Semantically similar to "user_age"
-        "email": "john.doe@example.com",  # Semantically similar to "email_address"
-        "address": {  # Semantically similar to "home_address"
-            "street": "123 Main Street",  # Semantically similar to "street_name"
-            "city": "New York",  # Semantically similar to "city_name"
-            "zip": "10001"  # Semantically similar to "postal_code"
-        },
-        "hobbies": ["coding", "reading", "running"],  # Semantically similar to "interests"
-        "active": True,  # Semantically similar to "is_active"
-        "balance": 1499.00  # Semantically similar to "account_balance"
-    }
-    
-    json3 = {
-        "firstName": "John",
-        "lastName": "Doe",
-        "contact": {
-            "email": "john.doe@example.com",
-            "phone": "123-456-7890"
-        }
-    }
-    
-    test_cases = [
-        (
-            {
-                "interests": [
-                    {
-                        "name": "programming",
-                        "frequency": 1
-                    },
-                    {
-                        "name": "go running",
-                        "frequency": 5
-                    }
-                ]
-            },
-            {
-                "hobbies": [
-                    {
-                        "name": "cooking",
-                        "frequency": 3
-                    },
-                    {
-                        "name": "running",
-                        "frequency": 5
-                    }
-                ]
-            }
-        ),
-        (
-            {
-                "hobbies": [
-                    {
-                        "name": "coding",
-                        "frequency": 1
-                    },
-                    {
-                        "name": "running",
-                        "frequency": 5
-                    }
-                ]
-            },
-            {
-                "hobbies": [
-                    {
-                        "name": "coding",
-                        "frequency": 1
-                    },
-                    {
-                        "name": "running",
-                        "frequency": 5
-                    }
-                ]
-            }
-        ),
-        (
-            {
-                "hobbies": [
-                    "I like coding",
-                    "i love running"
-                ]
-            },
-            {
-                "hobbies": [
-                    {
-                        "name": "coding",
-                        "frequency": 1
-                    },
-                    {
-                        "name": "running",
-                        "frequency": 5
-                    }
-                ]
-            }
-        ),
-        (
-            {
-                "name": "产品A",
-                "price": 100,
-                "category": "电子产品"
-            },
-            {
-                "price": 100,
-                "category": "电子产品",
-                "name": "产品A"
-            }
-        ),
-        (
-            {
-                "name": "产品A",
-                "price": 100,
-                "category": "电子产品"
-            },
-            {
-                "price": 100,
-                "category": "product",
-                "name": "产品A"
-            }
-        )
-    ]
-    
-    # Create evaluator
-    evaluator = SemanticJsonTreeConsistencyEvaluator(
-        model_id='all-MiniLM-L6-v2',
-    )
-    
-    # Evaluate consistency
-    print("=== Semantic JSON Tree Consistency Evaluation ===\n")
-    
-    for (input1, input2) in test_cases:
-        print(f"Input: {input1}, {input2}")
-        for method in ['ted', 'bertscore', 'deepdiff']:
-            if method == "ted":
-                evaluator.set_original_zss(False)
-                result_semantic = evaluator.evaluate_structural_consistency([input1, input2], method_name=method)
-                print(f"{method}-optimal TED - Consistency Metrics: {result_semantic['consistency_metrics']['mean_similarity']}")
-                
-                evaluator.set_original_zss(True)
-                result_semantic = evaluator.evaluate_structural_consistency([input1, input2], method_name=method)
-                print(f"{method}-ORG TED - Consistency Metrics: {result_semantic['consistency_metrics']['mean_similarity']}")
-            else:
-                result_semantic = evaluator.evaluate_structural_consistency([input1, input2], method_name=method)
-                print(f"{method} Consistency Metrics: {result_semantic['consistency_metrics']['mean_similarity']}")
-    '''
     evaluator = SemanticJsonTreeConsistencyEvaluator(
         model_id='amazon.titan-embed-text-v2:0',
     )
@@ -1415,85 +1305,27 @@ if __name__ == "__main__":
     #values = evaluator.collect_all_values(data)
     #print(values)
     
-    json1 = {
-        "name": "产品A",
-        "price": 100,
-        "category": "电子产品"
-    }
+    json1 = [{'question': 'What data was used to calculate the number of people potentially exposed to flooding in Somalia for the 2024 HNRP?', 'options': [{'answer': 'Daily FloodScan (1998-2022) & WorldPop (2020 UN Adjusted) raster data', 'is_correct': True}, {'answer': 'ECMWF seasonal forecast data only', 'is_correct': False}, {'answer': 'UNFPA Methodology data only', 'is_correct': False}, {'answer': 'Somalia ICCG and HCT data only', 'is_correct': False}]}, {'question': 'What threshold was used to reclassify the FloodScan daily flood fraction Standard Flood Exposure Depiction (SFED) to binary?', 'options': [{'answer': '10 percent flood fraction threshold', 'is_correct': False}, {'answer': '20 percent flood fraction threshold', 'is_correct': True}, {'answer': '30 percent flood fraction threshold', 'is_correct': False}, {'answer': '40 percent flood fraction threshold', 'is_correct': False}]}, {'question': 'How were the yearly seasonal flood exposure rasters aggregated to obtain the estimated population exposure per district?', 'options': [{'answer': 'Via zonal statistics (mean)', 'is_correct': False}, {'answer': 'Via zonal statistics (sum)', 'is_correct': True}, {'answer': 'Via zonal statistics (median)', 'is_correct': False}, {'answer': 'Via zonal statistics (mode)', 'is_correct': False}]}, {'question': 'What percentiles were used to estimate the range of population exposed for the MAM 2024 season?', 'options': [{'answer': '25th-50th percentile levels', 'is_correct': False}, {'answer': '50th-95th percentile levels', 'is_correct': True}, {'answer': '25th-75th percentile levels', 'is_correct': False}, {'answer': '10th-90th percentile levels', 'is_correct': False}]}, {'question': 'Who should be contacted for questions or feedback on the Somalia Flood Exposure Methodology Note?', 'options': [{'answer': 'Leonardo Milano, Team Lead for Data Science at leonardo.milano@un.org', 'is_correct': True}, {'answer': 'Somalia ICCG and HCT', 'is_correct': False}, {'answer': 'UNFPA Methodology team', 'is_correct': False}, {'answer': 'ECMWF seasonal forecast team', 'is_correct': False}]}]
 
-    json2 = {
-        "price": 100,
-        "category": "电子产品",
-        "name": "产品A"
-    }
+    json2 = [{'question': 'What data sources were used to analyze flood conditions in Somalia?', 'options': [{'answer': 'Daily FloodScan (1998-2022) and WorldPop (2020 UN Adjusted) raster data', 'is_correct': True}, {'answer': 'ECMWF seasonal forecast data only', 'is_correct': False}, {'answer': 'UN OCHA population estimates', 'is_correct': False}, {'answer': 'Satellite imagery from 2024', 'is_correct': False}]}, {'question': 'How were the flood fraction composites processed?', 'options': [{'answer': 'Reclassified to binary using a 20 percent flood fraction threshold and masked to remove flood fraction values < 0.05 percent', 'is_correct': True}, {'answer': 'Completely removed from the analysis', 'is_correct': False}, {'answer': 'Converted directly to population exposure estimates', 'is_correct': False}, {'answer': 'Averaged across all years without further processing', 'is_correct': False}]}, {'question': 'What seasons were analyzed for flood exposure in Somalia?', 'options': [{'answer': 'March-April-May (MAM) and October-November-December (OND) seasons', 'is_correct': True}, {'answer': 'January-February and July-August', 'is_correct': False}, {'answer': 'Only the MAM season', 'is_correct': False}, {'answer': 'Winter and summer seasons', 'is_correct': False}]}, {'question': 'How were the population exposure ranges estimated?', 'options': [{'answer': 'Using percentiles for MAM (50th-95th) and OND (25th-75th) seasons', 'is_correct': True}, {'answer': 'Using exact population count predictions', 'is_correct': False}, {'answer': 'Based solely on ECMWF seasonal forecast', 'is_correct': False}, {'answer': 'Using a fixed percentage across all districts', 'is_correct': False}]}, {'question': 'What was the final step in calculating population flood exposure?', 'options': [{'answer': 'Applying the percent exposure to the 2024 population data set and aggregating to administrative level 1', 'is_correct': True}, {'answer': 'Directly using the FloodScan data', 'is_correct': False}, {'answer': 'Multiplying by a fixed population growth factor', 'is_correct': False}, {'answer': 'Estimating exposure based on historical data only', 'is_correct': False}]}]
     
-    result_semantic = evaluator.evaluate_structural_consistency([json1], gt=json2, method_name="ted")
-    print(f"Optimal TED->result_semantic: {result_semantic}")
+    json3 = [{'question': 'What data sources were used to analyze flood conditions in Somalia?', 'options': [{'answer': 'Daily FloodScan (1998-2022) and WorldPop (2020 UN Adjusted) raster data', 'is_correct': True}, {'answer': 'ECMWF seasonal forecast data only', 'is_correct': False}, {'answer': 'UN OCHA population estimates', 'is_correct': False}, {'answer': 'UNFPA demographic data', 'is_correct': False}]}, {'question': 'How were the flood fraction composites processed?', 'options': [{'answer': 'Reclassified to binary using a 20 percent flood fraction threshold and masked to remove values < 0.05 percent', 'is_correct': True}, {'answer': 'Completely removed from the analysis', 'is_correct': False}, {'answer': 'Converted directly to population exposure estimates', 'is_correct': False}, {'answer': 'Aggregated without any processing', 'is_correct': False}]}, {'question': 'What seasonal periods were analyzed for flood exposure?', 'options': [{'answer': 'March-April-May (MAM) and October-November-December (OND) seasons', 'is_correct': True}, {'answer': 'January-February and June-July', 'is_correct': False}, {'answer': 'Only MAM season', 'is_correct': False}, {'answer': 'Only OND season', 'is_correct': False}]}, {'question': 'How were the flood exposure ranges estimated?', 'options': [{'answer': 'Using percentiles for MAM (50th-95th) and OND (25th-75th) seasons', 'is_correct': True}, {'answer': 'Using fixed percentage across all districts', 'is_correct': False}, {'answer': 'Based solely on ECMWF seasonal forecast', 'is_correct': False}, {'answer': 'Randomly generated estimates', 'is_correct': False}]}, {'question': 'What was the final step in calculating population flood exposure?', 'options': [{'answer': 'Applying percent exposure to the 2024 population dataset and aggregating to administrative level 1', 'is_correct': True}, {'answer': 'Directly using historical flood data', 'is_correct': False}, {'answer': 'Multiplying by a fixed population coefficient', 'is_correct': False}, {'answer': 'Removing all low-risk districts', 'is_correct': False}]}]
     
-    evaluator.set_original_zss(True)
-    result_semantic = evaluator.evaluate_structural_consistency([json1], gt=json2, method_name="ted")
-    print(f"original TED->result_semantic: {result_semantic}")
+    #json1 = [{"name": "John", "age": 30, "city": "NYC"}]
+    #json2 = [{"name": "wang", "age": 30, "city": "LA"}]
+    #json3 = [{"name": "Jane", "age": 10, "city": "NYC"}]
     
-    ## Semantic similarity Check
-    json4 = {
-        "product_name": "Product-A",
-        "price": 100,
-        "category": "Consumer Electronics",
-        "desc": "this product is good"
-    }
+    
+    result_semantic1 = evaluator.calculate_similarity_with_deepdiff(json1, json2)
+    result_semantic2 = evaluator.calculate_similarity_with_deepdiff(json1, json3)
+    print(f"deepdiff->result_semantic1: {result_semantic1}")
+    print(f"deepdiff->result_semantic1: {result_semantic2}")
+    
+    t1 = {'a': 1, 'b': 2}
+    t2 = {'a': 1, 'b': 3}
 
-    json5 = {
-        "name": "Product-A",
-        "price": 100,
-        "category": "Consumer Electronics",
-        "desc": "awsome product"
-    }
+    diff1 = DeepDiff(json1, json2, ignore_order=True, cache_size=5000, get_deep_distance=True)
+    diff2 = DeepDiff(json1, json3, ignore_order=True, cache_size=5000, get_deep_distance=True)
+    print(diff1)
+    print(diff2)
     
-    print("Semantic similarity Check---------")
-    
-    evaluator.set_original_zss(False)
-    result_semantic = evaluator.evaluate_structural_consistency([json4], gt=json5, method_name="ted")
-    print(f"OPT TED->result_semantic: {result_semantic['consistency_metrics']['mean_similarity']}")
-    
-    evaluator.set_original_zss(True)
-    result_semantic = evaluator.evaluate_structural_consistency([json4], gt=json5, method_name="ted")
-    print(f"original TED->result_semantic: {result_semantic['consistency_metrics']['mean_similarity']}")
-    
-    evaluator.set_original_zss(True)
-    result_semantic = evaluator.evaluate_structural_consistency([json4], gt=json5, method_name="bertscore")
-    print(f"bertscore->result_semantic: {result_semantic['consistency_metrics']['mean_similarity']}")
-    
-    result_semantic = evaluator.evaluate_structural_consistency([json4], gt=json5, method_name="deepdiff")
-    print(f"deepdiff->result_semantic: {result_semantic['consistency_metrics']['mean_similarity']}")
-    
-    ## Schema similarity Check
-    json4 = {
-        "product_name": "Product-A",
-        "price": 100,
-        "category": "Consumer Electronics",
-        "desc": "this product is good"
-    }
-
-    json5 = {
-        "Product-A": {
-            "price": 100,
-            "category": "Consumer Electronics",
-            "desc": "this product is good"
-        }
-    }
-    
-    print("Schema similarity Check---------")
-    evaluator.set_original_zss(False)
-    result_semantic = evaluator.evaluate_structural_consistency([json4], gt=json5, method_name="ted")
-    print(f"OPT TED->result_semantic: {result_semantic['consistency_metrics']['mean_similarity']}")
-    
-    evaluator.set_original_zss(True)
-    result_semantic = evaluator.evaluate_structural_consistency([json4], gt=json5, method_name="ted")
-    print(f"original TED->result_semantic: {result_semantic['consistency_metrics']['mean_similarity']}")
-    
-    evaluator.set_original_zss(True)
-    result_semantic = evaluator.evaluate_structural_consistency([json4], gt=json5, method_name="bertscore")
-    print(f"bertscore->result_semantic: {result_semantic['consistency_metrics']['mean_similarity']}")
-    
-    result_semantic = evaluator.evaluate_structural_consistency([json4], gt=json5, method_name="deepdiff")
-    print(f"deepdiff->result_semantic: {result_semantic['consistency_metrics']['mean_similarity']}")
