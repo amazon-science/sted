@@ -26,6 +26,24 @@ import re
 # Add the project root to the path to import modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+def estimate_tokens(text):
+    """
+    Estimate token count using character-based approximation.
+    Uses conservative 3:1 ratio (3 chars = 1 token) to avoid underestimation.
+    """
+    return len(text) // 3
+
+def truncate_text_by_chars(text, max_tokens):
+    """
+    Truncate text to fit within estimated max_tokens limit.
+    Uses conservative character-based estimation.
+    """
+    # Use conservative 3:1 ratio for truncation
+    max_chars = max_tokens * 3
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "... [TRUNCATED]"
+
 def extract_json_from_string(input_string):
     """
     Extract JSON data from a string with a prefix.
@@ -398,7 +416,9 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", type=str, default="./generations", help="Directory to save generation results.")
     parser.add_argument("--sample-limit", type=int, default=-1, help="Limit the number of samples to process.")
     parser.add_argument("--include-schema", action="store_true", help="Include JSON schema in the prompt to guide the output structure.")
-    parser.add_argument("--max-tokens", type=int, default=8000, help="Limit the number of max_tokens of LLM generation.")
+    parser.add_argument("--max-tokens", type=int, default=8000, help="Maximum tokens for LLM generation.")
+    parser.add_argument("--max-context-tokens", type=int, default=32767, help="Maximum context tokens to use (default: 32767 for 32k models).")
+    parser.add_argument("--skip-long-samples", action="store_true", help="Skip samples that exceed token limit instead of truncating.")
     args = parser.parse_args()
     
     # Create a client with appropriate configuration
@@ -466,6 +486,34 @@ if __name__ == "__main__":
             print(f"gt_value: {gt_value}")
             gt_dict = {"error": "Invalid JSON", "raw_value": gt_value}
         
+        # Check estimated token count before processing
+        total_estimated_tokens = estimate_tokens(system_prompt + user_prompt + gt_value)
+        print(f"Estimated total tokens: {total_estimated_tokens}")
+        
+        # Use command line argument for max context length
+        MAX_CONTEXT_TOKENS = args.max_context_tokens
+        
+        if total_estimated_tokens > MAX_CONTEXT_TOKENS:
+            print(f"WARNING: Sample {sample_id} exceeds estimated token limit ({total_estimated_tokens} > {MAX_CONTEXT_TOKENS})")
+            
+            if args.skip_long_samples:
+                print(f"Skipping sample {sample_id} due to --skip-long-samples flag")
+                continue
+            
+            # Try to truncate the user prompt while keeping system prompt and ground truth
+            system_estimated_tokens = estimate_tokens(system_prompt)
+            gt_estimated_tokens = estimate_tokens(gt_value)
+            available_tokens = MAX_CONTEXT_TOKENS - system_estimated_tokens - gt_estimated_tokens - 1000  # Buffer for schema
+            
+            if available_tokens < 1000:
+                print(f"ERROR: Sample {sample_id} cannot be processed - system prompt and ground truth too long")
+                print(f"System estimated tokens: {system_estimated_tokens}, GT estimated tokens: {gt_estimated_tokens}")
+                continue
+            
+            print(f"Truncating user prompt from {estimate_tokens(user_prompt)} to ~{available_tokens} estimated tokens")
+            user_prompt = truncate_text_by_chars(user_prompt, available_tokens)
+            print(f"After truncation: {estimate_tokens(user_prompt)} estimated tokens")
+        
         # Determine whether to use the original prompt or a modified one with schema
         if not args.include_schema:
             # Use original prompt without schema
@@ -480,6 +528,25 @@ if __name__ == "__main__":
                 ground_truth_dict=gt_dict
             )
             
+            # Check if the modified prompt with schema exceeds limits
+            modified_total_estimated_tokens = estimate_tokens(system_prompt + modified_user_prompt)
+            if modified_total_estimated_tokens > MAX_CONTEXT_TOKENS:
+                print(f"WARNING: Modified prompt with schema exceeds estimated limit ({modified_total_estimated_tokens} tokens)")
+                # Try to truncate the user part of the modified prompt
+                schema_part = modified_user_prompt[len(user_prompt):]
+                schema_estimated_tokens = estimate_tokens(schema_part)
+                available_for_user = MAX_CONTEXT_TOKENS - estimate_tokens(system_prompt) - schema_estimated_tokens - 1000
+                
+                if available_for_user < 500:
+                    print(f"ERROR: Cannot fit schema - falling back to original prompt")
+                    modified_user_prompt = user_prompt
+                else:
+                    truncated_user = truncate_text_by_chars(user_prompt, available_for_user)
+                    modified_user_prompt = create_prompt_with_schema(
+                        user_prompt=truncated_user,
+                        ground_truth_dict=gt_dict
+                    )
+            
             message = build_message(texts=[modified_user_prompt])
             
             print(f"\nRunning inference on prompt with schema")
@@ -492,6 +559,14 @@ if __name__ == "__main__":
             with open(prompt_output_path, 'w') as f:
                 f.write(modified_user_prompt)
             print(f"Saved modified prompt to {prompt_output_path}")
+        
+        # Final estimated token count check
+        final_estimated_tokens = estimate_tokens(system_prompt + modified_user_prompt)
+        print(f"Final estimated tokens: {final_estimated_tokens}")
+        
+        if final_estimated_tokens > MAX_CONTEXT_TOKENS:
+            print(f"ERROR: Sample {sample_id} still exceeds estimated token limit after truncation. Skipping.")
+            continue
         
         responses = run_inference(
             client=client,
