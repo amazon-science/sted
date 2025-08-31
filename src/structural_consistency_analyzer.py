@@ -55,12 +55,12 @@ class StructuralConsistencyAnalyzer:
         Returns:
             Dictionary mapping pairs to similarity scores
         """
-        uncached_pairs = [(s1, s2) for s1, s2 in pairs if self.evaluator.cache.get(s1, s2) is None]
+        uncached_pairs = [(s1, s2) for s1, s2 in pairs if self.evaluator._cache.get(s1, s2) is None]
     
         if not uncached_pairs:
             # Return cached values for requested pairs
-            return {(s1, s2): self.evaluator.cache.get(s1, s2) for s1, s2 in pairs 
-                    if self.evaluator.cache.get(s1, s2) is not None}
+            return {(s1, s2): self.evaluator._cache.get(s1, s2) for s1, s2 in pairs 
+                    if self.evaluator._cache.get(s1, s2) is not None}
         
         batch_size = min(self.evaluator.batch_size_bertscore, len(uncached_pairs))
         
@@ -75,13 +75,13 @@ class StructuralConsistencyAnalyzer:
             else:
                 scores = [self.evaluator._calculate_semantic_similarity(s1, s2) for s1, s2 in zip(list(cands), list(refs))]
             
-            self.evaluator.cache.batch_set(batch, scores)
+            self.evaluator._cache.batch_set(batch, scores)
         
-        return self.evaluator.cache.cache
+        return self.evaluator._cache.cache
     
     def evaluate_structural_consistency(self, json_outputs: List[Dict[str, Any]], 
                                       gt: Dict[str, Any] = None, 
-                                      method_name: str = "ted") -> Dict[str, Any]:
+                                      method_name: str = "ted", variation_type="combined") -> Dict[str, Any]:
         """
         Evaluate structural consistency across multiple JSON outputs with enhanced metrics.
         
@@ -89,7 +89,8 @@ class StructuralConsistencyAnalyzer:
             json_outputs: List of JSON objects to evaluate
             gt: Ground truth JSON object (optional)
             method_name: Similarity method to use ('ted', 'bertscore', 'deepdiff')
-            
+            variation_type: Type of variation to consider ('structural', 'content', 'combined')
+
         Returns:
             Dictionary with comprehensive consistency metrics
         """
@@ -102,12 +103,16 @@ class StructuralConsistencyAnalyzer:
         
         # Prepare similarity computation by collecting all string pairs
         if gt:
+            
+            if isinstance(gt, list) and len(gt) == 1:
+                gt = gt[0]
+
             all_pairs = self.collect_all_string_pairs(json_outputs, gt)
             self.batch_compute_similarities(all_pairs)
             
             # Calculate similarities between ground truth and each output
             similarity_values = [
-                self.evaluator.calculate_similarity_method[method_name](gt, json_output) 
+                self.evaluator.calculate_similarity_method[method_name](gt, json_output, variation_type) 
                 for json_output in json_outputs
             ]
         else:
@@ -118,7 +123,7 @@ class StructuralConsistencyAnalyzer:
             similarity_values = []
             for i in range(n-1):
                 for j in range(i+1, n):
-                    sim = self.evaluator.calculate_similarity_method[method_name](json_outputs[i], json_outputs[j])
+                    sim = self.evaluator.calculate_similarity_method[method_name](json_outputs[i], json_outputs[j], variation_type)
                     similarity_values.append(sim)
 
         # Calculate essential consistency metrics (this includes mean/std calculation internally)
@@ -150,13 +155,14 @@ class StructuralConsistencyAnalyzer:
         
         return report
     
-    def _calculate_advanced_metrics(self, similarity_values: List[float], has_gt: bool) -> Dict[str, float]:
+    def _calculate_advanced_metrics(self, similarity_values: List[float], has_gt: bool, steepness_factor: int = 20) -> Dict[str, float]:
         """
         Calculate essential consistency metrics for LLM output evaluation.
         
         Args:
             similarity_values: List of similarity scores
             has_gt: Whether ground truth was used
+            steepness_factor: Exponent for stability score calculation (default: 20)
             
         Returns:
             Dictionary of essential metrics
@@ -164,6 +170,7 @@ class StructuralConsistencyAnalyzer:
         if not similarity_values:
             return {}
         
+        print(f"similarity_values: {similarity_values}")
         similarity_array = np.array(similarity_values)
         mean_sim = float(np.mean(similarity_array))
         std_sim = float(np.std(similarity_array))
@@ -180,19 +187,39 @@ class StructuralConsistencyAnalyzer:
         else:
             consistency_coefficient = 0.0
         
-        # === SUPPORTING METRICS (choose based on analysis needs) ===
+        # === MIXED AMPLIFICATION APPROACH ===
+        import math
         
-        # Option A: Normalized CV - for relative variability analysis
-        normalized_cv = cv
+        # Consistency Coefficient - power transformation (better discrimination)
+        consistency_coefficient = consistency_coefficient ** 5
         
-        # Option B: Stability Score - for absolute variability analysis  
-        stability_score = 1.0 / (1.0 + std_sim)
+        # Stability Score - power transformation (better discrimination)
+        # stability_score = 1.0 / (1.0 + std_sim*2)
+        # stability_score = stability_score ** 20
+        
+        # Stability Score - smart mapping with steep changes for small std variations
+        n = len(similarity_values)
+        if n <= 1:
+            stability_score = 1.0
+        else:
+            # Calculate max possible std for n values in [0,1]
+            zeros = n // 2
+            ones = n - zeros
+            max_possible_std = float(np.std([0] * zeros + [1] * ones))
+            
+            # Normalize std to [0,1] range
+            normalized_std = std_sim / max_possible_std if max_possible_std > 0 else 0.0
+            
+            # Apply exponential transformation for steep changes (similar to original shape)
+            #stability_score = (1.0 - normalized_std) ** 10
+            stability_score = 1.0 / (1.0 + normalized_std*2)
+            stability_score = stability_score ** steepness_factor
+        
+        # Normalized CV - direct scaling with cap (works well)
+        normalized_cv = min(cv * 20.0, 1.0)
         
         return {
-            # Primary comprehensive metric
             "consistency_coefficient": consistency_coefficient,
-            
-            # Choose one based on your analysis focus:
-            "normalized_cv": normalized_cv,        # Relative variability (recommended for comparing across different similarity scales)
-            "stability_score": stability_score     # Absolute variability (recommended for fixed similarity scales)
+            "normalized_cv": normalized_cv,
+            "stability_score": stability_score
         }

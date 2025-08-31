@@ -106,13 +106,16 @@ def compute_combined_embedding(graph):
     if len(graph.nodes) == 0:
         return torch.zeros(384 + 10)
     
-    # Semantic embedding (weighted average)
+    # Semantic embedding - use sum instead of mean to preserve magnitude differences
     embeddings = []
     for node in graph.nodes:
         embeddings.append(graph.nodes[node]["feat"])
     
     embeddings = torch.stack(embeddings)
-    semantic_embedding = embeddings.mean(dim=0)
+    semantic_embedding = embeddings.sum(dim=0)  # Changed from mean to sum
+    
+    # Normalize semantic embedding to unit length
+    semantic_embedding = F.normalize(semantic_embedding.unsqueeze(0), dim=1).squeeze(0)
     
     # Structural features
     structural_features = extract_graph_features(graph)
@@ -120,12 +123,17 @@ def compute_combined_embedding(graph):
     # Normalize structural features
     structural_features = F.normalize(structural_features.unsqueeze(0), dim=1).squeeze(0)
     
-    # Combine (you can adjust the weight of structural features)
-    # Scale structural features to have similar magnitude
-    structural_features = structural_features * 10
+    # Weight structural features more heavily
+    structural_weight = 0.3
+    semantic_weight = 0.7
     
-    combined = torch.cat([semantic_embedding, structural_features])
-    return combined
+    # Scale and combine
+    combined = torch.cat([
+        semantic_embedding * semantic_weight,
+        structural_features * structural_weight
+    ])
+    
+    return F.normalize(combined.unsqueeze(0), dim=1).squeeze(0)
 
 def compare_json(json1, json2, model):
     g1 = json_to_graph(json1, model)
