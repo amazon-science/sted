@@ -27,176 +27,147 @@ from sentence_transformers import SentenceTransformer
 import torch
 
 import boto3
-from botocore.exceptions import ClientError
-from botocore.config import Config
 
 from deepdiff import DeepDiff
-
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import concurrent.futures
 
 import itertools
 import math
 
+# Try relative imports first (when used as package)
+from .json_tree_node import JsonNode
+from .similarity_cache import StringSimilarityCache
+from .utils import collect_all_values, getEmbeddings, create_bedrock_client, count_json_elements
+from .gnn import compare_json
+from .bedrock_utils import build_message, get_json, inference_with_converse_api
+from botocore.config import Config
+
+# System prompt for LLM judge to calculate similarity score between two structured data
+SYSTEM_PROMPT_JUDGE = """You are an expert evaluator tasked with assessing the similarity between two structured JSON outputs. Your goal is to provide a similarity score that aligns with human judgment.
+
+## Evaluation Criteria:
+
+1. **Semantic Equivalence** (40%): Do the outputs convey the same meaning, even if expressed differently?
+   - Consider synonyms, paraphrases, and equivalent expressions
+   - Account for different levels of detail that maintain core meaning
+   - Recognize when different structures represent the same information
+
+2. **Structural Consistency** (30%): How well do the organizational patterns match?
+   - Field names and their semantic relationships
+   - Hierarchical organization and nesting patterns
+   - Data types and their appropriateness for the content
+
+3. **Content Accuracy** (20%): How accurate are the specific values and details?
+   - Factual correctness of information
+   - Precision of numerical values
+   - Completeness of required information
+
+4. **Functional Equivalence** (10%): Would these outputs serve the same purpose in practice?
+   - Usability for downstream applications
+   - Preservation of key relationships and dependencies
+
+## Scoring Guidelines:
+
+- **0.9-1.0**: Essentially identical or semantically equivalent with minor stylistic differences
+- **0.7-0.8**: Very similar with some differences in detail or structure that don't affect core meaning
+- **0.5-0.6**: Moderately similar with notable differences but shared core concepts
+- **0.3-0.4**: Some similarities but significant differences in structure or content
+- **0.1-0.2**: Minimal similarity with only basic shared elements
+- **0.0**: Completely different or unrelated
+
+## Instructions:
+
+1. Analyze both JSON structures carefully
+2. Consider the context and likely use case
+3. Focus on semantic meaning over exact textual matches
+4. Provide a single similarity score between 0.0 and 1.0
+5. Be consistent with human judgment patterns
+
+Generate result using calculate_similarity_score."""
+
+judge_schema = [
+    {
+        "toolSpec": {
+            "name": "calculate_similarity_score",
+            "description": "Calculate the similarity score between two structured JSON outputs",
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {
+                        "overall_score": {
+                            "type": "number",
+                            "description": "The similarity score between two structured JSON outputs, ranging from 0.0 to 1.0"
+                        },
+                        "structural_score": {
+                            "type": "number",
+                            "description": "The structural consistency score, ranging from 0.0 to 1.0"
+                        },
+                        "content_score": {
+                            "type": "number",
+                            "description": "The semantic equivalence score for values in json outputs, ranging from 0.0 to 1.0"
+                        }
+                    },
+                    "required": ["overall_score", "structural_score", "content_score"]
+                }
+            }
+        }
+    }
+]
+
+# Define default configuration inline to avoid import issues
+def _get_default_type_change_costs() -> Dict[Tuple[str, str], float]:
+    """Define default costs for type changes."""
+    costs = {}
+    types = ["object", "array", "string", "number", "boolean", "null"]
+    
+    # Default cost is 1.0
+    for t1 in types:
+        for t2 in types:
+            costs[(t1, t2)] = 1.0
+    
+    # Same type has zero cost
+    for t in types:
+        costs[(t, t)] = 0.0
+    
+    # Lower costs for some type conversions
+    costs[("string", "number")] = costs[("number", "string")] = 0.1
+    costs[("boolean", "string")] = costs[("string", "boolean")] = 0.1
+    costs[("number", "boolean")] = costs[("boolean", "number")] = 0.1
+    costs[("null", "string")] = costs[("string", "null")] = 0.1
+    costs[("null", "number")] = costs[("number", "null")] = 0.1
+    
+    # Higher costs for structure changes
+    costs[("object", "array")] = costs[("array", "object")] = 0.5
+    costs[("object", "string")] = costs[("string", "object")] = 0.5
+    costs[("object", "number")] = costs[("number", "object")] = 0.5
+    costs[("array", "string")] = costs[("string", "array")] = 0.5
+    costs[("array", "number")] = costs[("number", "array")] = 1
+    
+    return costs
+
+
 from transformers import logging
 logging.set_verbosity_error()
-
-def getEmbeddings(text, model_id, bedrock_client, max_retries=10, initial_delay=2, output_embedding_length=1024):
-    """
-    Get embeddings from Bedrock with proper retry and connection handling
-    """
-    # Validate input text
-    if not text or not text.strip():
-        warnings.warn(f"Empty or whitespace-only text provided for embedding: '{text}'")
-        return np.zeros(output_embedding_length)
-    
-    def exponential_delay(attempt):
-        # Add jitter to prevent thundering herd
-        jitter = 0.1 * initial_delay * np.random.random()
-        return initial_delay * (2 ** attempt) + jitter
-    
-    if model_id == "amazon.titan-embed-text-v1":
-        request_body = {
-            "inputText": text
-        }
-    elif model_id == "amazon.titan-embed-text-v2:0":
-        request_body = {
-            "inputText": text,
-            "dimensions": output_embedding_length,
-            "normalize": True,
-            "embeddingTypes": ["float"]
-        }
-    elif model_id == "cohere.embed-multilingual-v3":
-        request_body = {
-            "texts": [text],
-            "input_type": "clustering",
-            "truncate": "END",
-            "dimensions": output_embedding_length,
-            "normalize": True,
-            "embeddingTypes": ["float"]
-        }
-    else:
-        raise ValueError(f"Unknown model_id: {model_id}")
-
-    for attempt in range(max_retries):
-        try:
-            body = json.dumps(request_body)
-            response = bedrock_client.invoke_model(
-                body=body,
-                modelId=model_id,
-                accept="application/json",
-                contentType="application/json")
-            response_body = json.loads(response.get("body").read())
-            
-            # Handle different response formats
-            if model_id == "cohere.embed-multilingual-v3":
-                embedding = response_body.get("embeddings", [[]])[0]
-            else:
-                embedding = response_body.get("embedding", [])
-                
-            return np.array(embedding).astype(np.float32)
-        except Exception as e:
-            # Catch other exceptions (like connection errors)
-            print(f"Unexpected error on attempt {attempt + 1}: {str(e)}")
-            if attempt == max_retries - 1:
-                raise
-            
-            delay = exponential_delay(attempt)
-            print(f"Retrying in {delay:.2f} seconds...")
-            time.sleep(delay)
-
-    # This should be unreachable with the retry logic above
-    raise Exception("Max retries reached. Unable to get embeddings.")
-
-class StringSimilarityCache:
-    def __init__(self):
-        self.cache = {}
-    
-    def get_key(self, s1: str, s2: str) -> str:
-        return "|".join(sorted([s1, s2]))
-    
-    def get(self, s1: str, s2: str) -> Optional[float]:
-        return self.cache.get(self.get_key(s1, s2))
-    
-    def set(self, s1: str, s2: str, score: float):
-        self.cache[self.get_key(s1, s2)] = score
-    
-    def batch_set(self, pairs: List[Tuple[str, str]], scores: List[float]):
-        for (s1, s2), score in zip(pairs, scores):
-            self.set(s1, s2, score)
-
-class JsonNode:
-    """Node representation for JSON tree structure."""
-    
-    def __init__(self, label: str, value: Any = None, node_type: str = None):
-        """
-        Initialize a JSON node.
-        
-        Args:
-            label: The label (key or index) of the node
-            value: The value of the node (for leaf nodes)
-            node_type: The type of the node ('object', 'array', or value type)
-        """
-        self.label = label
-        self.value = value
-        self.children = []
-        self.node_type = node_type or self._determine_type(value)
-        self.path = label  # Full path to this node
-        
-    def _determine_type(self, value: Any) -> str:
-        """Determine the type of a node based on its value."""
-        if value is None:
-            return "null"
-        elif isinstance(value, dict):
-            return "object"
-        elif isinstance(value, list):
-            return "array"
-        elif isinstance(value, bool):
-            return "boolean"
-        elif isinstance(value, (int, float)):
-            return "number"
-        elif isinstance(value, str):
-            return "string"
-        else:
-            return str(type(value).__name__)
-    
-    def add_child(self, child: 'JsonNode'):
-        """Add a child node."""
-        self.children.append(child)
-    
-    def get_children(self):
-        """Get all children of this node (required for zss)."""
-        return self.children
-    
-    def get_label(self):
-        """Get the label of this node (required for zss)."""
-        return self.label
-    
-    def __str__(self):
-        """String representation of the node."""
-        if self.value is not None:
-            return f"{self.path} ({self.node_type}): {self.value}"
-        return f"{self.path} ({self.node_type})"
-    
-    def __repr__(self):
-        return self.__str__()
 
 class SemanticJsonTreeConsistencyEvaluator:
     """Evaluator for JSON structural consistency using Tree Edit Distance with semantic similarity."""
     
     def __init__(self, 
-                 original_zss: bool = False,
-                 path_weight_decay: float = 0.9,
+                 path_weight_decay: float = 1.0,
                  type_change_cost: Dict[Tuple[str, str], float] = None,
                  required_fields: Set[str] = None,
                  model_id: str = 'all-MiniLM-L6-v2',
                  chunk_size: int = 300,
-                 chunk_overlap: int = 50):
+                 chunk_overlap: int = 50,
+                 region_name: str = "us-west-2",
+                 weights: Dict[str, float] = {"type": 0.1, "value": 0.8, "key": 0.1},
+                 sort_keys: bool = True,
+                 sort_arrays: bool = True
+        ):
         """
         Initialize the evaluator with semantic capabilities.
         
         Args:
-            original_zss: whether using original zss
             path_weight_decay: Weight decay factor for deeper paths (0-1)
             type_change_cost: Custom costs for type changes
             required_fields: Set of required field paths
@@ -205,38 +176,35 @@ class SemanticJsonTreeConsistencyEvaluator:
             chunk_overlap: Overlap between chunks
         """
         self.path_weight_decay = path_weight_decay
-        self.type_change_cost = type_change_cost or self._default_type_change_costs()
+        self.type_change_cost = type_change_cost or _get_default_type_change_costs()
         self.required_fields = required_fields or set()
-        
-        self.cache = StringSimilarityCache()
         
         # Initialize embedding model if available
         self.embedding_model = None
         self.bedrock_client = None
+        self.llm_client = None
         self.model_id = model_id
         
+        boto_config = Config(
+            retries={
+                'max_attempts': 10,
+                'mode': 'adaptive'
+            },
+            max_pool_connections=50  # Increase connection pool size
+        )
+        
         if self.model_id in ["amazon.titan-embed-text-v1", "amazon.titan-embed-text-v2:0", "cohere.embed-multilingual-v3"]:
-            bedrock_config = Config(
-                max_pool_connections=50,  # Increase connection pool size
-                retries={'max_attempts': 5, 'mode': 'adaptive'},
-                connect_timeout=10,
-                read_timeout=30,
-                tcp_keepalive=True
-            )
-            session = boto3.Session()
-            
-            self.bedrock_client = session.client(
-                'bedrock-runtime',
-                config=bedrock_config,
-                region_name="us-west-2"
-            )
+            self.bedrock_client = create_bedrock_client(region_name=region_name, config=boto_config)
         else:
             self.embedding_model = SentenceTransformer(self.model_id)
             # Warm up the model
             self.embedding_model.encode(["test"], show_progress_bar=False)
         
+        # Initialize LLM client for similarity evaluation (using same Bedrock client)
+        self.llm_client = self.bedrock_client if self.bedrock_client else create_bedrock_client(region_name=region_name, config=boto_config)
+        
         # Cache for embeddings
-        self._embedding_cache = {}
+        self._cache = StringSimilarityCache()
         
         # Text splitting configuration
         self.chunk_size = chunk_size
@@ -244,129 +212,22 @@ class SemanticJsonTreeConsistencyEvaluator:
         
         self.calculate_similarity_method = {
             "ted": self.calculate_tree_edit_distance,
+            "sted": self.calculate_tree_edit_distance_opt,
             "bertscore": self.calculate_bertscore,
-            "deepdiff": self.calculate_similarity_with_deepdiff
+            "deepdiff": self.calculate_similarity_with_deepdiff,
+            "deepdiff_opt": self.calculate_similarity_with_deepdiff_opt,
+            "gnn": self.calculate_gnn_similarity,
+            "llm_judge": self.calculate_similarity_with_llm
         }
         
-        self.weights = {
-            'type': 0.1,
-            'value': 0.8,
-            'key': 0.1
-        }
+        self.weights = weights
         
-        self.original_zss = original_zss
+        self.sort_keys = sort_keys
+        self.sort_arrays = sort_arrays
+        
         self.batch_size_bertscore = 2000
         
-    def set_original_zss(self, original_zss: bool=False):
-        self.original_zss = original_zss
-    
-    def collect_all_string_pairs(self, json_outputs: Union[Dict, List[Dict]], gt: Union[Dict, List[Dict], None] = None) -> List[Tuple[str, str]]:
-        # get all values from json_outputs
-        output_values = self.collect_all_values(json_outputs)
-        
-        pairs = []
-        seen = set()
-            
-        ref_values = self.collect_all_values(gt) if gt else output_values.copy()
-            
-        # create all pairs from output_values and gt_values
-        for item1 in ref_values:
-            for item2 in output_values:
-                # Sort the pair to ensure consistent ordering
-                pair_tuple = tuple(sorted([str(item1), str(item2)]))
-                if pair_tuple not in seen:
-                    seen.add(pair_tuple)
-                    pairs.append((item1, item2))
-        return pairs
-    
-    def collect_all_values(self, data: Union[Dict, List, Any]) -> List[Tuple[str, Any]]:
-        """
-        Collect all values from a nested dictionary/list structure.
-        
-        Args:
-            data: The input data structure (dict, list, or primitive)
-            include_keys: If True, also collect dictionary keys as values
-            
-        Returns:
-            List of tuples (path, value) where path shows the location of the value
-        """
-        values = []
-        def _collect_recursive(obj):
-            """Recursively collect values with their paths."""
-            if isinstance(obj, dict):
-                # Collect dictionary values
-                for key, value in obj.items():
-                    _collect_recursive(value)
-                    
-            elif isinstance(obj, list):
-                # Collect list elements
-                for idx, item in enumerate(obj):
-                    _collect_recursive(item)
-                    
-            else:
-                # Leaf value (string, number, boolean, None, etc.)
-                if isinstance(obj, str):
-                    values.append(obj)
-        
-        _collect_recursive(data)
-        return values
-    
-    def batch_compute_similarities(self, pairs: List[Tuple[str, str]], method='cosine') -> Dict[Tuple[str, str], float]:
-        """Batch compute BERT scores for all unique pairs."""
-        uncached_pairs = [(s1, s2) for s1, s2 in pairs if self.cache.get(s1, s2) is None]
-    
-        if not uncached_pairs:
-            # Return cached values for requested pairs
-            return {(s1, s2): self.cache.get(s1, s2) for s1, s2 in pairs 
-                    if self.cache.get(s1, s2) is not None}
-        
-        batch_size = min(self.batch_size_bertscore, len(uncached_pairs))
-        # Process pairs by batch
-        for i in range(0, len(uncached_pairs), batch_size):
-            batch = uncached_pairs[i:i+batch_size]
-            refs, cands = zip(*batch)
-            #P, R, F1 = bert_score(list(cands), list(refs), lang="en", verbose=False)
-            #scores = [float(f.item()) for f in F1]
-            if method == "bertscore":
-                P, R, F1 = bert_score(list(cands), list(refs), lang="en", verbose=False)
-                scores = [float(f.item()) for f in F1]
-            else:
-                scores = [self._calculate_semantic_similarity(s1, s2) for s1, s2 in zip(list(cands), list(refs))]
-                
-            
-            self.cache.batch_set(batch, scores)
-        
-        return self.cache.cache
-        
-    def _default_type_change_costs(self) -> Dict[Tuple[str, str], float]:
-        """Define default costs for type changes."""
-        costs = {}
-        types = ["object", "array", "string", "number", "boolean", "null"]
-        
-        # Default cost is 1.0
-        for t1 in types:
-            for t2 in types:
-                costs[(t1, t2)] = 1.0
-        
-        # Same type has zero cost
-        for t in types:
-            costs[(t, t)] = 0.0
-        
-        # Lower costs for some type conversions
-        costs[("string", "number")] = costs[("number", "string")] = 0.5
-        costs[("boolean", "string")] = costs[("string", "boolean")] = 0.7
-        costs[("number", "boolean")] = costs[("boolean", "number")] = 0.7
-        costs[("null", "string")] = costs[("string", "null")] = 0.5
-        costs[("null", "number")] = costs[("number", "null")] = 0.5
-        
-        # Higher costs for structure changes
-        costs[("object", "array")] = costs[("array", "object")] = 1
-        costs[("object", "string")] = costs[("string", "object")] = 1
-        costs[("object", "number")] = costs[("number", "object")] = 1
-        costs[("array", "string")] = costs[("string", "array")] = 1
-        costs[("array", "number")] = costs[("number", "array")] = 1
-        
-        return costs
+        self.judge_model_id = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
     
     @lru_cache(maxsize=2000)
     def _get_embedding(self, text: str) -> Optional[np.ndarray]:
@@ -430,36 +291,12 @@ class SemanticJsonTreeConsistencyEvaluator:
             return 0.0
             
         similarity = dot_product / (norm1 * norm2)
+        similarity = np.clip(similarity, -1.0, 1.0)
         
-        return float(np.clip(similarity, -1.0, 1.0))
-    
-    def json_to_tree(self, json_obj: Any, path: str = "", parent_path: str = "") -> JsonNode:
-        """
-        Convert a JSON object to a tree representation.
+        # Scale from [-1, 1] to [0, 1]
+        similarity = (similarity + 1) / 2.0
         
-        Args:
-            json_obj: The JSON object to convert
-            path: The current path in the JSON structure
-            parent_path: The path of the parent node
-            
-        Returns:
-            A JsonNode representing the root of the tree
-        """
-        full_path = path if path else "root"
-        if isinstance(json_obj, dict):
-            # Create a node for the object
-            node = JsonNode(full_path, node_type="object")
-            
-            # Add children for each key-value pair
-            for key, value in sorted(json_obj.items()):  # Sort for deterministic behavior
-                child_path = f"{full_path}.{key}" if full_path != "root" else key
-                child = self.json_to_tree(value, child_path, full_path)
-                node.add_child(child)
-        else:
-            # Create a leaf node for primitive values
-            node = JsonNode(full_path, json_obj)
-        
-        return node
+        return float(similarity)
 
     def calculate_path_weight(self, path: str) -> float:
         """
@@ -526,79 +363,6 @@ class SemanticJsonTreeConsistencyEvaluator:
         
         return cost
     
-    def _normalize_path(self, path: str) -> str:
-        """
-        Normalize a path by replacing array indices with a placeholder.
-        This allows structural comparison while ignoring specific array indices.
-        
-        Args:
-            path: The path to normalize
-            
-        Returns:
-            Normalized path
-        """
-        # Replace array indices like [0], [1], etc. with [*]
-        normalized = re.sub(r'\[\d+\]', '[*]', path)
-        return normalized
-    
-    def _calculate_node_similarity(self, node1: JsonNode, node2: JsonNode, key_sim_threshold: float = 0.8) -> Dict[str, Any]:
-        """
-        Calculate similarity metrics between two nodes.
-        This shared method is used by both are_nodes_equal and update_cost.
-        
-        Args:
-            node1: First node
-            node2: Second node
-            
-        Returns:
-            Dictionary with similarity metrics
-        """
-        # Extract key names for comparison
-        key1 = node1.label.split('.')[-1] if '.' in node1.label else node1.label
-        key2 = node2.label.split('.')[-1] if '.' in node2.label else node2.label
-        
-        # Remove array brackets for comparison
-        key1 = re.sub(r'\[\d+\]', '', key1)
-        key2 = re.sub(r'\[\d+\]', '', key2)
-        
-        # Calculate basic metrics
-        type_match = node1.node_type == node2.node_type
-        
-        # Compare paths
-        path1 = self._normalize_path(node1.path)
-        path2 = self._normalize_path(node2.path)
-        path_match = path1 == path2
-        
-        # Calculate key similarity
-        key_sim = self._calculate_semantic_similarity(key1, key2)
-        
-        value_cost = 1.0
-                
-        #string_pairs = []
-        if key_sim > key_sim_threshold:
-            # Calculate value similarity for leaf nodes
-            if not node1.children and not node2.children and type_match:
-                if node1.node_type == "string":
-                    #string_pairs.append((str(node1.value), str(node2.value)))
-                    value_cost = 1 - self._compare_strings(str(node1.value), str(node2.value))
-                elif node1.node_type == "number":
-                    value_cost = 1 - self._compare_numbers(float(node1.value), float(node2.value))
-                elif node1.node_type == "array":
-                    value_cost = self._compare_arrays_unordered(list(node1.value), list(node2.value), node1.label, node2.label)
-                elif node1.value == node2.value:  # For boolean, null, etc.
-                    value_cost = 0.0
-        
-        #print(f"node1.node_type: {node1.node_type}, value_sim: {value_sim}") 
-        return {
-            "type_match": type_match,
-            "path_match": path_match,
-            "key_sim": key_sim,
-            "value_cost": value_cost,
-            "key1": key1,
-            "key2": key2,
-            "is_leaf": not node1.children and not node2.children
-        }
-    
     def _compare_strings(self, str1: str, str2: str, method="cosine") -> float:
         """Compare two strings with optional semantic similarity and chunking for long text."""
         # Quick equality check
@@ -607,10 +371,9 @@ class SemanticJsonTreeConsistencyEvaluator:
             return 1.0
         
         # Check cache first
-        cached = self.cache.get(str1, str2)
-        if cached is not None:
-            #print(f"str1: {str1}, str2: {str2}, sim: {cached}")
-            return cached
+        cached_sim = self._cache.get(str1, str2)
+        if cached_sim is not None:
+            return cached_sim
         
         if len(str1) < self.chunk_size and len(str2) < self.chunk_size:
             if method == "bertscore":
@@ -618,188 +381,45 @@ class SemanticJsonTreeConsistencyEvaluator:
                 sim = float(F1.item())
             else:
                 sim = self._calculate_semantic_similarity(str1, str2)
-                # Apply domain penalty for unrelated content
-                sim = self._apply_domain_penalty(str1, str2, sim)
+            self._cache.set(str1, str2, sim)
             return sim
         else:
-            return self._compare_long_strings_hungarian(str1, str2)
-    
-    def _apply_domain_penalty(self, str1: str, str2: str, similarity: float) -> float:
-        """
-        Apply domain-specific penalty for unrelated content.
-        
-        Args:
-            str1: First string
-            str2: Second string  
-            similarity: Base similarity score
+            chunks1 = self._split_natural_text(str1)
+            chunks2 = self._split_natural_text(str2)
             
-        Returns:
-            Adjusted similarity score
-        """
-        # Simple implementation - can be enhanced with domain-specific logic
-        if not str1.strip() or not str2.strip():
-            return 0.0
+            return 1 - self._compare_arrays_unordered(chunks1, chunks2, "str1_chunks", "str2_chunks")
         
-        # Apply penalty for very different string lengths
-        len_ratio = min(len(str1), len(str2)) / max(len(str1), len(str2))
-        if len_ratio < 0.3:  # Very different lengths
-            similarity *= 0.8
-            
-        return similarity
-    
-    def _compare_long_strings_hungarian(self, str1: str, str2: str) -> float:
-        """Compare long strings by breaking them into chunks and using Hungarian algorithm for optimal matching."""
-        # Split into chunks (sentences or paragraphs)
-        chunks1 = self._split_into_chunks(str1)
-        chunks2 = self._split_into_chunks(str2)
-        
-        # Create similarity matrix between all chunks
-        similarity_matrix = np.zeros((len(chunks1), len(chunks2)))
-        
-        
-        #string_pairs = []
-        for i, chunk1 in enumerate(chunks1):
-            for j, chunk2 in enumerate(chunks2):
-                # Use appropriate method for chunk comparison
-                similarity_matrix[i, j] = self._compare_strings(chunk1, chunk2)
-                #string_pairs.append((chunk1, chunk2))
-        
-        #print(f"_compare_long_strings_hungarian: {len(string_pairs)}")
-        
-        row_ind, col_ind = linear_sum_assignment(-similarity_matrix)  # Negate for max similarity
-        
-        # Calculate total similarity of matched chunks
-        matched_similarities = [similarity_matrix[i, j] for i, j in zip(row_ind, col_ind)]
-        
-        # Calculate normalized similarity (accounting for unmatched chunks)
-        # This divides by the max number of chunks to properly penalize unmatched content
-        total_similarity = sum(matched_similarities)
-        max_chunks = max(len(chunks1), len(chunks2))
-        normalized_similarity = total_similarity / max_chunks if max_chunks > 0 else 0.0
-        
-        # Also calculate traditional average for comparison
-        avg_similarity = sum(matched_similarities) / len(matched_similarities) if matched_similarities else 0.0
-        
-        # Calculate coverage (what percentage of chunks are matched well)
-        good_matches = sum(1 for sim in matched_similarities if sim > 0.7)
-        coverage = good_matches / max_chunks if max_chunks > 0 else 0.0
-        
-        # Combine normalized similarity and coverage
-        # Weight similarity more heavily but ensure coverage affects the score
-        chunk_sim = 0.8 * normalized_similarity + 0.2 * coverage
-        
-        # For debugging purposes, store these metrics
-        self._last_hungarian_metrics = {
-            "avg_similarity": avg_similarity,
-            "normalized_similarity": normalized_similarity,
-            "coverage": coverage,
-            "matched_count": len(matched_similarities),
-            "chunks1_count": len(chunks1),
-            "chunks2_count": len(chunks2)
-        }
-        
-        # Return the better of the two approaches
-        return chunk_sim  # Slight penalty for direct comparison
-    
-    def _split_into_chunks(self, text: str) -> List[str]:
-        """Split text into meaningful chunks based on content type."""
-        # Check if this is code or structured data
-        if self._is_structured_text(text):
-            return self._split_structured_text(text)
-        else:
-            return self._split_natural_text(text)
-    
-    def _is_structured_text(self, text: str) -> bool:
-        """Detect if text is code, JSON, or other structured format."""
-        # Check for code indicators
-        code_indicators = [
-            text.count('{') > 3 and text.count('}') > 3,  # Likely code blocks
-            text.count('[') > 3 and text.count(']') > 3,  # Likely arrays
-            text.strip().startswith(('def ', 'function', 'class ', '<?php', '<html', '#!/')),
-            text.count('import ') > 1 or text.count('from ') > 1,  # Python imports
-            text.count(';') > text.count('.') * 2,  # Likely code with semicolons
-            text.count('=') > text.count(' ') / 10  # Many assignments
-        ]
-        
-        return any(code_indicators)
-    
-    def _split_structured_text(self, text: str) -> List[str]:
-        """Split structured text (code, JSON) into logical chunks."""
-        # Split by lines first
-        lines = [line.strip() for line in text.split('\n') if line.strip()]
-        
-        # For very short texts, return as is
-        if len(lines) <= 5:
-            return lines
-        
-        # Group lines into logical blocks (e.g., functions, blocks)
-        chunks = []
-        current_chunk = []
-        indent_level = 0
-        
-        for line in lines:
-            # Check for block start/end
-            if '{' in line:
-                indent_level += line.count('{')
-            if '}' in line:
-                indent_level -= line.count('}')
-            
-            current_chunk.append(line)
-            
-            # End of logical block or function
-            if (indent_level == 0 and line.endswith((';', '}')) or 
-                line.startswith(('def ', 'class ', 'function')) or
-                len(current_chunk) > 10):  # Avoid chunks getting too large
-                
-                chunks.append('\n'.join(current_chunk))
-                current_chunk = []
-        
-        # Add any remaining lines
-        if current_chunk:
-            chunks.append('\n'.join(current_chunk))
-        
-        return chunks
-    
-    def _split_natural_text(self, text: str) -> List[str]:
+    def _split_natural_text(self, text: str, coding_language: str=None) -> List[str]:
         """Split natural language text into sentences or paragraphs using LangChain if available and enabled."""
         # For short text, don't split at all
         if len(text) < self.chunk_size:
             return [text]
         
-        # Create a text splitter that tries to create semantically meaningful chunks
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=self.chunk_size,
-            chunk_overlap=self.chunk_overlap,
-            length_function=len,
-            separators=["\n\n", "\n", ".", "!", "?", ";", ":", " ", ""]  # Try these separators in order
-        )
+        if coding_language:
+            #ToDo: add support for langchain
+            text_splitter = None
+            pass
+        else:
+            # Create a text splitter that tries to create semantically meaningful chunks
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=self.chunk_size - self.chunk_overlap,
+                chunk_overlap=self.chunk_overlap,
+                length_function=len,
+                separators=["\n\n", "\n", ".", "!", "?", ";", ":", " "]  # Try these separators in order
+            )
         
-        # Split the text
-        return text_splitter.split_text(text)
+        try:
+            # Split the text
+            return text_splitter.split_text(text)
+        except Exception as e:
+            warnings.warn(f"Failed to split text: {e}\n{text}")
+            return [text]
     
     def _compare_numbers(self, num1: float, num2: float) -> float:
         """Compare two numbers with tolerance."""
         return 0 if num1 != num2 else 1
-    
-    def _count_json_elements(self, json_obj: Any) -> int:
-        """
-        Count the total number of elements in a JSON structure.
-        Used for normalizing structural penalties.
-        
-        Args:
-            json_obj: JSON object to count elements in
             
-        Returns:
-            Total number of elements (keys, values, array items)
-        """
-        if isinstance(json_obj, dict):
-            return len(json_obj) + sum(self._count_json_elements(v) for v in json_obj.values())
-        elif isinstance(json_obj, list):
-            return len(json_obj) + sum(self._count_json_elements(item) for item in json_obj)
-        else:
-            return 1  # Primitive value counts as 1 element
-            
-    def update_cost(self, node1: JsonNode, node2: JsonNode) -> float:
+    def update_cost(self, node1: JsonNode, node2: JsonNode, structural_weight=0.5) -> float:
         """
         Calculate the cost of updating a node.
         
@@ -810,58 +430,99 @@ class SemanticJsonTreeConsistencyEvaluator:
         Returns:
             The cost of update
         """
-        # Quick check for identical nodes
+        structural_cost = self.structural_update_cost(node1, node2)
+        content_cost = self.content_update_cost(node1, node2)
+        
+        # Combined cost with weighting
+        return structural_weight * structural_cost + (1 - structural_weight) * content_cost
+    
+    def _calculate_structural_similarity(self, node1: JsonNode, node2: JsonNode) -> float:
+        """Calculate structural similarity: paths and field names only"""        
+        path1 = re.sub(r'\[\d+\]', '[*]', node1.path)
+        path2 = re.sub(r'\[\d+\]', '[*]', node2.path)
+        path_match = path1 == path2
+        
+        key1 = node1.label.split('.')[-1] if '.' in node1.label else node1.label
+        key2 = node2.label.split('.')[-1] if '.' in node2.label else node2.label
+        key1 = re.sub(r'\[\d+\]', '', key1)
+        key2 = re.sub(r'\[\d+\]', '', key2)
+                
+        # replace all special characters such as -, _, % with space
+        key1 = re.sub(r'[^a-zA-Z0-9]', ' ', key1)
+        key2 = re.sub(r'[^a-zA-Z0-9]', ' ', key2)
+                
+        field_similarity = self._calculate_semantic_similarity(key1, key2)
+        structural_similarity = (field_similarity + (1 if path_match else 0)) / 2
+        
+        return structural_similarity
+    
+    def _calculate_content_similarity(self, node1: JsonNode, node2: JsonNode, structural_sim_threshold=0.3) -> float:
+        """Calculate content similarity: includes type changes and value differences"""
+        
+        structural_sim = self._calculate_structural_similarity(node1, node2)
+                
+        if not node1.children and not node2.children and structural_sim > structural_sim_threshold:
+            # Same type comparisons
+            if node1.node_type == node2.node_type:
+                if node1.node_type == "string":                    
+                    return self._compare_strings(str(node1.value), str(node2.value))                
+                elif node1.node_type == "number":
+                    return self._compare_numbers(float(node1.value), float(node2.value))
+                elif node1.node_type == "array":
+                    return 1 - self._compare_arrays_unordered(list(node1.value), list(node2.value), node1.label, node2.label, variation_type="content")
+                elif node1.node_type == "object":
+                    return self._calculate_content_similarity(node1.value, node2.value, structural_sim_threshold=structural_sim_threshold)
+                else:
+                    return 1.0
+            else:
+                val1_str = str(node1.value)
+                val2_str = str(node2.value)
+                                
+                # Use semantic similarity on string representations
+                semantic_sim = self._calculate_semantic_similarity(val1_str, val2_str)
+                
+                # Apply small type penalty
+                type_cost = self.type_change_cost.get((node1.node_type, node2.node_type), 1.0)
+                content_similarity = max(0.0, semantic_sim - type_cost)
+                
+                return content_similarity
+        
+        return 0.0
+        
+    def structural_update_cost(self, node1: JsonNode, node2: JsonNode) -> float:
+        """Calculate structural update cost only"""
         if (node1.label == node2.label and 
             node1.node_type == node2.node_type and 
-            node1.value == node2.value and
             len(node1.children) == len(node2.children)):
-            #print(f"update_cost: {node1.label}->{node1.value}, {node2.label}->{node2.value} cost: 0")
-            return 0.0  # Identical nodes have zero update cost
+            return 0.0  # Structurally identical
         
-        # Get similarity metrics from shared calculation
-        sim = self._calculate_node_similarity(node1, node2)
-        #print(f"update_cost-> sim: {sim}")
-        # Base cost for type change
-        type_cost = self.type_change_cost.get(
-            (node1.node_type, node2.node_type), 
-            1.0  # Default cost if not specified
-        )
+        structural_similarity = self._calculate_structural_similarity(node1, node2)
+        cost = 1 - structural_similarity
         
-        # Calculate value cost
-        if sim["type_match"] and sim["is_leaf"]:
-            # For leaf nodes with same type, use the value similarity
-            value_cost = sim['value_cost']
-        else:
-            value_cost = 1.0  # No value cost if types are different or not leaf nodes
-        
-        
-        # Calculate key difference factor
-        key_cost = 1 - sim["key_sim"]
-        
-        # 特殊情况处理
-        if sim["type_match"] and sim["is_leaf"] and sim["value_cost"] == 0 and sim["key_sim"] == 1.0:
-            #print(f"update_cost: {node1.label}->{node1.value}, {node2.label}->{node2.value} cost: 0")
-            return 0.0  # 完全相同
-        
-        #print(f"type_cost: {type_cost}, value_cost: {value_cost}, key_cost: {key_cost}")
-        
-        # 加权平均
-        cost = (
-            self.weights['type'] * type_cost +
-            self.weights['value'] * value_cost +
-            self.weights['key'] * key_cost
-        )
-        
-        # Apply path-based weighting - consider both paths
-        # Use the average of both path weights for symmetry
+        # Apply path weighting
         path_weight1 = self.calculate_path_weight(node1.path)
         path_weight2 = self.calculate_path_weight(node2.path)
         avg_path_weight = (path_weight1 + path_weight2) / 2.0
         
-        cost *= avg_path_weight
-        return cost
+        return cost * avg_path_weight
     
-    def _compare_arrays_unordered(self, arr1: List[Any], arr2: List[Any], arr1_label: str, arr2_label: str) -> float:
+    def content_update_cost(self, node1: JsonNode, node2: JsonNode) -> float:
+        """Calculate content update cost only"""
+        if (node1.node_type == node2.node_type and 
+            node1.value == node2.value):
+            return 0.0  # Content identical
+        
+        content_similarity = self._calculate_content_similarity(node1, node2)
+        cost = 1 - content_similarity
+        
+        # Apply path weighting
+        path_weight1 = self.calculate_path_weight(node1.path)
+        path_weight2 = self.calculate_path_weight(node2.path)
+        avg_path_weight = (path_weight1 + path_weight2) / 2.0
+        
+        return cost * avg_path_weight
+    
+    def _compare_arrays_unordered(self, arr1: List[Any], arr2: List[Any], arr1_label: str, arr2_label: str, variation_type="content") -> float:
         """Compare arrays without considering order using optimal matching."""
         if len(arr1) == 0 and len(arr2) == 0:
             return 0  # Both empty arrays are identical
@@ -882,12 +543,12 @@ class SemanticJsonTreeConsistencyEvaluator:
                     cost_matrix[i, j] = 1-self._compare_numbers(float(item1), float(item2))
                 elif isinstance(item1, dict):
                     # Recursive comparison for nested objects
-                    tree1 = self.json_to_tree(item1, f"{arr1_label}")
-                    tree2 = self.json_to_tree(item2, f"{arr2_label}")
-                    cost_matrix[i, j] = self._calculate_optimal_matching_cost(tree1, tree2)
+                    tree1 = JsonNode.from_dict(item1, f"{arr1_label}", sort_arrays=self.sort_arrays, sort_keys=self.sort_keys)
+                    tree2 = JsonNode.from_dict(item2, f"{arr2_label}", sort_arrays=self.sort_arrays, sort_keys=self.sort_keys)
+                    cost_matrix[i, j] = self._calculate_optimal_matching_cost(tree1, tree2, variation_type=variation_type)
                 elif isinstance(item1, list):
                     # Recursive array comparison
-                    cost_matrix[i, j] = self._compare_arrays_unordered(item1, item2, arr1_label, arr2_label)
+                    cost_matrix[i, j] = self._compare_arrays_unordered(item1, item2, arr1_label, arr2_label, variation_type=variation_type)
                 elif item1 and item1 == item2:
                     cost_matrix[i, j] = 0.0
                 else:
@@ -930,23 +591,32 @@ class SemanticJsonTreeConsistencyEvaluator:
         # (This handles cases where one array is larger)
         unmatched_from_arr1 = len1 - matched_elements
         unmatched_from_arr2 = len2 - matched_elements
-        total_cost += max(0, unmatched_from_arr1) + max(0, unmatched_from_arr2)
+        total_cost += max(max(0, unmatched_from_arr1), max(0, unmatched_from_arr2))
         
         # Normalize by the maximum array length
         normalized_cost = total_cost / max_len if max_len > 0 else 0
-        
-        return normalized_cost
+                
+        return min(normalized_cost, 1)
     
     def _calculate_optimal_matching_cost(
-        self, tree1: JsonNode, tree2: JsonNode
+        self, tree1: JsonNode, tree2: JsonNode, variation_type: str = "combined"
     ) -> float:
         """
         Calculate optimal matching cost between two trees using Hungarian algorithm.
-        This addresses the issue where tree edit distance makes suboptimal choices due to ordering.
+        
+        Args:
+            tree1: First tree
+            tree2: Second tree  
+            variation_type: "structural", "content", or "combined"
         """
         # Base case: both are leaf nodes
         if not tree1.children and not tree2.children:
-            return self.update_cost(tree1, tree2)
+            if variation_type == "structural":
+                return self.structural_update_cost(tree1, tree2)
+            elif variation_type == "content":
+                return self.content_update_cost(tree1, tree2)
+            else:  # combined
+                return self.update_cost(tree1, tree2)
 
         # If one is leaf and other is not, use insert/delete costs
         if not tree1.children and tree2.children:
@@ -963,127 +633,251 @@ class SemanticJsonTreeConsistencyEvaluator:
         children2 = tree2.children
         
         if not children1 and not children2:
-            return self.update_cost(tree1, tree2)
+            if variation_type == "structural":
+                return self.structural_update_cost(tree1, tree2)
+            elif variation_type == "content":
+                return self.content_update_cost(tree1, tree2)
+            else:
+                return self.update_cost(tree1, tree2)
 
         # Create cost matrix for Hungarian algorithm
         n1, n2 = len(children1), len(children2)
         max_size = max(n1, n2)
+        cost_matrix = [[float('inf')] * max_size for _ in range(max_size)]
 
-        # Pad to square matrix
-        cost_matrix = np.full((max_size, max_size), float("inf"))
-
-        # Fill actual costs
+        # Fill cost matrix
         for i in range(n1):
             for j in range(n2):
                 # Cost of matching child i with child j
                 cost_matrix[i][j] = self._calculate_optimal_matching_cost(
-                    children1[i], children2[j]
+                    children1[i], children2[j], variation_type
                 )
 
-        # Cost of unmatched nodes (insert/delete)
-        for i in range(n1, max_size):
-            for j in range(n2):
-                cost_matrix[i][j] = self.insert_cost(children2[j])
-
+        # Add deletion costs for unmatched nodes in tree1
         for i in range(n1):
             for j in range(n2, max_size):
                 cost_matrix[i][j] = self.delete_cost(children1[i])
 
-        # Solve assignment problem
-        row_indices, col_indices = linear_sum_assignment(cost_matrix)
+        # Add insertion costs for unmatched nodes in tree2
+        for i in range(n1, max_size):
+            for j in range(n2):
+                cost_matrix[i][j] = self.insert_cost(children2[j])
 
-        # Calculate total cost
-        total_cost = self.update_cost(tree1, tree2)  # Cost of updating root nodes
-        for i, j in zip(row_indices, col_indices):
-            total_cost += cost_matrix[i][j]
+        # Solve assignment problem using Hungarian algorithm
+        from scipy.optimize import linear_sum_assignment
+        row_indices, col_indices = linear_sum_assignment(cost_matrix)
         
-        #print(f"total_cost: {total_cost}")
-        return total_cost
+        total_cost = sum(cost_matrix[i][j] for i, j in zip(row_indices, col_indices))
+        
+        # Calculate actual matched pairs
+        matched_pairs = sum(1 for i, j in zip(row_indices, col_indices) if i < n1 and j < n2)
+        unmatched_total = (n1 - matched_pairs) + (n2 - matched_pairs)
+        
+        # Add size penalty based on unmatched elements
+        size_penalty = min(unmatched_total * 0.1, max_size * 0.3)
+        
+        total_cost += size_penalty
+                
+        normalized_cost = total_cost / len(row_indices)
+        normalized_cost = min(normalized_cost, 1.0)
+        
+        #return total_cost if total_cost > 0 else 0
+        return normalized_cost
     
-    def calculate_tree_edit_distance(self, json1: Dict[str, Any], json2: Dict[str, Any]) -> float:
+    def calculate_tree_edit_distance_opt(self, json1: Dict[str, Any], json2: Dict[str, Any], variation_type: str = "combined") -> float:
+        return self.calculate_tree_edit_distance(json1, json2, original_zss=False, variation_type=variation_type)
+    
+    def calculate_tree_edit_distance(self, json1: Dict[str, Any], json2: Dict[str, Any], original_zss=True, variation_type: str = "combined") -> float:
         """
         Calculate tree edit distance between two JSON objects.
         
         Args:
             json1: First JSON object
             json2: Second JSON object
+            original_zss: Whether to use original ZSS algorithm
+            variation_type: "structural", "content", or "combined"
             
         Returns:
             similarity_score
         """
+        json1 = {"root": json1} if isinstance(json1, dict) else json1
+        json2 = {"root": json2} if isinstance(json2, dict) else json2
+        
         # Convert JSONs to trees
-        tree1 = self.json_to_tree(json1)
-        tree2 = self.json_to_tree(json2)
+        tree1 = JsonNode.from_dict(json1, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys)
+        tree2 = JsonNode.from_dict(json2, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys)
         
-        # Use Zhang-Shasha algorithm from zss
-        # Check which version of zss API we're using
-        
-        if self.original_zss:
+        if original_zss:
             try:
-                # Newer zss versions
+                # For ZSS, use appropriate cost function based on variation_type
+                """
+                if variation_type == "structural":
+                    update_cost_func = self.structural_update_cost
+                elif variation_type == "content":
+                    update_cost_func = self.content_update_cost
+                else:
+                    update_cost_func = self.update_cost
+                
                 distance = zss.distance(
                     tree1, tree2,
                     get_children=lambda x: x.get_children(),
                     insert_cost=self.insert_cost,
                     remove_cost=self.delete_cost,
-                    update_cost=self.update_cost
+                    update_cost=update_cost_func
                 )
+                """
+                distance = zss.simple_distance(tree1, tree2, get_children=lambda x: x.get_children())
+                max_node = (tree1.count_nodes(), tree2.count_nodes())
+                return 1 - distance/max_node
+                
             except TypeError as e:
                 raise TypeError(
                     f"Failed to calculate tree distance. Ensure zss is properly installed "
                     f"and trees have compatible structure: {str(e)}"
                 ) from e
         else:
-            distance = self._calculate_optimal_matching_cost(tree1, tree2)
-            
-        # Calculate tree sizes for normalization
-        size1 = self._count_nodes(tree1)
-        size2 = self._count_nodes(tree2)
-        
-        max_cost = size1 + size2
-        
-        # Convert distance to similarity
-        if max_cost == 0:
-            return 1.0  # Identical empty structures
-        
-        # Normalize distance and convert to similarity
-        normalized_distance = distance / max_cost
-        similarity = 1.0 - normalized_distance
-        
-        # Ensure similarity is in [0, 1] range
-        return max(0.0, min(1.0, similarity))
-        
-    def _count_nodes(self, node: JsonNode) -> int:
-        """Count the number of nodes in a tree."""
-        count = 1 if node.value else 0 # Count the current node
-        for child in node.get_children():
-            count += self._count_nodes(child)
-        
-        if node.node_type == "array" and len(node.value) > 0 and isinstance(node.value[0],dict):
-            for el in node.value:
-                el_tree = self.json_to_tree(el)
-                count += self._count_nodes(el_tree)
-        return count
-    
-    def _normalize_to_field_path(self, path: str) -> str:
-        """
-        Normalize a path to field level by removing array indices.
-        
-        Args:
-            path: The path to normalize
-            
-        Returns:
-            Normalized field path
-        """
-        # Replace array indices like [0], [1], etc. with [*]
-        normalized = re.sub(r'\[\d+\]', '[*]', path)
-        return normalized
+            distance = self._calculate_optimal_matching_cost(tree1, tree2, variation_type)
+                
+        similarity = 1.0 - distance
+        return similarity
     
     def calculate_bertscore(self, json1: Dict[str, Any], json2: Dict[str, Any], **kwargs) -> float:
-        P, R, F1 = bert_score([str(json1)], [str(json2)], lang="en")
+        # Preprocess JSONs to make them order-invariant
+        tree1 = JsonNode.from_dict(json1, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys)
+        tree2 = JsonNode.from_dict(json2, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys)
+        processed_json1 = tree1.reconstruct_json()
+        processed_json2 = tree2.reconstruct_json()
+        
+        P, R, F1 = bert_score([str(processed_json1)], [str(processed_json2)], lang="en")
         return float(F1.item())
     
+    def calculate_similarity_with_llm(self, json1: [Dict[str, Any], List], json2: [Dict[str, Any], List], 
+                                     llm_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0", 
+                                     max_retries: int = 3, **kwargs) -> float:
+        """
+        Calculate similarity between two JSON structures using an LLM judge.
+        
+        Args:
+            json1: First JSON object or list
+            json2: Second JSON object or list
+            llm_model_id: The LLM model to use for evaluation
+            max_retries: Maximum number of retry attempts
+            
+        Returns:
+            Similarity score between 0.0 and 1.0
+        """
+        try:
+            # Prepare the JSON structures for comparison
+            json1_str = json.dumps(json1, indent=2, ensure_ascii=False, sort_keys=True)
+            json2_str = json.dumps(json2, indent=2, ensure_ascii=False, sort_keys=True)
+            
+            # Create the evaluation prompt
+            user_prompt = f"""Please evaluate the similarity between these two JSON structures:
+
+JSON Structure 1:
+```json
+{json1_str}
+```
+
+JSON Structure 2:
+```json
+{json2_str}
+```
+
+Provide a similarity score between 0.0 and 1.0 based on semantic equivalence, structural consistency, content accuracy, and functional equivalence."""
+            message = build_message(texts=[user_prompt])
+            response = inference_with_converse_api(
+                self.llm_client,
+                model_id=llm_model_id,
+                messages=[message],
+                system_prompts=SYSTEM_PROMPT_JUDGE,
+                max_tokens=2000,
+                temperature=0.1,
+                tools=judge_schema
+            )
+            
+            return get_json(response, "calculate_similarity_score")
+        except Exception as e:
+            warnings.warn(f"Error in LLM similarity calculation: {str(e)}")
+            # print error trace
+            import traceback
+            traceback.print_exc()
+            return {}
+        
+    def calculate_gnn_similarity(self, json1: [Dict[str, Any], List], json2: [Dict[str, Any], List], **kwargs) -> float:
+        """
+        Calculate similarity using GNN approach from gnn.py.
+        
+        Args:
+            json1: First JSON object or list
+            json2: Second JSON object or list
+            
+        Returns:
+            Similarity score between 0.0 and 1.0
+        """
+        try:
+            if isinstance(json1, list):
+                json1 = {"root": json1}
+            if isinstance(json2, list):
+                json2 = {"root": json2}
+            
+            # Check if we have the embedding model
+            text_model = SentenceTransformer("all-MiniLM-L6-v2")
+            
+            # Use the compare_json function from gnn.py
+            similarity = compare_json(json1, json2, text_model)
+            
+            return float(max(0.0, min(1.0, similarity)))
+            
+        except Exception as e:
+            warnings.warn(f"Error in GNN similarity calculation: {str(e)}")
+            return 0.0
+    
+    def batch_compute_llm_similarities(self, json_pairs: List[Tuple[Dict, Dict]], 
+                                      llm_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0") -> Dict[Tuple[str, str], float]:
+        """
+        Batch compute LLM similarities for multiple JSON pairs.
+        
+        Args:
+            json_pairs: List of (json1, json2) tuples to evaluate
+            llm_model_id: The LLM model to use for evaluation
+            
+        Returns:
+            Dictionary mapping JSON pair hashes to similarity scores
+        """
+        results = {}
+        
+        for json1, json2 in json_pairs:
+            # Create a hash key for caching
+            json1_str = json.dumps(json1, sort_keys=True)
+            json2_str = json.dumps(json2, sort_keys=True)
+            cache_key = (json1_str, json2_str)
+            
+            # Check cache first
+            cached_score = self._cache.get(json1_str, json2_str)
+            if cached_score is not None:
+                results[cache_key] = cached_score
+                continue
+            
+            # Calculate similarity using LLM
+            try:
+                similarity = self.calculate_similarity_with_llm(json1, json2, llm_model_id=llm_model_id)
+                results[cache_key] = similarity
+                
+                # Cache the result
+                self._cache.set(json1_str, json2_str, similarity)
+                
+            except Exception as e:
+                warnings.warn(f"Failed to calculate LLM similarity for pair: {str(e)}")
+                results[cache_key] = 0.0
+        
+        return results
+    
     def calculate_similarity_with_deepdiff(self, json1: [Dict[str, Any], List], json2: [Dict[str, Any], List], **kwargs) -> float:
+        diff = DeepDiff(json1, json2, ignore_order=True, cache_size=5000, get_deep_distance=True)
+        return 1- diff['deep_distance']
+    
+    def calculate_similarity_with_deepdiff_opt(self, json1: [Dict[str, Any], List], json2: [Dict[str, Any], List], variation_type: str = "combined", structural_weight=0.5, **kwargs) -> float:
         """
         Calculate similarity using DeepDiff with enhanced value comparison.
         Uses semantic similarity for strings and proper comparison for numbers.
@@ -1091,6 +885,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         Args:
             json1: First JSON object
             json2: Second JSON object
+            variation_type: "structural", "content", or "combined"
             
         Returns:
             Similarity score between 0 and 1 (1 = identical, 0 = completely different)
@@ -1103,196 +898,116 @@ class SemanticJsonTreeConsistencyEvaluator:
             if not diff:
                 return 1.0
             
-            # Calculate similarity based on different types of changes
-            total_similarity_score = 0.0
-            total_comparisons = 0
-            
-            # Handle value changes with semantic comparison
-            if 'values_changed' in diff:
-                for path, change in diff['values_changed'].items():
-                    old_value = change['old_value']
-                    new_value = change['new_value']
-                    
-                    # Use appropriate comparison method based on value types
-                    if isinstance(old_value, str) and isinstance(new_value, str):
-                        # Use semantic string comparison
-                        value_similarity = self._compare_strings(old_value, new_value)
-                    elif isinstance(old_value, (int, float)) and isinstance(new_value, (int, float)):
-                        # Use number comparison
-                        value_similarity = self._compare_numbers(float(old_value), float(new_value))
-                    elif isinstance(old_value, bool) and isinstance(new_value, bool):
-                        # Boolean comparison
-                        value_similarity = 1.0 if old_value == new_value else 0.0
-                    elif old_value is None or new_value is None:
-                        # Null comparison
-                        value_similarity = 1.0 if old_value == new_value else 0.0
-                    elif isinstance(old_value, (list, dict)) and isinstance(new_value, (list, dict)):
-                        value_similarity = self.calculate_similarity_with_deepdiff(old_value, new_value)
-                    else:
-                        # Fallback for other types (convert to string and compare)
-                        value_similarity = self._compare_strings(str(old_value), str(new_value))
-                    
-                    total_similarity_score += value_similarity
-                    total_comparisons += 1
-            
-            # Handle structural changes (additions/removals) - these get lower similarity
-            structural_changes = 0
-            
-            if 'dictionary_item_added' in diff:
-                structural_changes += len(diff['dictionary_item_added'])
-            
-            if 'dictionary_item_removed' in diff:
-                structural_changes += len(diff['dictionary_item_removed'])
-            
-            if 'iterable_item_added' in diff:
-                structural_changes += len(diff['iterable_item_added'])
-            
-            if 'iterable_item_removed' in diff:
-                structural_changes += len(diff['iterable_item_removed'])
-            
-            if 'type_changes' in diff:
-                # Type changes are significant structural differences
-                structural_changes += len(diff['type_changes']) * 2
-            
-            # Calculate overall similarity using a change-ratio approach
-            if total_comparisons == 0 and structural_changes == 0:
-                return 1.0  # No changes found
-            
-            # Count total comparable elements in both JSONs
-            total_elements_json1 = self._count_json_elements(json1)
-            total_elements_json2 = self._count_json_elements(json2)
-            
-            # Use the larger JSON size as the base for comparison
-            # This ensures we account for all elements in the comparison
-            base_elements = max(total_elements_json1, total_elements_json2)
-            
-            if base_elements == 0:
-                return 1.0
-            
-            # Calculate similarity based on the proportion of changes
-            total_changes = total_comparisons + structural_changes
-            
-            # If we have value changes, use their average similarity
-            # If we have only structural changes, they contribute 0 similarity
-            if total_comparisons > 0:
-                avg_change_similarity_value = total_similarity_score / total_comparisons
-            else:
-                avg_change_similarity_value = 0.0  # Only structural changes
-            
-            
-            # Calculate change ratios
-            change_ratio_value = min(total_comparisons / base_elements, 1.0)
-            change_ratio_schema = min(structural_changes / base_elements, 1.0)
-            
-            avg_change_similarity_value = (1-change_ratio_value) * avg_change_similarity_value
-            schema_similarity_value = 1 - change_ratio_schema
-            
-            # Overall similarity calculation:
-            overall_similarity = avg_change_similarity_value * 0.3 + schema_similarity_value * 0.7
-            
-            # Ensure similarity is in valid range
-            return max(0.0, min(1.0, overall_similarity))
-            
+            # Calculate similarity based on variation type
+            if variation_type == "structural":
+                return self._calculate_deepdiff_structural_only(diff, json1, json2)
+            elif variation_type == "content":
+                return self._calculate_deepdiff_content_only(diff, json1, json2)
+            else:  # combined
+                structural_sim = self._calculate_deepdiff_structural_only(diff, json1, json2)
+                content_sim = self._calculate_deepdiff_content_only(diff, json1, json2)
+                return structural_sim * structural_weight + (1 - structural_weight) * content_sim
+                
         except Exception as e:
-            # If DeepDiff fails, fall back to simple comparison
-            warnings.warn(f"DeepDiff calculation failed: {e}")
-            return 1.0 if json1 == json2 else 0.0
+            warnings.warn(f"Error in DeepDiff calculation: {str(e)}")
+            return 0.0
     
-
+    def _calculate_deepdiff_structural_only(self, diff: dict, json1, json2) -> float:
+        """Calculate structural similarity only (schema organization changes)"""
+        structural_changes = 0
+                
+        # Count structural changes only (schema organization)
+        if 'dictionary_item_added' in diff:
+            structural_changes += len(diff['dictionary_item_added'])
+        
+        if 'dictionary_item_removed' in diff:
+            structural_changes += len(diff['dictionary_item_removed'])
+        
+        if 'iterable_item_added' in diff:
+            structural_changes += len(diff['iterable_item_added'])
+        
+        if 'iterable_item_removed' in diff:
+            structural_changes += len(diff['iterable_item_removed'])
+                
+        # Estimate total structural elements
+        total_elements = count_json_elements(json1) + count_json_elements(json2)
+        if total_elements == 0:
+            return 1.0
+        
+        # Calculate structural similarity
+        structural_similarity = max(0.0, 1.0 - (structural_changes * 2) / total_elements)
+        return structural_similarity
     
-    def evaluate_structural_consistency(self, json_outputs: List[Dict[str, Any]], gt: Dict[str, Any]=None, method_name: str="ted") -> Dict[str, Any]:
-        """
-        Evaluate structural consistency across multiple JSON outputs with enhanced metrics.
+    def _calculate_deepdiff_content_only(self, diff: dict, json1, json2) -> float:
+        """Calculate content similarity only (reuse original value processing logic)"""
+        # First check structural similarity
+        structural_sim = self._calculate_deepdiff_structural_only(diff, json1, json2)
         
-        Args:
-            json_outputs: List of JSON objects to evaluate
-            
-        Returns:
-            Dictionary with comprehensive consistency metrics
-        """
+        if structural_sim < 0.5:  # Same threshold as other methods
+            return 0.0
         
-        n = len(json_outputs)
-        if gt is None and n < 2:
-            return {
-                "error": "Need at least 2 outputs to evaluate consistency",
-                "valid_count": n
-            }
+        # Reuse original value processing logic
+        total_similarity_score = 0.0
+        total_comparisons = 0
         
-        if gt:
-            all_pairs = self.collect_all_string_pairs(json_outputs, gt)
-            self.batch_compute_similarities(all_pairs)
-            
-            similarity_values = [self.calculate_similarity_method[method_name](gt, json_output) for json_output in json_outputs]
-        else:
-            all_pairs = self.collect_all_string_pairs(json_outputs)
-            
-            self.batch_compute_similarities(all_pairs)
-            
-            similarity_values = []
-            for i in range(n-1):
-                for j in range(i+1, n):
-                    sim = self.calculate_similarity_method[method_name](json_outputs[i], json_outputs[j])
-                    similarity_values.append(sim)
-
-        # Calculate basic statistics
-        avg_similarity = sum(similarity_values) / len(similarity_values) if similarity_values else 1.0
-        std_similarity = float(np.std(similarity_values)) if len(similarity_values) > 1 else 0.0
-        min_similarity = min(similarity_values) if similarity_values else 1.0
-        max_similarity = max(similarity_values) if similarity_values else 1.0
-        similarity_range = max_similarity - min_similarity
+        # Handle value changes with semantic comparison (original logic)
+        if 'values_changed' in diff:
+            for path, change in diff['values_changed'].items():
+                old_value = change['old_value']
+                new_value = change['new_value']
+                
+                # Use appropriate comparison method based on value types
+                if isinstance(old_value, str) and isinstance(new_value, str):
+                    value_similarity = self._compare_strings(old_value, new_value)
+                elif isinstance(old_value, (int, float)) and isinstance(new_value, (int, float)):
+                    value_similarity = self._compare_numbers(float(old_value), float(new_value))
+                elif isinstance(old_value, bool) and isinstance(new_value, bool):
+                    value_similarity = 1.0 if old_value == new_value else 0.0
+                elif old_value is None or new_value is None:
+                    value_similarity = 1.0 if old_value == new_value else 0.0
+                elif isinstance(old_value, (list, dict)) and isinstance(new_value, (list, dict)):
+                    value_similarity = self.calculate_similarity_with_deepdiff(old_value, new_value)
+                else:
+                    try:
+                        value_similarity = self._compare_numbers(float(old_value), float(new_value))
+                    except:
+                        value_similarity = self._compare_strings(str(old_value), str(new_value))
+                
+                total_similarity_score += value_similarity
+                total_comparisons += 1
         
-        # Calculate consistency coefficient (rewards high similarity, penalizes variance)
-        normalized_std = min(std_similarity, avg_similarity) / avg_similarity if avg_similarity > 0 else 0
-        consistency_coefficient = avg_similarity * (1 - normalized_std)
+        # Handle type changes as content changes (moved from structural)
+        if 'type_changes' in diff:
+            for path, change in diff['type_changes'].items():
+                old_type = change['old_type'].__name__ if hasattr(change['old_type'], '__name__') else str(change['old_type'])
+                new_type = change['new_type'].__name__ if hasattr(change['new_type'], '__name__') else str(change['new_type'])
+                
+                # Map Python types to our type system
+                type_mapping = {
+                    'str': 'string',
+                    'int': 'number', 
+                    'float': 'number',
+                    'bool': 'boolean',
+                    'NoneType': 'null',
+                    'list': 'array',
+                    'dict': 'object'
+                }
+                
+                old_type_mapped = type_mapping.get(old_type, old_type)
+                new_type_mapped = type_mapping.get(new_type, new_type)
+                
+                # Use type_change_cost to calculate type similarity
+                type_cost = self.type_change_cost.get((old_type_mapped, new_type_mapped), 1.0)
+                type_similarity = 1.0 - type_cost
+                
+                total_similarity_score += type_similarity
+                total_comparisons += 1
         
-        # Prepare comprehensive report
-        report = {
-            "timestamp": datetime.datetime.now().isoformat(),
-            "num_outputs_analyzed": n,
-            
-            # Basic consistency metrics
-            "consistency_metrics": {
-                "mean_similarity": avg_similarity,
-                "std_deviation": std_similarity,
-                "min_similarity": min_similarity,
-                "max_similarity": max_similarity,
-                "similarity_range": similarity_range,
-            }
-        }
+        # Return content similarity
+        if total_comparisons == 0:
+            return 1.0  # No value or type changes
         
-        return report
-
-def parse_json_outputs(outputs: List[Union[str, Dict]]) -> List[Dict]:
-    """
-    Parse a list of JSON outputs that might be strings or dictionaries.
-    
-    Args:
-        outputs: List of JSON strings or dictionaries
-        
-    Returns:
-        List of parsed JSON dictionaries
-    """
-    parsed = []
-    for i, output in enumerate(outputs):
-        if isinstance(output, str):
-            try:
-                parsed.append(json.loads(output))
-            except json.JSONDecodeError as e:
-                print(f"Warning: Could not parse JSON string at index {i}: {e}")
-                print(f"String preview: {output[:100]}...")
-        elif isinstance(output, list):
-            if isinstance(output[0], dict) and len(output)>0:
-                parsed.append({"responses": output})
-            elif isinstance(output[0], str) and len(output)>0:
-                parsed.append({"responses": json.loads(str)})
-            else:
-                parsed.append({"responses": output})
-        elif isinstance(output, dict):
-            parsed.append(output)
-        else:
-            parsed.append({"responses": output})
-    
-    return parsed
+        return total_similarity_score / total_comparisons
 
 if __name__ == "__main__":
     # Example usage
@@ -1311,13 +1026,9 @@ if __name__ == "__main__":
     
     json3 = [{'question': 'What data sources were used to analyze flood conditions in Somalia?', 'options': [{'answer': 'Daily FloodScan (1998-2022) and WorldPop (2020 UN Adjusted) raster data', 'is_correct': True}, {'answer': 'ECMWF seasonal forecast data only', 'is_correct': False}, {'answer': 'UN OCHA population estimates', 'is_correct': False}, {'answer': 'UNFPA demographic data', 'is_correct': False}]}, {'question': 'How were the flood fraction composites processed?', 'options': [{'answer': 'Reclassified to binary using a 20 percent flood fraction threshold and masked to remove values < 0.05 percent', 'is_correct': True}, {'answer': 'Completely removed from the analysis', 'is_correct': False}, {'answer': 'Converted directly to population exposure estimates', 'is_correct': False}, {'answer': 'Aggregated without any processing', 'is_correct': False}]}, {'question': 'What seasonal periods were analyzed for flood exposure?', 'options': [{'answer': 'March-April-May (MAM) and October-November-December (OND) seasons', 'is_correct': True}, {'answer': 'January-February and June-July', 'is_correct': False}, {'answer': 'Only MAM season', 'is_correct': False}, {'answer': 'Only OND season', 'is_correct': False}]}, {'question': 'How were the flood exposure ranges estimated?', 'options': [{'answer': 'Using percentiles for MAM (50th-95th) and OND (25th-75th) seasons', 'is_correct': True}, {'answer': 'Using fixed percentage across all districts', 'is_correct': False}, {'answer': 'Based solely on ECMWF seasonal forecast', 'is_correct': False}, {'answer': 'Randomly generated estimates', 'is_correct': False}]}, {'question': 'What was the final step in calculating population flood exposure?', 'options': [{'answer': 'Applying percent exposure to the 2024 population dataset and aggregating to administrative level 1', 'is_correct': True}, {'answer': 'Directly using historical flood data', 'is_correct': False}, {'answer': 'Multiplying by a fixed population coefficient', 'is_correct': False}, {'answer': 'Removing all low-risk districts', 'is_correct': False}]}]
     
-    #json1 = [{"name": "John", "age": 30, "city": "NYC"}]
-    #json2 = [{"name": "wang", "age": 30, "city": "LA"}]
-    #json3 = [{"name": "Jane", "age": 10, "city": "NYC"}]
     
-    
-    result_semantic1 = evaluator.calculate_similarity_with_deepdiff(json1, json2)
-    result_semantic2 = evaluator.calculate_similarity_with_deepdiff(json1, json3)
+    result_semantic1 = evaluator.calculate_tree_edit_distance(json1, json2)
+    result_semantic2 = evaluator.calculate_tree_edit_distance(json1, json3)
     print(f"deepdiff->result_semantic1: {result_semantic1}")
     print(f"deepdiff->result_semantic1: {result_semantic2}")
     

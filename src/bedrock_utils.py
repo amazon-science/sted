@@ -21,6 +21,8 @@ boto_config = Config(
     max_pool_connections=50  # Increase connection pool size
 )
 
+sm_client = boto3.client("runtime.sagemaker", region_name="us-west-2")
+
 def retry_with_count(max_attempts=3, delay=1):
     def decorator(func):
         @wraps(func)
@@ -138,6 +140,8 @@ def inference_with_converse_api(bedrock_client,
         "inferenceConfig": inference_config,
     }
     
+    print(f"model_id: {model_id}")
+    
     if tools:
         params["toolConfig"] = {"tools": tools}
     
@@ -162,12 +166,35 @@ def inference_with_converse_api(bedrock_client,
         
 
     # Send the message.
-    response = bedrock_client.converse(**params)
+    try:
+        response = bedrock_client.converse(**params)
+    except:
+        import traceback
+        traceback.print_exc()
+        return {}
     
     if return_content:
         return response['output']['message']['content']
     else:
         return response
+    
+def inference_with_sm_endpoint(prompt, endpoint="jumpstart-dft-hf-reasoning-qwen3-32-20250820-053044", max_new_tokens=1000):
+    body = {
+        "inputs": f"<|begin_of_sentence|><|User|>{prompt}<|Assistant|>",
+        "parameters": {
+            "max_new_tokens": max_new_tokens
+        }
+    }
+    
+    response = client.invoke_endpoint(
+        EndpointName=endpoint,
+        ContentType="application/json",
+        Body=json.dumps(body),
+        Accept="application/json"
+    )
+    
+    result = json.loads(response["Body"].read().decode("utf-8"))
+    return result["generated_text"]
 
 def build_message(texts=None, images=None, invoke_model=False):
     message = {
