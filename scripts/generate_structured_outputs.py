@@ -10,7 +10,7 @@ Usage:
 """
 
 import boto3
-from bedrock_utils import build_message, inference_with_converse_api
+from src.bedrock_utils import build_message, inference_with_converse_api, get_json
 import argparse
 import json
 import ast
@@ -75,7 +75,7 @@ def read_sharegpt(dataset_dir="data"):
     for dataset_name in dataset_list:
         print(f"Processing dataset: {dataset_name}")
         data_dir = os.path.join(dataset_dir, dataset_name)
-        if not os.path.exists(data_dir):
+        if not os.path.exists(data_dir) or '.DS_Store' == dataset_name:
             print(f"Dataset {dataset_name} does not exist. Skipping.")
             continue
         
@@ -400,6 +400,9 @@ if __name__ == "__main__":
     parser.add_argument("--include-schema", action="store_true", help="Include JSON schema in the prompt to guide the output structure.")
     parser.add_argument("--max-tokens", type=int, default=8000, help="Limit the number of max_tokens of LLM generation.")
     args = parser.parse_args()
+    
+    
+    args.include_schema = True
     
     # Create a client with appropriate configuration
     from botocore.config import Config
