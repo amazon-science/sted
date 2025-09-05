@@ -257,6 +257,7 @@ Key findings demonstrate STED's effectiveness in capturing both structural and s
 
 ### 🔧 Framework Enhancements
 - [ ] **Multi-Provider API Support**: Integrate with OpenAI, Google, Anthropic, and other APIs
+- [ ] **MCP Server Support**: Implement Model Context Protocol server to enable STED evaluation as tools for agentic AI systems
 - [ ] **Real-Time Evaluation**: Support for streaming evaluation of live model outputs
 - [ ] **Custom Similarity Functions**: Allow users to define domain-specific similarity measures
 - [ ] **Batch Processing Optimization**: Improve performance for large-scale evaluations
