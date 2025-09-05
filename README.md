@@ -214,6 +214,54 @@ The framework has been used to evaluate multiple LLMs including:
 
 Key findings demonstrate STED's effectiveness in capturing both structural and semantic consistency in LLM outputs across different temperature settings.
 
+## Future Features & TODO List
+
+### 🏆 Model Benchmarking Expansion
+- [ ] **Extended Model Coverage**: Benchmark additional state-of-the-art models
+  - GPT-4 (OpenAI)
+  - GPT-4o (OpenAI)
+  - GPT-5 (OpenAI)
+  - Gemini-2.5-Pro (Google)
+  - Qwen3 (Alibaba)
+- [ ] **Cross-Provider Comparison**: Comprehensive analysis across different model providers
+- [ ] **Model Size Impact Analysis**: Evaluate consistency patterns across different model sizes
+- [ ] **Fine-tuned Model Evaluation**: Test consistency of domain-specific fine-tuned models
+
+### 🎯 Field-Level Analysis
+- [ ] **Field-Level Consistency Evaluation**: Implement granular analysis to measure consistency at individual field level
+- [ ] **Field Importance Weighting**: Add capability to assign different weights to fields based on their importance
+- [ ] **Field-Specific Metrics**: Develop specialized metrics for different field types (text, numeric, categorical)
+- [ ] **Cross-Field Dependency Analysis**: Analyze how inconsistencies in one field affect others
+
+### 🔍 Inconsistency Root Cause Analysis
+- [ ] **Inconsistency Factor Identification**: Implement algorithms to identify primary factors causing inconsistencies
+  - Temperature sensitivity analysis per field
+  - Prompt complexity impact assessment
+  - Model-specific inconsistency patterns
+- [ ] **Inconsistency Categorization**: Classify inconsistencies by type (semantic, structural, formatting)
+- [ ] **Statistical Correlation Analysis**: Identify correlations between input characteristics and output inconsistencies
+- [ ] **Attention Mechanism Analysis**: Integrate attention weights to understand model focus areas
+
+### 🛠️ Consistency Improvement Methods
+- [ ] **Adaptive Prompting**: Develop dynamic prompt adjustment based on detected inconsistencies
+- [ ] **Consistency-Aware Sampling**: Implement sampling strategies that optimize for consistency
+- [ ] **Multi-Pass Refinement**: Add iterative refinement process to improve consistency
+- [ ] **Ensemble Consistency**: Combine multiple model outputs to achieve higher consistency
+- [ ] **Template-Based Generation**: Provide structured templates to guide consistent output generation
+
+### 📊 Advanced Analytics & Visualization
+- [ ] **Interactive Consistency Dashboard**: Web-based interface for real-time consistency monitoring
+- [ ] **Consistency Heatmaps**: Visual representation of consistency across different dimensions
+- [ ] **Trend Analysis**: Track consistency improvements over time and model versions
+- [ ] **Comparative Analysis Tools**: Side-by-side comparison of different models and configurations
+
+### 🔧 Framework Enhancements
+- [ ] **Multi-Provider API Support**: Integrate with OpenAI, Google, Anthropic, and other APIs
+- [ ] **Real-Time Evaluation**: Support for streaming evaluation of live model outputs
+- [ ] **Custom Similarity Functions**: Allow users to define domain-specific similarity measures
+- [ ] **Batch Processing Optimization**: Improve performance for large-scale evaluations
+- [ ] **Configuration Management**: YAML/JSON-based configuration for different evaluation scenarios
+
 ## Contributing
 
 1. Fork the repository
