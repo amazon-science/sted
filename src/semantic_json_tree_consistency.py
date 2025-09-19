@@ -598,6 +598,56 @@ class SemanticJsonTreeConsistencyEvaluator:
                 
         return min(normalized_cost, 1)
     
+    def calculate_field_level_similarity(self, json1: Dict[str, Any], json2: Dict[str, Any], exact_match_fields: Set[str] = None) -> Dict[str, Dict[str, Any]]:
+        """Calculate content similarity for each matching field pair."""
+        json1 = {"root": json1} if isinstance(json1, dict) else json1
+        json2 = {"root": json2} if isinstance(json2, dict) else json2
+        
+        tree1 = JsonNode.from_dict(json1, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys)
+        tree2 = JsonNode.from_dict(json2, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys)
+        
+        field_similarities = {}
+        self.exact_match_fields = exact_match_fields or set()
+        self._collect_field_similarities(tree1, tree2, field_similarities)
+        return field_similarities
+    
+    def _collect_field_similarities(self, tree1: JsonNode, tree2: JsonNode, similarities: Dict[str, float]):
+        """Recursively collect field-level similarities."""
+        if not tree1.children and not tree2.children:
+            structural_sim = self._calculate_structural_similarity(tree1, tree2)
+            if structural_sim > 0.3:
+                # Check if field requires exact match
+                field_name = tree1.path.split('.')[-1]
+                if hasattr(self, 'exact_match_fields') and field_name in self.exact_match_fields:
+                    content_sim = 1.0 if tree1.value == tree2.value else 0.0
+                else:
+                    content_sim = self._calculate_content_similarity(tree1, tree2)
+                
+                # For dict values, include both structural and content similarity
+                if tree1.node_type == "object" and tree2.node_type == "object":
+                    combined_sim = (structural_sim + content_sim) / 2
+                    similarities[tree1.path] = {"similarity": combined_sim, "matched_with": tree2.path, "structural": structural_sim, "content": content_sim}
+                else:
+                    similarities[tree1.path] = {"similarity": content_sim, "matched_with": tree2.path}
+        
+        if tree1.children and tree2.children:
+            parent_structural_sim = self._calculate_structural_similarity(tree1, tree2)
+            if parent_structural_sim > 0.5:
+                n1, n2 = len(tree1.children), len(tree2.children)
+                cost_matrix = [[1.0] * n2 for _ in range(n1)]
+                
+                for i, child1 in enumerate(tree1.children):
+                    for j, child2 in enumerate(tree2.children):
+                        structural_sim = self._calculate_structural_similarity(child1, child2)
+                        cost_matrix[i][j] = 1.0 - structural_sim
+                
+                from scipy.optimize import linear_sum_assignment
+                row_indices, col_indices = linear_sum_assignment(cost_matrix)
+                
+                for i, j in zip(row_indices, col_indices):
+                    if i < n1 and j < n2 and cost_matrix[i][j] < 0.7:
+                        self._collect_field_similarities(tree1.children[i], tree2.children[j], similarities)
+    
     def _calculate_optimal_matching_cost(
         self, tree1: JsonNode, tree2: JsonNode, variation_type: str = "combined"
     ) -> float:

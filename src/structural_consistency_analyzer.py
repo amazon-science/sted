@@ -223,3 +223,76 @@ class StructuralConsistencyAnalyzer:
             "normalized_cv": normalized_cv,
             "stability_score": stability_score
         }
+    
+    def evaluate_field_level_consistency(self, json_outputs: List[Dict[str, Any]], 
+                                       gt: Dict[str, Any] = None,
+                                       exact_match_fields: set = None) -> Dict[str, Any]:
+        """
+        Evaluate consistency at field level across multiple JSON outputs.
+        
+        Args:
+            json_outputs: List of JSON objects to evaluate
+            gt: Ground truth JSON object (optional)
+            exact_match_fields: Set of field names requiring exact match
+            
+        Returns:
+            Dictionary with field-level consistency metrics
+        """
+        n = len(json_outputs)
+        if gt is None and n < 2:
+            return {"error": "Need at least 2 outputs to evaluate consistency"}
+        
+        field_consistency = {}
+        
+        if gt:
+            # Compare each output against ground truth
+            for i, output in enumerate(json_outputs):
+                field_similarities = self.evaluator.calculate_field_level_similarity(
+                    gt, output, exact_match_fields
+                )
+                
+                for field_path, result in field_similarities.items():
+                    if field_path not in field_consistency:
+                        field_consistency[field_path] = []
+                    field_consistency[field_path].append(result['similarity'])
+        else:
+            # Pairwise comparison between all outputs
+            for i in range(n-1):
+                for j in range(i+1, n):
+                    field_similarities = self.evaluator.calculate_field_level_similarity(
+                        json_outputs[i], json_outputs[j], exact_match_fields
+                    )
+                    
+                    for field_path, result in field_similarities.items():
+                        if field_path not in field_consistency:
+                            field_consistency[field_path] = []
+                        field_consistency[field_path].append(result['similarity'])
+        
+        # Calculate consistency metrics for each field
+        field_metrics = {}
+        for field_path, similarities in field_consistency.items():
+            if similarities:
+                field_metrics[field_path] = {
+                    "mean_similarity": float(np.mean(similarities)),
+                    "std_deviation": float(np.std(similarities)),
+                    "min_similarity": float(np.min(similarities)),
+                    "max_similarity": float(np.max(similarities)),
+                    "consistency_coefficient": self._calculate_field_consistency_coefficient(similarities)
+                }
+        
+        return {
+            "timestamp": datetime.datetime.now().isoformat(),
+            "num_outputs_analyzed": n,
+            "has_ground_truth": gt is not None,
+            "field_level_metrics": field_metrics,
+            "overall_field_consistency": float(np.mean([m["consistency_coefficient"] for m in field_metrics.values()])) if field_metrics else 0.0
+        }
+    
+    def _calculate_field_consistency_coefficient(self, similarities: List[float]) -> float:
+        """Calculate consistency coefficient for a single field."""
+        if not similarities:
+            return 0.0
+        
+        # Simple and intuitive: just use mean similarity
+        # This aligns with human expectation that 2/3 matches = ~0.67 consistency
+        return float(np.mean(similarities))
