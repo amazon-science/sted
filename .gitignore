@@ -255,3 +255,9 @@ results_archive/*/
 !results_archive/*/README.md
 results/latest
 
+# Large generated datasets and results
+llm_gen_results/
+synthetic_dataset/
+sharegpt_data/
+experiments/*.zip
+
