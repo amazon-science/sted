@@ -259,5 +259,10 @@ results/latest
 llm_gen_results/
 synthetic_dataset/
 sharegpt_data/
-experiments/*.zip
+
+# Research datasets and large files
+research/datasets/
+research/experiments/*.zip
+research/experiments/*/llm_gen_results/
+research/notebooks/.ipynb_checkpoints/
 
