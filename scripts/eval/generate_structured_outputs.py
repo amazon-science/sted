@@ -10,7 +10,8 @@ Usage:
 """
 
 import boto3
-from src.bedrock_utils import build_message, inference_with_converse_api, get_json
+from dotenv import load_dotenv
+from sted.bedrock_utils import build_message, inference_with_converse_api
 import argparse
 import json
 import ast
@@ -22,9 +23,29 @@ from typing import List, Dict, Any, Optional, Union, Callable, Set, Tuple
 import sys
 from tqdm import tqdm
 import re
+import openai
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Add the project root to the path to import modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+openai_client = openai.OpenAI(
+    api_key=os.getenv("OPENROUTER_API_KEY"),  # Get this from poe.com/api_keys
+    base_url="https://openrouter.ai/api/v1",
+)
+
+provider_mapping = {
+    "us.anthropic.claude-3-7-sonnet-20250219-v1:0": "bedrock",
+    "us.anthropic.claude-sonnet-4-20250514-v1:0": "bedrock",
+    "us.qwen.qwen3-235b-a22b-2507-v1:0": "bedrock",
+    "us.deepseek.v3-v1:0": "bedrock",
+    "openai/gpt-5": "openai",
+    "openai/gpt-4o": "openai",
+    "google/gemini-2.5-pro": "openai",
+    "x-ai/grok-4": "openai"
+}
 
 def estimate_tokens(text):
     """
@@ -107,7 +128,7 @@ def read_sharegpt(dataset_dir="data"):
     
     return json_data
 
-def _single_inference(client, model_id, messages, system_prompts=None, max_tokens=8000, temperature=0.1, top_p=0.9, top_k=200, task_id=None):
+def _single_inference(client, model_id, user_prompt, system_prompts=None, max_tokens=8000, temperature=0.1, top_p=0.9, top_k=200, task_id=None):
     """
     Helper function to run a single inference request using threads.
     """
@@ -119,26 +140,43 @@ def _single_inference(client, model_id, messages, system_prompts=None, max_token
         if task_id is not None:
             print(f"Starting task {task_id}")
         
-        # Attempt to run inference
-        response = inference_with_converse_api(
-            thread_client,
-            model_id=model_id,
-            messages=messages,
-            system_prompts=system_prompts,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k
-        )
+        provider = provider_mapping.get(model_id, "bedrock")
+        print(f"provider: {provider} for model_id: {model_id}")
+        if provider == "bedrock":
+            message = build_message(texts=[user_prompt])
+            # Attempt to run inference
+            response = inference_with_converse_api(
+                thread_client,
+                model_id=model_id,
+                messages=[message],
+                system_prompts=system_prompts,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p
+            )
+            
+            if not response or not isinstance(response, list) or len(response) == 0:
+                print(f"Warning: Empty or invalid response received for task {task_id}")
+                return {}
         
-        if not response or not isinstance(response, list) or len(response) == 0:
-            print(f"Warning: Empty or invalid response received for task {task_id}")
-            return {}
-        
-        print(f"Response received for task {task_id}: {len(response)} items")
-        response_text = response[0].get('text', '{}')
-        print(f"original response: {response_text}")
-        
+            print(f"Response received for task {task_id}: {len(response)} items")
+            response_text = response[0].get('text', '{}')
+            print(f"original response: {response_text}")
+        else:
+            response = openai_client.chat.completions.create(
+                model=model_id,
+                messages=[
+                    {"role": "system", "content": f"{system_prompt}"},
+                    {"role": "user", "content": user_prompt}
+                ],
+                stream=False,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                #top_p=top_p
+            )
+            print(f"Response received for task {task_id}: {response}")
+            response_text = response.choices[0].message.content
+            print(f"Response received for task {task_id}: {response_text}")
         # remove space or new lines in ends of response_text
         response_text = response_text.strip()
         
@@ -302,14 +340,14 @@ def create_prompt_with_schema(user_prompt, ground_truth_dict):
     
     return modified_prompt
 
-def run_inference(client, model_id, messages, system_prompts=None, max_tokens=8000, temperature=0.1, top_p=0.9, top_k=200, run_num=5, max_workers=None):
+def run_inference(client, model_id, user_prompt, system_prompts=None, max_tokens=8000, temperature=0.1, top_p=0.9, top_k=200, run_num=5, max_workers=None):
     """
     Runs inference in parallel using ThreadPoolExecutor.
     
     Args:
         client: Bedrock client (not used directly, each thread creates its own)
         model_id: Model ID to use
-        messages: List of messages to send
+        user_prompt: The user prompt to send to the model
         system_prompts: Optional system prompts
         max_tokens: Maximum tokens to generate
         temperature: Temperature for sampling (higher = more random outputs)
@@ -339,7 +377,7 @@ def run_inference(client, model_id, messages, system_prompts=None, max_tokens=80
                 _single_inference,
                 client,  # Not used directly, each thread creates its own client
                 model_id,
-                messages,
+                user_prompt,
                 system_prompts,
                 max_tokens,
                 temperature,
@@ -550,8 +588,6 @@ if __name__ == "__main__":
                         ground_truth_dict=gt_dict
                     )
             
-            message = build_message(texts=[modified_user_prompt])
-            
             print(f"\nRunning inference on prompt with schema")
             print(f"Original prompt: {user_prompt[:100]}...")
             print(f"System prompt: {system_prompt[:100]}...")
@@ -574,7 +610,7 @@ if __name__ == "__main__":
         responses = run_inference(
             client=client,
             model_id=model_id,
-            messages=[message],
+            user_prompt=modified_user_prompt,
             system_prompts=system_prompt,
             max_tokens=args.max_tokens,
             temperature=args.temperature,

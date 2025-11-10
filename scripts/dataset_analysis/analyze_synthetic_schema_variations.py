@@ -2,11 +2,14 @@
 import json
 import numpy as np
 import matplotlib.pyplot as plt
-from src.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
+from sted.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
 from tqdm import tqdm
 
-def analyze_schema_variations(dataset_file):
+def analyze_schema_variations(dataset_file, output_dir='results'):
     """Analyze similarity scores for different schema variation types"""
+    
+    import os
+    os.makedirs(output_dir, exist_ok=True)
     
     evaluator = SemanticJsonTreeConsistencyEvaluator(model_id='amazon.titan-embed-text-v2:0')
     methods = ['ted', 'sted', 'bertscore', 'deepdiff', 'gnn']
@@ -121,7 +124,7 @@ def analyze_schema_variations(dataset_file):
                    f'{score:.3f}', ha='center', va='bottom')
     
     plt.tight_layout()
-    plt.savefig('schema_variation_analysis.png', dpi=300, bbox_inches='tight')
+    plt.savefig(f'{output_dir}/schema_variation_analysis.png', dpi=300, bbox_inches='tight')
     plt.show()
     
     # Print results
@@ -147,15 +150,21 @@ def analyze_schema_variations(dataset_file):
                 print(f"  {method.upper()}: {score:.3f}")
     
     # Save results
-    with open('schema_variation_analysis_results.json', 'w') as f:
+    with open(f'{output_dir}/schema_variation_analysis_results.json', 'w') as f:
         json.dump(results, f, indent=2)
+    
+    print(f"\nFiles saved to {output_dir}/:")
+    print(f"- schema_variation_analysis.png")
+    print(f"- schema_variation_analysis_results.json")
     
     return results
 
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) != 2:
-        print("Usage: python analyze_schema_variations.py <dataset_file>")
-        sys.exit(1)
+    import argparse
     
-    analyze_schema_variations(sys.argv[1])
+    parser = argparse.ArgumentParser(description='Analyze schema variation patterns')
+    parser.add_argument('dataset_file', help='Schema variation dataset file to analyze')
+    parser.add_argument('--output-dir', default='results', help='Directory to save output files')
+    
+    args = parser.parse_args()
+    analyze_schema_variations(args.dataset_file, args.output_dir)

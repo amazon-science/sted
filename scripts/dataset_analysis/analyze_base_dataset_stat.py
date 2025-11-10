@@ -103,8 +103,24 @@ def calculate_comprehensive_metrics(obj, depth=0):
     return metrics
 
 def main():
+    import argparse
+    import os
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset-dir', default='synthetic_dataset', help='Directory containing synthetic datasets')
+    parser.add_argument('--output-dir', default='results', help='Directory to save output files')
+    args = parser.parse_args()
+    
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Find the most recent schema variation dataset
+    import glob
+    schema_files = glob.glob(f'{args.dataset_dir}/schema_variation_dataset_*.json')
+    if not schema_files:
+        raise FileNotFoundError(f"No schema variation dataset found in {args.dataset_dir}")
+    schema_file = max(schema_files, key=lambda x: x.split('_')[-1])
+    
     # Load schema dataset and extract the 75 "flat" samples as base samples
-    with open('schema_variation_dataset_2025-08-28_14-02-39-full-dataset.json', 'r') as f:
+    with open(schema_file, 'r') as f:
         schema_data = json.load(f)
     
     # Extract only the flat structure samples (these are the 75 base samples)
@@ -257,15 +273,15 @@ def main():
     plt.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig('75_base_samples_analysis.png', dpi=300, bbox_inches='tight')
+    plt.savefig(f'{args.output_dir}/75_base_samples_analysis.png', dpi=300, bbox_inches='tight')
     plt.show()
     
     # Save detailed results
-    df.to_csv('75_base_samples_metrics.csv', index=False)
+    df.to_csv(f'{args.output_dir}/75_base_samples_metrics.csv', index=False)
     
     # Create summary table for paper
     summary_stats = df[structural_metrics + field_type_metrics].describe().loc[['min', 'max', 'mean', 'std']]
-    summary_stats.to_csv('75_samples_summary_statistics.csv')
+    summary_stats.to_csv(f'{args.output_dir}/75_samples_summary_statistics.csv')
     
     print("=== REPRESENTATIVENESS EVIDENCE FOR 75 BASE SAMPLES ===")
     print(f"✓ Depth coverage: {df['max_depth'].nunique()} levels ({df['max_depth'].min()}-{df['max_depth'].max()})")
@@ -290,6 +306,61 @@ def main():
         mean_val = df[metric].mean()
         std_val = df[metric].std()
         print(f"{metric.replace('_', ' ').title()} | {min_val} | {max_val} | {mean_val:.1f} | {std_val:.1f}")
+    
+    # Save all analysis to markdown file
+    with open(f'{args.output_dir}/base_dataset_analysis.md', 'w') as f:
+        f.write(f"# Analysis of 75 Base Samples\n\n")
+        f.write(f"**Total base samples:** {len(base_samples)}\n\n")
+        
+        f.write(f"## Structural Complexity Statistics\n\n```\n")
+        f.write(df[structural_metrics].describe().to_string())
+        f.write(f"\n```\n\n")
+        
+        f.write(f"## Field Type Distribution Statistics\n\n```\n")
+        f.write(df[field_type_metrics].describe().to_string())
+        f.write(f"\n```\n\n")
+        
+        f.write(f"## Field Type Percentages (across 75 base samples)\n\n")
+        for field_type, count in total_fields_by_type.items():
+            percentage = (count / total_all_fields) * 100
+            f.write(f"- **{field_type.replace('_fields', '').title()}:** {count} fields ({percentage:.1f}%)\n")
+        
+        f.write(f"\n## Depth Distribution\n\n")
+        for depth, count in depth_dist.items():
+            percentage = (count / len(base_samples)) * 100
+            f.write(f"- **Depth {depth}:** {count} samples ({percentage:.1f}%)\n")
+        
+        f.write(f"\n## Field Count Distribution\n\n")
+        field_bins = pd.cut(df['total_fields'], bins=[0, 10, 25, 50, 100, float('inf')], labels=['1-10', '11-25', '26-50', '51-100', '100+'])
+        field_dist = field_bins.value_counts()
+        for bin_name, count in field_dist.items():
+            percentage = (count / len(base_samples)) * 100
+            f.write(f"- **{bin_name} fields:** {count} samples ({percentage:.1f}%)\n")
+        
+        f.write(f"\n## Representativeness Evidence for 75 Base Samples\n\n")
+        f.write(f"✓ **Depth coverage:** {df['max_depth'].nunique()} levels ({df['max_depth'].min()}-{df['max_depth'].max()})\n")
+        f.write(f"✓ **Field range:** {df['total_fields'].min()}-{df['total_fields'].max()} fields\n")
+        f.write(f"✓ **Node range:** {df['total_nodes'].min()}-{df['total_nodes'].max()} nodes\n")
+        f.write(f"✓ **Field type diversity:** Strings ({total_fields_by_type['string_fields']}), Integers ({total_fields_by_type['integer_fields']}), Arrays ({total_fields_by_type['array_fields']}), Objects ({total_fields_by_type['object_fields']})\n")
+        f.write(f"✓ **Structural variety:** {df['arrays'].sum()} arrays, {df['nested_objects'].sum()} nested objects, {df['leaf_nodes'].sum()} leaf nodes\n")
+        f.write(f"✓ **Array complexity:** Max array length {df['max_array_length'].max()}, Total array elements {df['array_elements'].sum()}\n")
+        
+        f.write(f"\n## Files Generated\n\n")
+        f.write(f"- `75_base_samples_metrics.csv` (detailed metrics for each sample)\n")
+        f.write(f"- `75_samples_summary_statistics.csv` (summary statistics table)\n")
+        f.write(f"- `75_base_samples_analysis.png` (comprehensive visualizations)\n")
+        
+        f.write(f"\n## Summary Table for Paper\n\n")
+        f.write("| Metric | Min | Max | Mean | Std |\n")
+        f.write("|--------|-----|-----|------|-----|\n")
+        for metric in ['max_depth', 'total_fields', 'total_nodes', 'arrays', 'nested_objects']:
+            min_val = df[metric].min()
+            max_val = df[metric].max()
+            mean_val = df[metric].mean()
+            std_val = df[metric].std()
+            f.write(f"| {metric.replace('_', ' ').title()} | {min_val} | {max_val} | {mean_val:.1f} | {std_val:.1f} |\n")
+    
+    print(f"- base_dataset_analysis.md (complete analysis report)")
 
 if __name__ == "__main__":
     main()

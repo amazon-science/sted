@@ -16,21 +16,73 @@ This framework implements STED (Semantic Tree Edit Distance), a novel approach t
 
 ## Installation
 
+### As a Library
+
+Install the STED consistency library for use in your own projects:
+
 ```bash
 # Clone the repository
 git clone <repository-url>
 cd field-aware-consistency-evaluation-framework
 
+# Install the library
+pip install -e .
+
+# Or with uv
+uv pip install -e .
+```
+
+### For Development
+
+```bash
+# Install with development dependencies
+pip install -e ".[dev]"
+
 # Install dependencies using uv
 uv sync
 ```
+
+## Library Usage
+
+### Quick Example
+
+```python
+from sted.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
+
+# Initialize evaluator
+evaluator = SemanticJsonTreeConsistencyEvaluator(
+    model_id='amazon.titan-embed-text-v2:0'
+)
+
+# Compare JSON structures
+json1 = {'name': 'John', 'age': 30, 'city': 'New York'}
+json2 = {'name': 'John', 'age': 30, 'location': 'NYC'}
+
+# Calculate similarity
+similarity = evaluator.calculate_tree_edit_distance_opt(
+    json1, json2, 
+    variation_type="combined"
+)
+
+print(f"Similarity: {similarity:.4f}")  # Output: 0.8650
+```
+
+### More Examples
+
+See `examples/basic_usage.py` for complete examples:
+
+```bash
+python examples/basic_usage.py
+```
+
+For detailed API documentation, see [Library Usage Guide](./LIBRARY_USAGE.md).
 
 ## Quick Start
 
 ### Basic Similarity Calculation with STED
 
 ```python
-from src.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
+from sted.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
 
 # Initialize evaluator with embedding model
 evaluator = SemanticJsonTreeConsistencyEvaluator(
@@ -63,7 +115,7 @@ The framework uses ShareGPT datasets for evaluation:
 Generate synthetic datasets with different variation types:
 
 ```bash
-uv run scripts/generate_sythetic_datasets.py
+python scripts/data/generate_synthetic_datasets.py
 ```
 
 This creates datasets with three variation types:
@@ -75,12 +127,12 @@ This creates datasets with three variation types:
 
 Analyze base dataset complexity (75 samples):
 ```bash
-uv run scripts/dataset_analysis/analyze_base_dataset_stat.py
+python scripts/dataset_analysis/analyze_base_dataset_stat.py --output-dir results/base_dataset_analysis
 ```
 
 Analyze synthetic dataset complexity (2400 samples):
 ```bash
-uv run scripts/dataset_analysis/analyze_synthetic_dataset_stat.py
+python scripts/dataset_analysis/analyze_synthetic_dataset_stat.py --output-dir results/synthetic_dataset_analysis
 ```
 
 ## STED Effectiveness Verification
@@ -90,22 +142,25 @@ uv run scripts/dataset_analysis/analyze_synthetic_dataset_stat.py
 Calculate similarities between variants and ground truth at different variation ratios:
 
 ```bash
-uv run scripts/eval/analyze_similarity_variation_progression.py
+python scripts/dataset_analysis/analyze_semantic_expression_variation_progression.py \
+  synthetic_dataset/expression_variation_dataset_*.json \
+  synthetic_dataset/semantic_variation_dataset_*.json \
+  --output-dir results/variation_progression
 ```
 
-This generates `{variation_type}_variation_progression_results.json` files for each variation type.
+This generates `{variation_type}_variation_progression_results.json` and `{variation_type}_variation_progression_analysis.png` files for each variation type.
 
 ### Visualization
 
 **Expression and Semantic Variation Analysis:**
 ```bash
-uv run scripts/result_analysis/visualize_progression_expression_semantic_separate_charts.py
+python scripts/visualization/visualize_progression_expression_semantic_separate_charts.py
 ```
 Output: `similarity_progression_combined.png`
 
 **Schema Variation Analysis:**
 ```bash
-uv run scripts/result_analysis/visualize_schema_variation_results.py
+python scripts/visualization/visualize_schema_variation_results.py
 ```
 Output: `schema_variation_analysis_with_errors.png`
 
@@ -118,7 +173,7 @@ Comprehensive benchmarking of LLMs using STED for structural, content, and overa
 Generate structured responses across temperature range (0.0-1.0):
 
 ```bash
-uv run eval/run_temperature_experiment.py \
+python scripts/eval/run_temperature_experiment.py \
   --data-dir sharegpt_data \
   --output-dir llm_gen_results \
   --run-num 10 \
@@ -142,7 +197,7 @@ llm_gen_results/
 Calculate consistency scores for structural, content, and combined metrics:
 
 ```bash
-uv run scripts/eval/calculate_consistency_metrics.py
+python scripts/eval/calculate_consistency_metrics.py
 ```
 
 Output: `{consistency_type}_consistency_metrics_results.json` files
@@ -152,7 +207,7 @@ Output: `{consistency_type}_consistency_metrics_results.json` files
 Generate comprehensive consistency analysis visualizations:
 
 ```bash
-uv run scripts/result_analysis/analyze_consistency_score_llm_benckmarking.py
+python scripts/visualization/visualize_consistency_scores.py
 ```
 
 Output: `consistency_score_by_consistency_type_with_errors.png`
@@ -161,15 +216,29 @@ Output: `consistency_score_by_consistency_type_with_errors.png`
 
 ```
 field-aware-consistency-evaluation-framework/
-├── src/                                    # Core implementation
+├── sted/                                  # Core implementation
 │   ├── semantic_json_tree_consistency.py  # Main STED implementation
 │   ├── json_tree_node.py                 # Tree node structures
 │   ├── bedrock_utils.py                   # AWS Bedrock utilities
+│   ├── probabilistic_consistency.py       # Probabilistic consistency metrics
+│   ├── pdc_metric.py                      # PDC metric implementation
 │   └── utils.py                           # Helper functions
 ├── scripts/                               # Analysis and generation scripts
-│   ├── eval/                             # Evaluation scripts
-│   ├── result_analysis/                  # Visualization scripts
-│   └── dataset_analysis/                 # Dataset analysis tools
+│   ├── data/                             # Data preparation scripts
+│   ├── eval/                             # LLM evaluation scripts
+│   ├── visualization/                    # Visualization scripts
+│   ├── dataset_analysis/                 # Dataset analysis tools
+│   ├── analysis/                         # Consistency analysis tools
+│   └── experiments/                      # Experimental scripts
+├── tests/                                # Test files
+│   ├── test_basic_sted.py               # Basic STED functionality tests
+│   ├── test_dataset_analysis.py         # Dataset validation tests
+│   └── test_llm_results.py              # LLM results structure tests
+├── docs/                                 # Documentation
+│   ├── sted_complexity_analysis.md      # Algorithm complexity analysis
+│   ├── MATHEMATICAL_FOUNDATIONS.md      # Mathematical foundations
+│   └── NEURIPS_*.md                     # Research documentation
+├── results/                              # Generated results and metrics
 ├── experiments/                          # Experiment results
 │   ├── experiment-1/                    # STED effectiveness verification
 │   └── experiment-2/                    # LLM consistency benchmarking
@@ -177,6 +246,26 @@ field-aware-consistency-evaluation-framework/
 ├── synthetic_dataset/                    # Generated synthetic datasets
 └── llm_gen_results/                      # LLM generation results
 ```
+
+## Scripts Reference
+
+For detailed information about all scripts, see [Scripts Reference](./SCRIPTS_REFERENCE.md).
+
+### Quick Reference
+
+**Data Preparation** (`scripts/data/`):
+- `download_sharegpt_data.py` - Download ShareGPT datasets
+- `generate_synthetic_datasets.py` - Generate synthetic variation datasets
+
+**Evaluation** (`scripts/eval/`):
+- `run_temperature_experiment.py` - Run LLM experiments across temperatures
+- `calculate_consistency_metrics.py` - Calculate consistency metrics
+
+**Visualization** (`scripts/visualization/`):
+- `visualize_consistency_scores.py` - Visualize LLM benchmarking results
+- `visualize_variation_progression.py` - Visualize variation analysis
+
+See [SCRIPTS_REFERENCE.md](./SCRIPTS_REFERENCE.md) for complete documentation of all 26 scripts.
 
 ## Key Components
 
@@ -197,7 +286,7 @@ field-aware-consistency-evaluation-framework/
 
 ## Algorithm Complexity
 
-Refer to [STED Computational Complexity Analysis](./sted_complexity_analysis.md) for detailed complexity analysis including:
+Refer to [STED Computational Complexity Analysis](./docs/sted_complexity_analysis.md) for detailed complexity analysis including:
 - Tree construction: O(n)
 - Embedding computation: O(k) with caching
 - Optimized STED: O(n₁ × n₂ × (n₁ + n₂))
@@ -205,12 +294,40 @@ Refer to [STED Computational Complexity Analysis](./sted_complexity_analysis.md)
 
 ## Results and Findings
 
-The framework has been used to evaluate multiple LLMs including:
+The framework has been used to evaluate **10 different LLMs** across multiple temperature settings:
+
+**Anthropic Models:**
 - Claude 3 Haiku
 - Claude 3.5 Haiku  
 - Claude 3.7 Sonnet
+
+**Amazon Models:**
+- Amazon Nova Pro v1
+
+**Meta Models:**
 - Llama 3.3 70B
-- Amazon Nova Pro
+
+**OpenAI Models:**
+- GPT-4.1 Mini
+
+**Google Models:**
+- Gemini 2.5 Flash Lite
+
+**DeepSeek Models:**
+- DeepSeek v3
+
+**Alibaba Qwen Models:**
+- Qwen3 32B
+- Qwen3 235B A22B
+
+**Total Evaluation:**
+- 10 models tested
+- 127 temperature settings (varies by model)
+- 80 samples per temperature
+- ~10,160 total structured outputs generated
+- ~30,480 consistency metric calculations
+
+For detailed benchmarking results, see [LLM Benchmarking Results](./docs/LLM_BENCHMARKING_RESULTS.md).
 
 Key findings demonstrate STED's effectiveness in capturing both structural and semantic consistency in LLM outputs across different temperature settings.
 

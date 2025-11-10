@@ -2,9 +2,10 @@
 import json
 import os
 import re
+import argparse
 import matplotlib.pyplot as plt
-from src.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
-from src.structural_consistency_analyzer import StructuralConsistencyAnalyzer
+from sted.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
+from sted.structural_consistency_analyzer import StructuralConsistencyAnalyzer
 from tqdm import tqdm
 
 def extract_temperature_from_path(path):
@@ -18,9 +19,21 @@ def extract_model_name(path):
     elif 'claude3-7-sonnet' in path: return 'Claude-3.7-Sonnet'
     elif 'claude3-5-sonnet' in path: return 'Claude-3.5-Sonnet-v2'
     elif 'nova-pro-v1' in path: return 'Nova-Pro'
+    elif 'deepseek.v3-v1' in path: return 'DeepSeek-V3.1'
+    elif 'gemini-2.5-flash-lite' in path: return 'Gemini 2.5 Flash Lite'
+    elif 'gpt-4.1-mini' in path: return 'GPT-4.1 Mini'
+    elif 'qwen3-32b-v1' in path: return 'Qwen3-32B'
+    elif 'qwen3-235b-a22b-2507' in path: return 'Qwen3-235B-A22B-Instruct-2507'
     return 'Unknown'
 
 def main():
+    parser = argparse.ArgumentParser(description='Calculate consistency metrics for LLM results')
+    parser.add_argument('--results-dir', default='llm_gen_results', help='Directory containing LLM generation results')
+    parser.add_argument('--output-dir', default='results', help='Output directory for results')
+    args = parser.parse_args()
+    
+    os.makedirs(args.output_dir, exist_ok=True)
+    
     evaluator = SemanticJsonTreeConsistencyEvaluator()
     analyzer = StructuralConsistencyAnalyzer(evaluator)
     results = {}
@@ -28,8 +41,8 @@ def main():
     variation_types = ["structural", "content", "combined"]
     
     for variation_type in variation_types:
-        for model_dir in tqdm(os.listdir("llm_gen_results"), desc=f"{variation_type} Processing models"):
-            model_path = os.path.join("llm_gen_results", model_dir)
+        for model_dir in tqdm(os.listdir(args.results_dir), desc=f"{variation_type} Processing models"):
+            model_path = os.path.join(args.results_dir, model_dir)
             if not os.path.isdir(model_path): continue
             
             model_name = extract_model_name(model_dir)
@@ -69,7 +82,8 @@ def main():
                     print(f"{model_name} T={temperature} S={sample_idx}: CC={metrics.get('consistency_coefficient', 0):.3f}, "
                         f"CV={metrics.get('normalized_cv', 0):.3f}, SS={metrics.get('stability_score', 0):.3f}")
         
-        with open(f'{variation_type}_consistency_metrics_results.json', 'w') as f:
+        output_file = os.path.join(args.output_dir, f'{variation_type}_consistency_metrics_results.json')
+        with open(output_file, 'w') as f:
             json.dump(results, f, indent=2)
     
     # Create visualization using mean metrics at each temperature
@@ -111,11 +125,12 @@ def main():
             ax.set_ylim(0, 1.05)
 
     plt.tight_layout()
-    plt.savefig(f'{variation_type}_consistency_metrics_comparison.png', dpi=300, bbox_inches='tight')
+    output_png = os.path.join(args.output_dir, f'{variation_type}_consistency_metrics_comparison.png')
+    plt.savefig(output_png, dpi=300, bbox_inches='tight')
     plt.show()
     
-    print("\nResults saved to consistency_metrics_results.json")
-    print("Visualization saved to consistency_metrics_comparison.png")
+    print(f"\nResults saved to {args.output_dir}/{variation_type}_consistency_metrics_results.json")
+    print(f"Visualization saved to {output_png}")
 
 if __name__ == "__main__":
     main()

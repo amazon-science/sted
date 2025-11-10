@@ -11,10 +11,14 @@ from .json_tree_node import JsonNode
 from .similarity_cache import StringSimilarityCache
 from .utils import collect_all_values, count_json_elements
 
-__version__ = "1.0.0"
+# Short alias for main class (STED = Semantic Tree Edit Distance)
+STED = SemanticJsonTreeConsistencyEvaluator
+
+__version__ = "0.1.0"
 __author__ = "Your Name"
 
 __all__ = [
+    "STED",
     "SemanticJsonTreeConsistencyEvaluator",
     "StructuralConsistencyAnalyzer", 
     "JsonNode",

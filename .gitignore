@@ -237,3 +237,21 @@ wandb/
 
 *.txt
 *.swp
+
+# Test files
+tests/__pycache__/
+tests/*.pyc
+
+# Results directory (keep structure, ignore contents)
+results/*.json
+results/*.csv
+results/*.png
+results/*.txt
+
+
+# Versioned results (keep structure, ignore contents)
+results_archive/*/
+!results_archive/*/VERSION.md
+!results_archive/*/README.md
+results/latest
+

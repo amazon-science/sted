@@ -927,6 +927,101 @@ Provide a similarity score between 0.0 and 1.0 based on semantic equivalence, st
         diff = DeepDiff(json1, json2, ignore_order=True, cache_size=5000, get_deep_distance=True)
         return 1- diff['deep_distance']
     
+    def calculate_variation_consistency(self, variations: List[Dict[str, Any]], 
+                                       method: str = 'sted', 
+                                       variation_type: str = 'combined',
+                                       apply_power_transform: bool = True,
+                                       steepness_factor: int = 20) -> Dict[str, float]:
+        """
+        Calculate consistency metrics for a set of variations using pairwise distances.
+        
+        Args:
+            variations: List of JSON variations to compare
+            method: Similarity calculation method ('sted', 'ted', 'bertscore', etc.)
+            variation_type: Type of variation ('structural', 'content', 'combined')
+            apply_power_transform: Whether to apply power transformation for better discrimination
+            steepness_factor: Exponent for power transformation (default: 20)
+            
+        Returns:
+            Dict with empty_ratio, consistency_score, and penalized_consistency
+        """
+        from itertools import combinations
+        
+        # Count empty outputs
+        def is_empty(output):
+            if output is None:
+                return True
+            if isinstance(output, (dict, list)) and len(output) == 0:
+                return True
+            return False
+        
+        empty_count = sum(1 for v in variations if is_empty(v))
+        total_count = len(variations)
+        empty_ratio = empty_count / total_count if total_count > 0 else 0.0
+        
+        # Filter valid variations
+        valid_variations = [v for v in variations if not is_empty(v)]
+        
+        if len(valid_variations) < 2:
+            return {
+                'empty_ratio': empty_ratio,
+                'consistency_score': float('inf'),
+                'penalized_consistency': float('inf'),
+                'valid_count': len(valid_variations)
+            }
+        
+        # Calculate pairwise distances
+        pairwise_distances = []
+        for v1, v2 in combinations(valid_variations, 2):
+            try:
+                similarity = self.calculate_similarity_method[method](v1, v2, variation_type=variation_type) \
+                    if method in ['sted', 'ted'] else self.calculate_similarity_method[method](v1, v2)
+                pairwise_distances.append(1.0 - similarity)
+            except Exception as e:
+                warnings.warn(f"Error calculating distance: {e}")
+        
+        if not pairwise_distances:
+            return {
+                'empty_ratio': empty_ratio,
+                'consistency_score': float('inf'),
+                'penalized_consistency': float('inf'),
+                'valid_count': len(valid_variations)
+            }
+        
+        # Calculate base consistency score (std deviation)
+        std_distance = float(np.std(pairwise_distances))
+        mean_distance = float(np.mean(pairwise_distances))
+        
+        # Apply power transformation for better discrimination
+        if apply_power_transform:
+            n = len(valid_variations)
+            # Calculate max possible std for n values
+            zeros = n // 2
+            ones = n - zeros
+            max_possible_std = float(np.std([0] * zeros + [1] * ones))
+            
+            # Normalize std to [0,1] range
+            normalized_std = std_distance / max_possible_std if max_possible_std > 0 else 0.0
+            
+            # Apply exponential transformation: higher std = worse consistency
+            # Transform to consistency score (inverse of instability)
+            consistency_score = 1.0 / (1.0 + normalized_std * 2)
+            consistency_score = consistency_score ** steepness_factor
+        else:
+            consistency_score = std_distance
+        
+        # Apply penalty based on empty ratio
+        penalized_consistency = consistency_score * (1 - empty_ratio) if apply_power_transform else consistency_score * (1 + empty_ratio)
+        
+        return {
+            'empty_ratio': empty_ratio,
+            'consistency_score': consistency_score,
+            'penalized_consistency': penalized_consistency,
+            'mean_distance': mean_distance,
+            'std_distance': std_distance,
+            'valid_count': len(valid_variations)
+        }
+    
     def calculate_similarity_with_deepdiff_opt(self, json1: [Dict[str, Any], List], json2: [Dict[str, Any], List], variation_type: str = "combined", structural_weight=0.5, **kwargs) -> float:
         """
         Calculate similarity using DeepDiff with enhanced value comparison.

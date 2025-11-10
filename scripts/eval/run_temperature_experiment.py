@@ -71,7 +71,7 @@ def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: 
         Path to the generated results file
     """
     cmd = [
-        "python", "./generate_structured_outputs.py",
+        "python", "scripts/eval/generate_structured_outputs.py",
         "--data-dir", data_dir,
         "--output-dir", output_dir,
         "--temperature", str(temperature),
@@ -85,7 +85,23 @@ def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: 
         cmd.append("--include-schema")
     
     print(f"Running generation with temperature {temperature}...")
-    subprocess.run(cmd, check=True)
+    print(f"Command: {' '.join(cmd)}")
+    
+    # Set environment with PYTHONPATH
+    env = os.environ.copy()
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    env['PYTHONPATH'] = project_root
+    
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True, cwd=project_root, env=env)
+    
+    if result.returncode != 0:
+        print(f"Subprocess failed with return code {result.returncode}")
+        print(f"Subprocess stdout: {result.stdout}")
+        print(f"Subprocess stderr: {result.stderr}")
+        raise subprocess.CalledProcessError(result.returncode, cmd, result.stdout, result.stderr)
+    
+    print(f"Subprocess stdout: {result.stdout}")
+    print(f"Subprocess stderr: {result.stderr}")
     
     # Find the most recent results directory for this temperature
     temp_str = f"temp_{temperature:.2f}".replace('.', '_')
@@ -121,8 +137,8 @@ def run_experiment(args):
     if args.temperatures:
         temperatures = args.temperatures
     else:
-        #temperatures = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-        temperatures = np.arange(0.0, 1.0, 0.05)
+        temperatures = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        #temperatures = np.arange(0.0, 1.0, 0.05)
     
     # Define similarity methods to use
     methods = ["ted", "bertscore", "deepdiff"]
@@ -130,7 +146,7 @@ def run_experiment(args):
     results = []
     
     # Run generation and evaluation for each temperature
-    for temp in tqdm(temperatures, desc="Processing temperatures"):
+    for temp in tqdm(temperatures, desc="Processing tempeyratures"):
         print(f"\n=== Processing Temperature {temp} ===")
         
         # Check if we already have generation results for this temperature and this model
@@ -174,11 +190,6 @@ def main():
     
     args = parser.parse_args()
     run_experiment(args)
-
-if __name__ == "__main__":
-    main()
     
-    run_experiment(args)
-
 if __name__ == "__main__":
     main()

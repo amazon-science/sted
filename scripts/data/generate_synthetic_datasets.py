@@ -13,7 +13,7 @@ import os
 from itertools import permutations
 import boto3
 import time
-from src.bedrock_utils import build_message, inference_with_converse_api, get_json
+from sted.bedrock_utils import build_message, inference_with_converse_api, get_json
 from tqdm import tqdm
 import json
 from datetime import datetime
@@ -118,23 +118,24 @@ class ExperimentDatasetGenerator:
         samples = []
         
         # list all datasets under base_dataset_dir
-        sharegpt_dirs = [d for d in os.listdir(base_dataset_dir) if os.path.isdir(os.path.join(base_dataset_dir, d)) and d.startswith("sharegpt_data_")]
+        sharegpt_dirs = [d for d in os.listdir(base_dataset_dir) if os.path.isdir(os.path.join(base_dataset_dir, d)) and d.startswith("sharegpt")]
                 
         for directory in sharegpt_dirs:
             try:
-                if not os.path.exists(directory):
-                    print(f"Directory not found: {directory}")
+                dir_path = os.path.join(base_dataset_dir, directory)
+                if not os.path.exists(dir_path):
+                    print(f"Directory not found: {dir_path}")
                     continue
                     
                 # Get all conversation files in the directory
-                conversation_files = [f for f in os.listdir(directory) if f.startswith("conversation_") and f.endswith(".json")]
+                conversation_files = [f for f in os.listdir(dir_path) if f.startswith("conversation_") and f.endswith(".json")]
                 conversation_files.sort()  # Sort to ensure consistent loading order
                 
-                print(f"Found {len(conversation_files)} conversation files in {directory}")
+                print(f"Found {len(conversation_files)} conversation files in {dir_path}")
                 
                 # Load all available conversations
                 for filename in conversation_files:
-                    file_path = os.path.join(directory, filename)
+                    file_path = os.path.join(dir_path, filename)
                     try:
                         with open(file_path, 'r', encoding='utf-8') as f:
                             conversation = json.load(f)
@@ -165,7 +166,7 @@ class ExperimentDatasetGenerator:
         print(f"Loaded {len(samples)} complex samples from ShareGPT data")
         return samples
     
-    def generate_schema_variation_dataset(self, num_samples: int = 80, variation_ratio=1.0) -> List[Dict]:
+    def generate_schema_variation_dataset(self, num_samples: int = 80, variation_ratio=1.0, output_dir="synthetic_dataset") -> List[Dict]:
         """
         Generate Dataset Category 2: Schema Variation Dataset V2
         Same semantic content in different structural formats using predefined variation types.
@@ -267,7 +268,8 @@ class ExperimentDatasetGenerator:
         
         # Save samples
         current_time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        with open(f"schema_variation_dataset_{current_time_str}.json", "w") as f:
+        os.makedirs(output_dir, exist_ok=True)
+        with open(os.path.join(output_dir, f"schema_variation_dataset_{current_time_str}.json"), "w") as f:
             json.dump(all_samples, f, indent=4)
         
         return all_samples
@@ -317,7 +319,7 @@ class ExperimentDatasetGenerator:
             return [self._rename_fields_recursive(item, field_renew_map, f"{prefix}{k}[{idx}].") if isinstance(item, dict) else item for idx, item in enumerate(obj)]
         return obj
         
-    def generate_expression_variation_dataset(self, num_samples: int = 50, max_variation_ratio=1.0) -> List[Dict]:
+    def generate_expression_variation_dataset(self, num_samples: int = 50, max_variation_ratio=1.0, output_dir="synthetic_dataset") -> List[Dict]:
         """
         Generate Dataset Category 3: Expression Variation Dataset
         Synonymous terms and equivalent expressions.
@@ -486,7 +488,7 @@ class ExperimentDatasetGenerator:
         
         return json_data
     
-    def generate_semantic_variation_dataset(self, num_samples: int = 80, max_variation_ratio=1.0, semantic_variation=True) -> List[Dict]:
+    def generate_semantic_variation_dataset(self, num_samples: int = 80, max_variation_ratio=1.0, semantic_variation=True, output_dir="synthetic_dataset") -> List[Dict]:
         samples = []
         system_prompt_by_field = system_prompt_semantic_by_field if semantic_variation else system_prompt_expression_by_field
         print_tool = print_field_semantic_variants_tool if semantic_variation else print_field_expression_variants_tool
@@ -574,7 +576,8 @@ class ExperimentDatasetGenerator:
         
         # Save samples
         current_time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        with open(f"{data_type}_variation_dataset_{current_time_str}.json", "w") as f:
+        os.makedirs(output_dir, exist_ok=True)
+        with open(os.path.join(output_dir, f"{data_type}_variation_dataset_{current_time_str}.json"), "w") as f:
             json.dump(samples, f, indent=4)
         
         return samples
@@ -584,18 +587,20 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description="Generate STED experiment datasets with variable ratios")
-    parser.add_argument("--output-dir", default="experiment_datasets", 
+    parser.add_argument("--output-dir", default="synthetic_dataset", 
                        help="Output directory for datasets")
     parser.add_argument("--num-samples", type=int, default=80,
                        help="Number of samples per dataset")
+    parser.add_argument("--base-dataset-dir", default="sharegpt_data",
+                       help="Base dataset directory")
 
     
     args = parser.parse_args()
     
-    generator = ExperimentDatasetGenerator()
-    generator.generate_schema_variation_dataset(num_samples=args.num_samples)
-    generator.generate_semantic_variation_dataset(num_samples=args.num_samples)
-    generator.generate_expression_variation_dataset(num_samples=args.num_samples)
+    generator = ExperimentDatasetGenerator(base_dataset_dir=args.base_dataset_dir)
+    generator.generate_schema_variation_dataset(num_samples=args.num_samples, output_dir=args.output_dir)
+    generator.generate_semantic_variation_dataset(num_samples=args.num_samples, output_dir=args.output_dir)
+    generator.generate_expression_variation_dataset(num_samples=args.num_samples, output_dir=args.output_dir)
 
 if __name__ == "__main__":
     main()

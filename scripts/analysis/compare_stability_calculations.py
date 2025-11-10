@@ -2,6 +2,8 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+import argparse
+import os
 
 def current_calculation(similarity_values):
     """Current calculation using original formula with normalized std"""
@@ -38,32 +40,39 @@ def proposed_calculation(similarity_values):
     stability_score = (1.0 - normalized_std) ** 20
     return stability_score
 
-# Test cases with different std levels
-test_cases = [
-    [1.0, 1.0, 1.0, 1.0],  # Perfect consistency (std=0)
-    [0.95, 0.95, 0.95, 0.95],  # Perfect consistency, different values
-    [0.9, 0.95, 0.92, 0.93],  # Very high consistency
-    [0.8, 0.85, 0.82, 0.88],  # High consistency
-    [0.7, 0.8, 0.75, 0.85],  # Medium consistency
-    [0.5, 0.6, 0.4, 0.7],  # Low consistency
-    [0.2, 0.8, 0.3, 0.9],  # Very low consistency
-    [0.0, 1.0, 0.0, 1.0],  # Maximum inconsistency
-]
-
-print("Stability Score Comparison:")
-print("Values\t\t\tStd\tCurrent\tProposed (**20)")
-print("-" * 65)
-
-results_current = []
-results_proposed = []
-std_values = []
-
-for values in test_cases:
-    std_val = np.std(values)
-    current_score = current_calculation(values)
-    proposed_score = proposed_calculation(values)
+def main():
+    parser = argparse.ArgumentParser(description='Compare stability calculation methods')
+    parser.add_argument('--output-dir', default='results', help='Directory to save output files')
+    args = parser.parse_args()
     
-    results_current.append(current_score)
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Test cases with different std levels
+    test_cases = [
+        [1.0, 1.0, 1.0, 1.0],  # Perfect consistency (std=0)
+        [0.95, 0.95, 0.95, 0.95],  # Perfect consistency, different values
+        [0.9, 0.95, 0.92, 0.93],  # Very high consistency
+        [0.8, 0.85, 0.82, 0.88],  # High consistency
+        [0.7, 0.8, 0.75, 0.85],  # Medium consistency
+        [0.5, 0.6, 0.4, 0.7],  # Low consistency
+        [0.2, 0.8, 0.3, 0.9],  # Very low consistency
+        [0.0, 1.0, 0.0, 1.0],  # Maximum inconsistency
+    ]
+    
+    print("Stability Score Comparison:")
+    print("Values\t\t\tStd\tCurrent\tProposed (**20)")
+    print("-" * 65)
+    
+    results_current = []
+    results_proposed = []
+    std_values = []
+    
+    for values in test_cases:
+        std_val = np.std(values)
+        current_score = current_calculation(values)
+        proposed_score = proposed_calculation(values)
+        
+        results_current.append(current_score)
     results_proposed.append(proposed_score)
     std_values.append(std_val)
     
@@ -96,7 +105,7 @@ ax2.legend()
 ax2.grid(True, alpha=0.3)
 
 plt.tight_layout()
-plt.savefig('stability_calculation_comparison.png', dpi=150, bbox_inches='tight')
+plt.savefig(os.path.join(args.output_dir, 'stability_calculation_comparison.png'), dpi=150, bbox_inches='tight')
 plt.show()
 
 # Generate continuous comparison
@@ -128,5 +137,8 @@ plt.ylabel('Stability Score')
 plt.title('Continuous Comparison: Current vs Proposed (**20)')
 plt.legend()
 plt.grid(True, alpha=0.3)
-plt.savefig('continuous_stability_comparison.png', dpi=150, bbox_inches='tight')
+plt.savefig(os.path.join(args.output_dir, 'continuous_stability_comparison.png'), dpi=150, bbox_inches='tight')
 plt.show()
+
+if __name__ == "__main__":
+    main()

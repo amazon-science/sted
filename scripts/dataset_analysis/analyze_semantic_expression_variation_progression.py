@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse
 import os
-from src.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
+from sted.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
 from tqdm import tqdm
 
 def get_variation_type_from_filename(filename):
@@ -21,7 +21,7 @@ def get_variation_type_from_filename(filename):
     else:
         return 'unknown'
 
-def analyze_variation_progression(file_paths):
+def analyze_variation_progression(file_paths, output_dir='results'):
     """Analyze how similarity changes as variation number increases"""
     
     evaluator = SemanticJsonTreeConsistencyEvaluator(model_id='amazon.titan-embed-text-v2:0')
@@ -81,7 +81,7 @@ def analyze_variation_progression(file_paths):
                 avg_results[method].append(avg_score)
         
         # Save results
-        output_filename = f'{variation_type}_variation_progression_results.json'
+        output_filename = f'{output_dir}/{variation_type}_variation_progression_results.json'
         
         # Convert numpy arrays to lists for JSON serialization
         def convert_numpy(obj):
@@ -124,7 +124,7 @@ def analyze_variation_progression(file_paths):
         plt.xticks(variation_ratios)
         
         plt.tight_layout()
-        plt.savefig(f'{variation_type}_variation_progression_analysis.png', dpi=300, bbox_inches='tight')
+        plt.savefig(f'{output_dir}/{variation_type}_variation_progression_analysis.png', dpi=300, bbox_inches='tight')
         plt.show()
         
         # Print analysis for this variation type
@@ -163,6 +163,8 @@ def analyze_variation_progression(file_paths):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Analyze variation progression from dataset files')
     parser.add_argument('files', nargs='+', help='Dataset files to analyze')
+    parser.add_argument('--output-dir', default='results', help='Directory to save output files')
     
     args = parser.parse_args()
-    analyze_variation_progression(args.files)
+    os.makedirs(args.output_dir, exist_ok=True)
+    analyze_variation_progression(args.files, args.output_dir)

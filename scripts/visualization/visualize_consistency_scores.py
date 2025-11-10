@@ -4,12 +4,26 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy import stats
 import seaborn as sns
+import argparse
+import sys
+
+# Parse command line arguments
+parser = argparse.ArgumentParser(description='Analyze consistency scores from LLM benchmarking results')
+parser.add_argument('--combined', required=True, help='Path to combined consistency metrics results JSON file')
+parser.add_argument('--content', required=True, help='Path to content consistency metrics results JSON file')
+parser.add_argument('--structural', required=True, help='Path to structural consistency metrics results JSON file')
+parser.add_argument('--output-dir', default='results', help='Directory to save output files')
+
+args = parser.parse_args()
+
+import os
+os.makedirs(args.output_dir, exist_ok=True)
 
 # Load data from all three files
 files = {
-    'Overall': 'experiments/experiment-2/combined_consistency_metrics_results.json',
-    'Semantic': 'experiments/experiment-2/content_consistency_metrics_results.json', 
-    'Structural': 'experiments/experiment-2/structural_consistency_metrics_results.json'
+    'Overall': args.combined,
+    'Semantic': args.content, 
+    'Structural': args.structural
 }
 
 all_results = []
@@ -111,7 +125,7 @@ for idx, row in detailed_stats.iterrows():
         detailed_stats.loc[idx, 'cs_se'] = 0
 
 # Save detailed statistics
-detailed_stats.to_csv('detailed_consistency_statistics.csv', index=False)
+detailed_stats.to_csv(os.path.join(args.output_dir, 'detailed_consistency_statistics.csv'), index=False)
 print("Detailed statistics saved to 'detailed_consistency_statistics.csv'")
 
 # Statistical significance tests
@@ -176,13 +190,20 @@ for metric_type in ['Overall', 'Semantic', 'Structural']:
         print(f"{model}\t\t{cs_mean:.3f} ± {cs_std:.3f}\t\t{cv_mean:.3f} ± {cv_std:.3f}\t\t{n}")
 
 # Create enhanced visualizations with error bars
+import matplotlib.colors as mcolors
+
+# Define distinct colors for each model
+models = sorted(detailed_stats['model'].unique())
+colors = plt.cm.tab20(np.linspace(0, 1, len(models)))
+model_colors = dict(zip(models, colors))
+
 for metric in ['consistency_score', 'normalized_cv']:
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
     
     for i, metric_type in enumerate(['Overall', 'Semantic', 'Structural']):
         ax = axes[i]
         
-        for model in detailed_stats['model'].unique():
+        for model in models:
             data_subset = detailed_stats[(detailed_stats['metric_type'] == metric_type) & 
                                        (detailed_stats['model'] == model)]
             
@@ -194,7 +215,8 @@ for metric in ['consistency_score', 'normalized_cv']:
                 errors = data_subset['cv_se']
             
             ax.errorbar(data_subset['temperature'], means, yerr=errors,
-                       marker='o', label=model, linewidth=2, capsize=3, capthick=1)
+                       marker='o', label=model, linewidth=2, capsize=3, capthick=1,
+                       color=model_colors[model])
         
         ax.set_xlabel('Temperature')
         ax.set_ylabel(metric.replace('_', ' ').title())
@@ -204,7 +226,8 @@ for metric in ['consistency_score', 'normalized_cv']:
         ax.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(f'{metric}_by_consistency_type_with_errors.png', dpi=300, bbox_inches='tight')
+    output_path = os.path.join(args.output_dir, f'{metric}_by_consistency_type_with_errors.png')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.show()
 
 # Print LaTeX tables with confidence intervals for 0.1 and 0.9 temperatures
@@ -253,7 +276,7 @@ enhanced_summary.columns = ['CV_Mean', 'CV_Std', 'CS_Mean', 'CS_Std']
 enhanced_summary['CV_MeanStd'] = enhanced_summary.apply(lambda x: f"{x['CV_Mean']:.3f} ± {x['CV_Std']:.3f}", axis=1)
 enhanced_summary['CS_MeanStd'] = enhanced_summary.apply(lambda x: f"{x['CS_Mean']:.3f} ± {x['CS_Std']:.3f}", axis=1)
 
-enhanced_summary.to_csv('enhanced_consistency_summary.csv')
+enhanced_summary.to_csv(os.path.join(args.output_dir, 'enhanced_consistency_summary.csv'))
 
 print(f"\nStatistical analysis complete. Files saved:")
 print("- detailed_consistency_statistics.csv")

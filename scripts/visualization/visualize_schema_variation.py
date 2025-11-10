@@ -4,11 +4,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from scipy import stats
+import argparse
+import os
 
-def visualize_schema_results():
+def visualize_schema_results(input_file, output_dir):
     """Visualize schema variation analysis results with statistical analysis"""
     
-    with open('schema_variation_analysis_results.json', 'r') as f:
+    os.makedirs(output_dir, exist_ok=True)
+    
+    with open(input_file, 'r') as f:
         results = json.load(f)
     
     methods = ['ted', 'sted', 'bertscore', 'deepdiff']
@@ -122,7 +126,8 @@ def visualize_schema_results():
                    f'{score:.3f}', ha='center', va='bottom')
     
     plt.tight_layout()
-    plt.savefig('schema_variation_analysis_with_errors.png', dpi=300, bbox_inches='tight')
+    output_path = os.path.join(output_dir, 'schema_variation_analysis_with_errors.png')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.show()
     
     # Statistical Analysis
@@ -251,7 +256,7 @@ def visualize_schema_results():
     # Save summary statistics
     if summary_data:
         summary_df = pd.DataFrame(summary_data)
-        summary_df.to_csv('schema_variation_detailed_statistics.csv', index=False)
+        summary_df.to_csv(os.path.join(output_dir, 'schema_variation_detailed_statistics.csv'), index=False)
         print(f"\nDetailed statistics saved to 'schema_variation_detailed_statistics.csv'")
     
     # LaTeX table with confidence intervals
@@ -330,4 +335,9 @@ def visualize_schema_results():
         print("- schema_variation_detailed_statistics.csv")
 
 if __name__ == "__main__":
-    visualize_schema_results()
+    parser = argparse.ArgumentParser(description='Visualize schema variation analysis results')
+    parser.add_argument('--input', default='schema_variation_analysis_results.json', help='Input JSON file with analysis results')
+    parser.add_argument('--output-dir', default='results', help='Directory to save output files')
+    args = parser.parse_args()
+    
+    visualize_schema_results(args.input, args.output_dir)

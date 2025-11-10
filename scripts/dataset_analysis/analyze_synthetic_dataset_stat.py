@@ -144,14 +144,32 @@ def analyze_dataset(filename):
     return results
 
 def main():
-    datasets = [
-        'schema_variation_dataset_2025-08-28_14-02-39-full-dataset.json',
-        'semantic_variation_dataset_2025-08-25_04-23-54-full-dataset.json',
-        'expression_variation_dataset_2025-08-25_07-02-22-full-dataset.json'
-    ]
+    import argparse
+    import os
+    import glob
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset-dir', default='synthetic_dataset', help='Directory containing synthetic datasets')
+    parser.add_argument('--output-dir', default='results', help='Directory to save output files')
+    args = parser.parse_args()
+    
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Find the most recent dataset files for each variation type
+    dataset_files = []
+    for variation_type in ['schema', 'semantic', 'expression']:
+        pattern = f'{args.dataset_dir}/{variation_type}_variation_dataset_*.json'
+        files = glob.glob(pattern)
+        if files:
+            # Get the most recent file
+            most_recent = max(files, key=lambda x: x.split('_')[-1])
+            dataset_files.append(most_recent)
+    
+    if not dataset_files:
+        raise FileNotFoundError(f"No variation datasets found in {args.dataset_dir}")
     
     all_results = []
-    for dataset in datasets:
+    for dataset in dataset_files:
         results = analyze_dataset(dataset)
         all_results.extend(results)
     
@@ -290,15 +308,15 @@ def main():
     plt.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig('comprehensive_dataset_analysis.png', dpi=300, bbox_inches='tight')
+    plt.savefig(f'{args.output_dir}/comprehensive_dataset_analysis.png', dpi=300, bbox_inches='tight')
     plt.show()
     
     # Save detailed results
-    unique_df.to_csv('comprehensive_dataset_metrics.csv', index=False)
+    unique_df.to_csv(f'{args.output_dir}/comprehensive_dataset_metrics.csv', index=False)
     
     # Create summary table for paper
     summary_stats = unique_df[structural_metrics + field_type_metrics].describe().loc[['min', 'max', 'mean', 'std']]
-    summary_stats.to_csv('dataset_summary_statistics.csv')
+    summary_stats.to_csv(f'{args.output_dir}/dataset_summary_statistics.csv')
     
     print("=== REPRESENTATIVENESS EVIDENCE ===")
     print(f"✓ Depth coverage: {unique_df['max_depth'].nunique()} levels ({unique_df['max_depth'].min()}-{unique_df['max_depth'].max()})")
@@ -311,6 +329,34 @@ def main():
     print(f"- comprehensive_dataset_metrics.csv (detailed metrics)")
     print(f"- dataset_summary_statistics.csv (summary table)")
     print(f"- comprehensive_dataset_analysis.png (visualizations)")
+    
+    # Save comprehensive analysis to markdown
+    with open(f'{args.output_dir}/synthetic_dataset_analysis.md', 'w') as f:
+        f.write("# Comprehensive Synthetic Dataset Analysis\n\n")
+        f.write(f"**Total samples analyzed:** {len(df)}\n")
+        f.write(f"**Unique base samples:** {len(unique_df)}\n\n")
+        
+        f.write("## Structural Complexity Statistics\n\n```\n")
+        f.write(unique_df[structural_metrics].describe().to_string())
+        f.write("\n```\n\n")
+        
+        f.write("## Field Type Distribution Statistics\n\n```\n")
+        f.write(unique_df[field_type_metrics].describe().to_string())
+        f.write("\n```\n\n")
+        
+        f.write("## Representativeness Evidence\n\n")
+        f.write(f"✓ **Depth coverage:** {unique_df['max_depth'].nunique()} levels ({unique_df['max_depth'].min()}-{unique_df['max_depth'].max()})\n")
+        f.write(f"✓ **Field range:** {unique_df['total_fields'].min()}-{unique_df['total_fields'].max()} fields\n")
+        f.write(f"✓ **Node range:** {unique_df['total_nodes'].min()}-{unique_df['total_nodes'].max()} nodes\n")
+        f.write(f"✓ **Field type diversity:** All major JSON types represented\n")
+        f.write(f"✓ **Structural variety:** Arrays ({unique_df['arrays'].sum()}), Objects ({unique_df['nested_objects'].sum()}), Primitives ({unique_df['leaf_nodes'].sum()})\n")
+        
+        f.write("\n## Files Generated\n\n")
+        f.write("- `comprehensive_dataset_metrics.csv` (detailed metrics)\n")
+        f.write("- `dataset_summary_statistics.csv` (summary table)\n")
+        f.write("- `comprehensive_dataset_analysis.png` (visualizations)\n")
+    
+    print(f"- synthetic_dataset_analysis.md (complete analysis report)")
 
 if __name__ == "__main__":
     main()
