@@ -216,35 +216,41 @@ Output: `consistency_score_by_consistency_type_with_errors.png`
 
 ```
 field-aware-consistency-evaluation-framework/
-├── sted/                                  # Core implementation
+├── sted/                                  # Product: Core library (pip installable)
 │   ├── semantic_json_tree_consistency.py  # Main STED implementation
 │   ├── json_tree_node.py                 # Tree node structures
 │   ├── bedrock_utils.py                   # AWS Bedrock utilities
 │   ├── probabilistic_consistency.py       # Probabilistic consistency metrics
 │   ├── pdc_metric.py                      # PDC metric implementation
 │   └── utils.py                           # Helper functions
-├── scripts/                               # Analysis and generation scripts
-│   ├── data/                             # Data preparation scripts
-│   ├── eval/                             # LLM evaluation scripts
-│   ├── visualization/                    # Visualization scripts
-│   ├── dataset_analysis/                 # Dataset analysis tools
-│   ├── analysis/                         # Consistency analysis tools
-│   └── experiments/                      # Experimental scripts
-├── tests/                                # Test files
+├── tests/                                # Product: Unit tests
 │   ├── test_basic_sted.py               # Basic STED functionality tests
 │   ├── test_dataset_analysis.py         # Dataset validation tests
 │   └── test_llm_results.py              # LLM results structure tests
-├── docs/                                 # Documentation
-│   ├── sted_complexity_analysis.md      # Algorithm complexity analysis
-│   ├── MATHEMATICAL_FOUNDATIONS.md      # Mathematical foundations
-│   └── NEURIPS_*.md                     # Research documentation
-├── results/                              # Generated results and metrics
-├── experiments/                          # Experiment results
-│   ├── experiment-1/                    # STED effectiveness verification
-│   └── experiment-2/                    # LLM consistency benchmarking
-├── sharegpt_data/                        # Base datasets
-├── synthetic_dataset/                    # Generated synthetic datasets
-└── llm_gen_results/                      # LLM generation results
+├── examples/                             # Product: Usage examples
+│   └── basic_usage.py                   # Basic STED usage examples
+├── benchmarks/                           # Product: Performance benchmarks
+├── scripts/                              # Shared: Utilities and tools
+│   ├── data/                            # Data preparation scripts
+│   ├── eval/                            # LLM evaluation scripts
+│   ├── visualization/                   # Visualization scripts
+│   ├── dataset_analysis/                # Dataset analysis tools
+│   └── analysis/                        # Consistency analysis tools
+├── docs/                                 # Shared: Documentation
+│   ├── api/                             # API documentation
+│   ├── LLM_BENCHMARKING_RESULTS.md     # Benchmarking results
+│   └── README.md                        # Documentation index
+├── research/                             # Research: Experiments and papers
+│   ├── experiments/                     # Experiment results
+│   │   ├── experiment-1/               # STED effectiveness verification
+│   │   └── experiment-2/               # LLM consistency benchmarking
+│   ├── notebooks/                       # Jupyter notebooks for analysis
+│   ├── papers/                          # Research papers and notes
+│   └── datasets/                        # Research datasets (gitignored)
+├── results/                              # Generated results and metrics (gitignored)
+├── sharegpt_data/                        # Base datasets (gitignored)
+├── synthetic_dataset/                    # Generated synthetic datasets (gitignored)
+└── llm_gen_results/                      # LLM generation results (gitignored)
 ```
 
 ## Scripts Reference
@@ -286,7 +292,7 @@ See [SCRIPTS_REFERENCE.md](./SCRIPTS_REFERENCE.md) for complete documentation of
 
 ## Algorithm Complexity
 
-Refer to [STED Computational Complexity Analysis](./docs/sted_complexity_analysis.md) for detailed complexity analysis including:
+Refer to [STED Computational Complexity Analysis](./docs/api/sted_complexity_analysis.md) for detailed complexity analysis including:
 - Tree construction: O(n)
 - Embedding computation: O(k) with caching
 - Optimized STED: O(n₁ × n₂ × (n₁ + n₂))
