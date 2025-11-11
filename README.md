@@ -11,6 +11,7 @@ This framework implements STED (Semantic Tree Edit Distance), a novel approach t
 - **Semantic Tree Edit Distance (STED)**: Advanced similarity calculation combining structural and semantic analysis
 - **Multiple Variation Types**: Support for schema, expression, and semantic variations
 - **LLM Benchmarking**: Comprehensive evaluation of different LLMs across temperature settings
+- **MCP Server Support**: Model Context Protocol server for real-time consistency evaluation in agentic systems
 - **Synthetic Dataset Generation**: Automated generation of variation datasets for evaluation
 - **Visualization Tools**: Rich plotting and analysis capabilities for results interpretation
 
@@ -337,6 +338,60 @@ For detailed benchmarking results, see [LLM Benchmarking Results](./docs/LLM_BEN
 
 Key findings demonstrate STED's effectiveness in capturing both structural and semantic consistency in LLM outputs across different temperature settings.
 
+## MCP Server for Agentic Systems
+
+The framework includes a Model Context Protocol (MCP) server for real-time consistency evaluation in agentic systems.
+
+### Features
+
+- **evaluate_consistency**: Compare two JSON structures using STED
+- **evaluate_batch_consistency**: Evaluate consistency across multiple JSON structures
+- **evaluate_tool_calls**: Evaluate agent tool call consistency
+
+### Quick Start
+
+```bash
+# Test the MCP server
+cd mcp
+echo '{"method":"tools/list","params":{}}' | python server.py
+```
+
+### Integration
+
+Add to your MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "sted-evaluator": {
+      "command": "python",
+      "args": ["server.py"],
+      "cwd": "/path/to/field-aware-consistency-evaluation-framework/mcp"
+    }
+  }
+}
+```
+
+### Example Usage
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "evaluate_tool_calls",
+    "arguments": {
+      "tool_calls": [
+        {"tool": "search", "parameters": {"query": "test"}},
+        {"tool": "search", "parameters": {"query": "test"}}
+      ],
+      "variation_type": "combined"
+    }
+  }
+}
+```
+
+See [mcp/README.md](./mcp/README.md) for detailed documentation.
+
 ## Future Features & TODO List
 
 ### 🏆 Model Benchmarking Expansion
@@ -380,7 +435,7 @@ Key findings demonstrate STED's effectiveness in capturing both structural and s
 
 ### 🔧 Framework Enhancements
 - [ ] **Multi-Provider API Support**: Integrate with OpenAI, Google, Anthropic, and other APIs
-- [ ] **MCP Server Support**: Implement Model Context Protocol server to enable STED evaluation as tools for agentic AI systems
+- [x] **MCP Server Support**: Implement Model Context Protocol server to enable STED evaluation as tools for agentic AI systems
 - [ ] **Real-Time Evaluation**: Support for streaming evaluation of live model outputs
 - [ ] **Custom Similarity Functions**: Allow users to define domain-specific similarity measures
 - [ ] **Batch Processing Optimization**: Improve performance for large-scale evaluations
