@@ -77,6 +77,51 @@ Add to your MCP client configuration:
 }
 ```
 
+### Deploy to AWS Bedrock AgentCore Runtime
+
+Deploy the MCP server to AWS Bedrock AgentCore Runtime for production use. Since the server depends on the entire STED library, use the provided script to prepare the deployment package.
+
+**Step 1: Prepare deployment package**
+```bash
+cd mcp
+./prepare_agentcore_deployment.sh
+```
+
+This creates a `mcp_deployment/` directory with:
+- `mcp_server.py` - FastMCP server compatible with AgentCore Runtime
+- `sted/` - Complete STED library
+- `requirements.txt` - All dependencies
+- `README.md` - Deployment instructions
+
+**Step 2: Test locally**
+```bash
+cd ../mcp_deployment
+pip install -r requirements.txt
+python mcp_server.py
+```
+
+Server will be available at `http://0.0.0.0:8000/mcp`
+
+**Step 3: Deploy to AgentCore Runtime**
+
+Install deployment tools:
+```bash
+pip install bedrock-agentcore-starter-toolkit
+```
+
+Follow the [AWS Bedrock AgentCore MCP deployment guide](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp.html):
+1. Set up Cognito user pool for authentication
+2. Use the starter toolkit to deploy the `mcp_deployment/` directory
+3. Configure AgentCore Runtime to use your MCP server
+4. Invoke using the `InvokeAgentRuntime` API
+
+**Key Configuration:**
+- Server endpoint: `0.0.0.0:8000/mcp`
+- Transport: `streamable-http`
+- Stateless: `True`
+
+For a complete example, see the [AWS AgentCore MCP samples](https://github.com/awslabs/amazon-bedrock-agentcore-samples/tree/main/01-tutorials/01-AgentCore-runtime/02-hosting-MCP-server).
+
 ## Tools
 
 ### evaluate_consistency

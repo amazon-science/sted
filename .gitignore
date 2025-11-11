@@ -260,6 +260,9 @@ llm_gen_results/
 synthetic_dataset/
 sharegpt_data/
 
+# MCP deployment package (generated)
+mcp_deployment/
+
 # Research datasets and large files
 research/datasets/
 research/experiments/*.zip
