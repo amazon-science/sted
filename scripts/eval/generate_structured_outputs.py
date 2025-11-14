@@ -32,8 +32,8 @@ load_dotenv()
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 openai_client = openai.OpenAI(
-    api_key=os.getenv("OPENROUTER_API_KEY"),  # Get this from poe.com/api_keys
-    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENAI_API_KEY"),
+    base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
 )
 
 provider_mapping = {

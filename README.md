@@ -43,6 +43,38 @@ pip install -e ".[dev]"
 uv sync
 ```
 
+## Credentials Setup
+
+### AWS Credentials
+
+This framework uses AWS Bedrock for embedding models and LLM inference. Configure your AWS credentials:
+
+```bash
+# Configure AWS credentials
+aws configure
+
+# Or set environment variables
+export AWS_ACCESS_KEY_ID=<your-access-key>
+export AWS_SECRET_ACCESS_KEY=<your-secret-key>
+export AWS_DEFAULT_REGION=us-east-1
+```
+
+Ensure your AWS account has access to:
+- Amazon Bedrock models (e.g., `amazon.titan-embed-text-v2:0`)
+- Required model permissions in your region
+
+### OpenAI API Key
+
+For OpenAI model evaluation, set your API key:
+
+```bash
+# Set environment variable
+export OPENAI_API_KEY=<your-openai-api-key>
+
+# Optional: Set custom base URL (for OpenAI-compatible APIs)
+export OPENAI_BASE_URL=<your-base-url>
+```
+
 ## Library Usage
 
 ### Quick Example
