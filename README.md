@@ -372,20 +372,21 @@ Key findings demonstrate STED's effectiveness in capturing both structural and s
 
 ## MCP Server for Agentic Systems
 
-The framework includes a Model Context Protocol (MCP) server for real-time consistency evaluation in agentic systems.
+The framework includes a Model Context Protocol (MCP) server built with FastMCP for real-time consistency evaluation in agentic systems.
 
 ### Features
 
 - **evaluate_consistency**: Compare two JSON structures using STED
 - **evaluate_batch_consistency**: Evaluate consistency across multiple JSON structures
 - **evaluate_tool_calls**: Evaluate agent tool call consistency
+- **FastMCP-powered**: Automatic schema generation, type safety, and clean decorator-based API
 
 ### Quick Start
 
 ```bash
 # Test the MCP server
 cd mcp
-echo '{"method":"tools/list","params":{}}' | python server.py
+python test_fastmcp.py
 ```
 
 ### Integration
