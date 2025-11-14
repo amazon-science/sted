@@ -263,6 +263,12 @@ field-aware-consistency-evaluation-framework/
 ├── examples/                             # Product: Usage examples
 │   └── basic_usage.py                   # Basic STED usage examples
 ├── benchmarks/                           # Product: Performance benchmarks
+├── mcp_dev/                              # Product: MCP server (FastMCP-based)
+│   ├── server.py                        # MCP server implementation
+│   ├── test_client.py                   # MCP client for testing
+│   ├── README.md                        # MCP usage guide
+│   ├── AGENTCORE_DEPLOYMENT_GUIDE.md   # AWS deployment guide
+│   └── prepare_agentcore_deployment.sh # Deployment script
 ├── scripts/                              # Shared: Utilities and tools
 │   ├── data/                            # Data preparation scripts
 │   ├── eval/                            # LLM evaluation scripts
