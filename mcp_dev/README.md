@@ -44,7 +44,7 @@ uv pip install -e .
 ### Test the Server
 
 ```bash
-cd mcp
+cd mcp_dev
 echo '{"method":"tools/list","params":{}}' | python server.py
 ```
 

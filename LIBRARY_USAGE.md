@@ -135,7 +135,36 @@ python examples/basic_usage.py
 
 ## Advanced Usage
 
-### Batch Evaluation
+### Batch Consistency Evaluation
+
+Evaluate consistency across multiple JSON outputs using `StructuralConsistencyAnalyzer`:
+
+```python
+from sted.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
+from sted.structural_consistency_analyzer import StructuralConsistencyAnalyzer
+
+evaluator = SemanticJsonTreeConsistencyEvaluator()
+analyzer = StructuralConsistencyAnalyzer(evaluator)
+
+# Multiple LLM outputs for the same prompt
+json_outputs = [
+    {'name': 'Alice', 'age': 25, 'city': 'New York'},
+    {'name': 'Alice', 'age': 25, 'city': 'NYC'},
+    {'name': 'Alice', 'age': 25, 'location': 'New York City'},
+]
+
+result = analyzer.evaluate_structural_consistency(
+    json_outputs,
+    method_name="ted",
+    variation_type="combined"
+)
+
+print(f"Mean similarity: {result['supporting_stats']['mean_similarity']:.4f}")
+print(f"Consistency coefficient: {result['consistency_metrics']['consistency_coefficient']:.4f}")
+print(f"Stability score: {result['consistency_metrics']['stability_score']:.4f}")
+```
+
+### Pairwise Evaluation
 
 ```python
 from sted.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator

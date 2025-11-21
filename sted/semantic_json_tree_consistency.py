@@ -777,7 +777,7 @@ class SemanticJsonTreeConsistencyEvaluator:
                 )
                 """
                 distance = zss.simple_distance(tree1, tree2, get_children=lambda x: x.get_children())
-                max_node = (tree1.count_nodes(), tree2.count_nodes())
+                max_node = max(tree1.count_nodes(), tree2.count_nodes())
                 return 1 - distance/max_node
                 
             except TypeError as e:

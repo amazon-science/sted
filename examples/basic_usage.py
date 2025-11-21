@@ -5,6 +5,7 @@ Basic usage examples for STED Consistency Library
 
 
 from sted.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
+from sted.structural_consistency_analyzer import StructuralConsistencyAnalyzer
 
 # Example 1: Basic similarity calculation
 def example_basic_similarity():
@@ -78,7 +79,39 @@ def example_content_consistency():
     print(f"Content Similarity: {similarity:.4f}\n")
 
 
+# Example 4: Batch consistency evaluation
+def example_batch_consistency():
+    """Evaluate consistency across multiple JSON outputs"""
+    print("=" * 60)
+    print("Example 4: Batch Consistency Evaluation")
+    print("=" * 60)
+    
+    evaluator = SemanticJsonTreeConsistencyEvaluator(
+        model_id='amazon.titan-embed-text-v2:0'
+    )
+    analyzer = StructuralConsistencyAnalyzer(evaluator)
+    
+    # Multiple LLM outputs for the same prompt
+    json_outputs = [
+        {'name': 'Alice', 'age': 25, 'city': 'New York'},
+        {'name': 'Alice', 'age': 25, 'city': 'NYC'},
+        {'name': 'Alice', 'age': 25, 'location': 'New York City'},
+    ]
+    
+    result = analyzer.evaluate_structural_consistency(
+        json_outputs,
+        method_name="ted",
+        variation_type="combined"
+    )
+    
+    print(f"Number of outputs: {len(json_outputs)}")
+    print(f"Mean similarity: {result['supporting_stats']['mean_similarity']:.4f}")
+    print(f"Consistency coefficient: {result['consistency_metrics']['consistency_coefficient']:.4f}")
+    print(f"Stability score: {result['consistency_metrics']['stability_score']:.4f}\n")
+
+
 if __name__ == "__main__":
     example_basic_similarity()
     example_structural_consistency()
     example_content_consistency()
+    example_batch_consistency()

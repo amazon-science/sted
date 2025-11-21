@@ -245,16 +245,23 @@ python scripts/visualization/visualize_consistency_scores.py
 
 Output: `consistency_score_by_consistency_type_with_errors.png`
 
+![LLM Consistency Scores](results_archive/v1_2025-11-08/llm_consistency/consistency_score_by_consistency_type_with_errors.png)
+
 ## Project Structure
 
 ```
 field-aware-consistency-evaluation-framework/
 ├── sted/                                  # Product: Core library (pip installable)
+│   ├── __init__.py                       # Package initialization
 │   ├── semantic_json_tree_consistency.py  # Main STED implementation
+│   ├── structural_consistency_analyzer.py # Batch consistency evaluation
 │   ├── json_tree_node.py                 # Tree node structures
 │   ├── bedrock_utils.py                   # AWS Bedrock utilities
 │   ├── probabilistic_consistency.py       # Probabilistic consistency metrics
 │   ├── pdc_metric.py                      # PDC metric implementation
+│   ├── evaluator_config.py               # Configuration management
+│   ├── similarity_cache.py               # Embedding cache
+│   ├── gnn.py                            # Graph neural network utilities
 │   └── utils.py                           # Helper functions
 ├── tests/                                # Product: Unit tests
 │   ├── test_basic_sted.py               # Basic STED functionality tests
@@ -287,9 +294,15 @@ field-aware-consistency-evaluation-framework/
 │   ├── papers/                          # Research papers and notes
 │   └── datasets/                        # Research datasets (gitignored)
 ├── results/                              # Generated results and metrics (gitignored)
+├── results_archive/                      # Archived experiment results
 ├── sharegpt_data/                        # Base datasets (gitignored)
 ├── synthetic_dataset/                    # Generated synthetic datasets (gitignored)
-└── llm_gen_results/                      # LLM generation results (gitignored)
+├── llm_gen_results/                      # LLM generation results (gitignored)
+├── README.md                             # Main documentation
+├── LIBRARY_USAGE.md                      # Library usage guide
+├── SCRIPTS_REFERENCE.md                  # Scripts documentation
+├── pyproject.toml                        # Project configuration
+└── uv.lock                               # Dependency lock file
 ```
 
 ## Scripts Reference
@@ -391,8 +404,8 @@ The framework includes a Model Context Protocol (MCP) server built with FastMCP 
 
 ```bash
 # Test the MCP server
-cd mcp
-python test_fastmcp.py
+cd mcp_dev
+python test_client.py
 ```
 
 ### Integration
@@ -405,7 +418,7 @@ Add to your MCP client configuration:
     "sted-evaluator": {
       "command": "python",
       "args": ["server.py"],
-      "cwd": "/path/to/field-aware-consistency-evaluation-framework/mcp"
+      "cwd": "/path/to/field-aware-consistency-evaluation-framework/mcp_dev"
     }
   }
 }
@@ -429,7 +442,7 @@ Add to your MCP client configuration:
 }
 ```
 
-See [mcp/README.md](./mcp/README.md) for detailed documentation.
+See [mcp_dev/README.md](./mcp_dev/README.md) for detailed documentation.
 
 ## Future Features & TODO List
 
