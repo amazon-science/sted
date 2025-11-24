@@ -136,6 +136,39 @@ print(f"Similarity score: {result['similarity']}")
 print(f"Edit distance: {result['edit_distance']}")
 ```
 
+### Batch Consistency Calculation
+
+Evaluate consistency across multiple JSON outputs:
+
+```python
+from sted.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
+from sted.structural_consistency_analyzer import StructuralConsistencyAnalyzer
+
+# Initialize evaluator and analyzer
+evaluator = SemanticJsonTreeConsistencyEvaluator(
+    model_id='amazon.titan-embed-text-v2:0'
+)
+analyzer = StructuralConsistencyAnalyzer(evaluator)
+
+# Multiple LLM outputs for the same prompt
+json_outputs = [
+    {'name': 'Alice', 'age': 25, 'city': 'New York'},
+    {'name': 'Alice', 'age': 25, 'city': 'NYC'},
+    {'name': 'Alice', 'age': 25, 'location': 'New York City'},
+]
+
+# Calculate consistency metrics
+result = analyzer.evaluate_structural_consistency(
+    json_outputs,
+    method_name="ted",
+    variation_type="combined"
+)
+
+print(f"Mean similarity: {result['supporting_stats']['mean_similarity']:.4f}")
+print(f"Consistency coefficient: {result['consistency_metrics']['consistency_coefficient']:.4f}")
+print(f"Stability score: {result['consistency_metrics']['stability_score']:.4f}")
+```
+
 ## Dataset
 
 The framework uses ShareGPT datasets for evaluation:
