@@ -9,8 +9,6 @@ more accurate structural consistency evaluation for JSON outputs.
 import json
 import numpy as np
 from typing import Dict, Any, List, Tuple, Optional, Set, Union
-from collections import defaultdict
-import datetime
 from functools import lru_cache
 import warnings
 import re
@@ -20,28 +18,24 @@ from bert_score import score as bert_score
 from scipy.optimize import linear_sum_assignment
 import zss
 
-# Optional imports with proper error handling
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from sentence_transformers import SentenceTransformer
-import torch
-
-import boto3
 
 from deepdiff import DeepDiff
-import concurrent.futures
 
 import itertools
 import math
 
-# Try relative imports first (when used as package)
 from .json_tree_node import JsonNode
 from .similarity_cache import StringSimilarityCache
 from .utils import collect_all_values, getEmbeddings, create_bedrock_client, count_json_elements
 from botocore.config import Config
 
-# System prompt for LLM judge to calculate similarity score between two structured data
-# Define default configuration inline to avoid import issues
+from transformers import logging
+logging.set_verbosity_error()
+
+
 def _get_default_type_change_costs() -> Dict[Tuple[str, str], float]:
     """Define default costs for type changes."""
     costs = {}
@@ -308,24 +302,19 @@ class SemanticJsonTreeConsistencyEvaluator:
             
             return 1 - self._compare_arrays_unordered(chunks1, chunks2, "str1_chunks", "str2_chunks")
         
-    def _split_natural_text(self, text: str, coding_language: str=None) -> List[str]:
+    def _split_natural_text(self, text: str) -> List[str]:
         """Split natural language text into sentences or paragraphs using LangChain if available and enabled."""
         # For short text, don't split at all
         if len(text) < self.chunk_size:
             return [text]
         
-        if coding_language:
-            #ToDo: add support for langchain
-            text_splitter = None
-            pass
-        else:
-            # Create a text splitter that tries to create semantically meaningful chunks
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=self.chunk_size - self.chunk_overlap,
-                chunk_overlap=self.chunk_overlap,
-                length_function=len,
-                separators=["\n\n", "\n", ".", "!", "?", ";", ":", " "]  # Try these separators in order
-            )
+        # Create a text splitter that tries to create semantically meaningful chunks
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.chunk_size - self.chunk_overlap,
+            chunk_overlap=self.chunk_overlap,
+            length_function=len,
+            separators=["\n\n", "\n", ".", "!", "?", ";", ":", " "]
+        )
         
         try:
             # Split the text
