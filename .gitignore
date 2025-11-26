@@ -276,3 +276,7 @@ benchmarks/
 sted/gnn.py
 sted/pdc_metric.py
 sted/probabilistic_consistency.py
+
+# Experimental scripts
+scripts/experiments/
+scripts/analysis/
