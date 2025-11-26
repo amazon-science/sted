@@ -8,7 +8,6 @@ import random
 from concurrent.futures import ThreadPoolExecutor
 import boto3
 from botocore.config import Config
-import json
 
 logger = logging.getLogger(__name__)
 
