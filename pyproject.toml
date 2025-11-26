@@ -5,7 +5,14 @@ description = "Semantic Tree Edit Distance (STED) for evaluating consistency of 
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "Guanghui Wang"},
+    {name = "Jinze Yu"},
+    {name = "Xing Zhang"},
+    {name = "Dayuan Jiang"},
+    {name = "Tomal Deb"},
+    {name = "Xuefeng Liu"},
+    {name = "Peiyang He"},
+    {name = "Yin Song"}
 ]
 keywords = ["sted", "tree-edit-distance", "semantic-similarity", "json-consistency", "llm-evaluation"]
 classifiers = [

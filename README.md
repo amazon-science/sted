@@ -41,7 +41,7 @@ Through systematic experiments on synthetic datasets with controlled schema, exp
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/amazon-science/sted.git
 cd sted
 
 # Install the library
