@@ -1,5 +1,4 @@
 import json
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import logging
 from functools import wraps
 import time
@@ -29,7 +28,7 @@ def retry_with_count(max_attempts=3, delay=1):
             for attempt in range(max_attempts):
                 try:
                     return func(*args, **kwargs)
-                except Exception as e:
+                except Exception:
                     if attempt == max_attempts - 1:
                         return None
                     time.sleep(delay)
@@ -48,16 +47,16 @@ async def retry_async_with_backoff(func, max_attempts=10, *args, **kwargs):
                 logger.error(f"All {max_attempts} attempts failed: {str(e)}")
                 # Return None instead of raising to avoid crashing the program
                 return None
-            
+
             # Exponential backoff with jitter
             wait_time = min(2 ** attempt + (0.1 * random.random()), 60)
             logger.warning(f"Attempt {attempt + 1} failed: {str(e)}. Retrying in {wait_time:.2f}s")
-            
+
             if "ThrottlingException" in str(e) or "TooManyRequestsException" in str(e):
                 # Longer wait for throttling and rate limiting
                 wait_time = min(5 ** attempt, 300)  # Increased max wait time for throttling
                 logger.warning(f"Rate limiting detected, waiting {wait_time:.2f}s")
-                
+
             await asyncio.sleep(wait_time)
 
 @retry_with_count(max_attempts=10, delay=5)
@@ -77,7 +76,7 @@ def generate_message(
         "temperature": temperature,
         "top_p": top_p
     }
-    
+
     if system_prompt:
         bedrock_format["system"] = system_prompt
 
@@ -104,7 +103,7 @@ async def async_generate_message(
         "temperature": temperature,
         "top_p": top_p
     }
-    
+
     if system_prompt:
         bedrock_format["system"] = system_prompt
 
@@ -128,72 +127,55 @@ def inference_with_converse_api(bedrock_client,
                          ):
     # Base inference parameters to use.
     inference_config = {"temperature": temperature}
-    
+
     params = {
         "modelId": model_id,
         "messages": messages,
         "inferenceConfig": inference_config,
     }
-    
+
     if tools:
         params["toolConfig"] = {"tools": tools}
-    
+
     if system_prompts:
         params["system"] = [{"text": system_prompts}]
-    
+
     if max_tokens:
         params["inferenceConfig"]["maxTokens"] = max_tokens
-    
+
     if top_p:
         params["inferenceConfig"]["topP"] = top_p
-    
+
     if top_k is not None and 'claude' in model_id:
         params["additionalModelRequestFields"] = {
             "top_k": top_k
         }
-        
+
     if thinking_config:
         params["additionalModelRequestFields"]['thinking'] = thinking_config
         params["inferenceConfig"]["temperature"] = 1
-        
+
 
     # Send the message.
     try:
         response = bedrock_client.converse(**params)
-    except:
+    except Exception:
         import traceback
         traceback.print_exc()
         return {}
-    
+
     if return_content:
         return response['output']['message']['content']
     else:
         return response
-    
-def inference_with_sm_endpoint(prompt, endpoint="jumpstart-dft-hf-reasoning-qwen3-32-20250820-053044", max_new_tokens=1000):
-    body = {
-        "inputs": f"<|begin_of_sentence|><|User|>{prompt}<|Assistant|>",
-        "parameters": {
-            "max_new_tokens": max_new_tokens
-        }
-    }
-    
-    response = client.invoke_endpoint(
-        EndpointName=endpoint,
-        ContentType="application/json",
-        Body=json.dumps(body),
-        Accept="application/json"
-    )
-    
-    result = json.loads(response["Body"].read().decode("utf-8"))
-    return result["generated_text"]
+
 
 def build_message(texts=None, images=None, invoke_model=False):
     message = {
         "role": "user",
         "content": [],
     }
-    
+
     if texts:
         if invoke_model:
             message["content"] += [{"text": text, "type": "text"} for text in texts]
@@ -216,19 +198,19 @@ def build_message(texts=None, images=None, invoke_model=False):
                     "bytes": img
                 }
             } for img in images}]
-    
+
     return message
 
 def get_json(contents, tool_name="print_pdf_content"):
     if not contents:
         return None
-        
+
     json_classification = None
     for content in contents:
         if "toolUse" in content and content['toolUse']['name'] == tool_name:
             json_classification = content['toolUse']['input']
             break
-    
+
     return json_classification
 async def async_inference_with_converse_api(bedrock_client,
                           model_id,
@@ -244,19 +226,19 @@ async def async_inference_with_converse_api(bedrock_client,
     """Run inference with Bedrock Converse API with robust retry handling."""
     # Base inference parameters to use.
     inference_config = {"temperature": temperature}
-    
+
     params = {
         "modelId": model_id,
         "messages": messages,
         "inferenceConfig": inference_config,
     }
-    
+
     if tools:
         params["toolConfig"] = {"tools": tools}
-    
+
     if system_prompts:
         params["system"] = [{"text": system_prompts}]
-    
+
     # Additional inference parameters to use.
     if "nova" in model_id:
         # Send the message.
@@ -265,13 +247,13 @@ async def async_inference_with_converse_api(bedrock_client,
                 return await asyncio.get_event_loop().run_in_executor(
                     executor, lambda: bedrock_client.converse(**params)
                 )
-        
+
         # Use the retry function with backoff
         response = await retry_async_with_backoff(make_api_call, max_attempts=10)
         if response is None:
             logger.error("Failed to get response after all retries")
             return None
-        
+
         return response['output']['message']['content']
     else:
         params["additionalModelRequestFields"] = {
@@ -281,19 +263,19 @@ async def async_inference_with_converse_api(bedrock_client,
             params["additionalModelRequestFields"]['top_k'] = top_k
         elif top_p is not None and thinking_config is None:
             params["additionalModelRequestFields"]["top_p"] = top_p
-            
+
         if thinking_config:
             params["additionalModelRequestFields"]['thinking'] = thinking_config
             logger.info("Temperature must be set to 1 and top_p must be unset")
             params["inferenceConfig"]["temperature"] = 1
-            
+
         # Send the message asynchronously using a custom executor
         async def make_api_call():
             with ThreadPoolExecutor(max_workers=5) as executor:  # Increased max_workers
                 return await asyncio.get_event_loop().run_in_executor(
                     executor, lambda: bedrock_client.converse(**params)
                 )
-        
+
         # Use the retry function with backoff
         response = await retry_async_with_backoff(make_api_call, max_attempts=10)
         logger.info(f"response: {response}")
@@ -306,11 +288,11 @@ async def async_inference_with_converse_api(bedrock_client,
 async def async_get_json(contents, tool_name="print_pdf_content"):
     if not contents:
         return None
-        
+
     json_classification = None
     for content in contents:
         if "toolUse" in content and content['toolUse']['name'] == tool_name:
             json_classification = content['toolUse']['input']
             break
-    
+
     return json_classification

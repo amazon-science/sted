@@ -20,7 +20,7 @@ __author__ = "AWS Generative AI Innovation Center"
 __all__ = [
     "STED",
     "SemanticJsonTreeConsistencyEvaluator",
-    "StructuralConsistencyAnalyzer", 
+    "StructuralConsistencyAnalyzer",
     "JsonNode",
     "StringSimilarityCache",
     "collect_all_values",

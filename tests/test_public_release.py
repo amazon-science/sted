@@ -174,6 +174,64 @@ def test_batch_consistency():
     print(f"✓ Batch consistency working (coefficient={result['consistency_metrics']['consistency_coefficient']:.4f})")
     return True
 
+def test_analyzer_with_ground_truth():
+    """Test consistency evaluation with ground truth"""
+    print("Testing analyzer with ground truth...")
+    from sted import SemanticJsonTreeConsistencyEvaluator, StructuralConsistencyAnalyzer
+    
+    evaluator = SemanticJsonTreeConsistencyEvaluator(model_id='all-MiniLM-L6-v2')
+    analyzer = StructuralConsistencyAnalyzer(evaluator)
+    
+    gt = {'name': 'Alice', 'age': 25}
+    outputs = [
+        {'name': 'Alice', 'age': 25},
+        {'name': 'Alice', 'age': 26},
+    ]
+    
+    result = analyzer.evaluate_structural_consistency(outputs, gt=gt, method_name="sted")
+    
+    assert result['has_ground_truth'] == True
+    assert 'consistency_metrics' in result
+    print(f"✓ Analyzer with ground truth working")
+    return True
+
+def test_field_level_consistency():
+    """Test field-level consistency evaluation"""
+    print("Testing field-level consistency...")
+    from sted import SemanticJsonTreeConsistencyEvaluator, StructuralConsistencyAnalyzer
+    
+    evaluator = SemanticJsonTreeConsistencyEvaluator(model_id='all-MiniLM-L6-v2')
+    analyzer = StructuralConsistencyAnalyzer(evaluator)
+    
+    outputs = [
+        {'name': 'Alice', 'age': 25, 'city': 'NYC'},
+        {'name': 'Alice', 'age': 25, 'city': 'New York'},
+        {'name': 'Alice', 'age': 26, 'city': 'NYC'},
+    ]
+    
+    result = analyzer.evaluate_field_level_consistency(outputs)
+    
+    assert 'field_level_metrics' in result
+    assert 'overall_field_consistency' in result
+    print(f"✓ Field-level consistency working (overall={result['overall_field_consistency']:.4f})")
+    return True
+
+def test_collect_string_pairs():
+    """Test string pair collection"""
+    print("Testing collect_all_string_pairs...")
+    from sted import SemanticJsonTreeConsistencyEvaluator, StructuralConsistencyAnalyzer
+    
+    evaluator = SemanticJsonTreeConsistencyEvaluator(model_id='all-MiniLM-L6-v2')
+    analyzer = StructuralConsistencyAnalyzer(evaluator)
+    
+    outputs = [{'a': 'hello'}, {'a': 'world'}]
+    pairs = analyzer.collect_all_string_pairs(outputs)
+    
+    assert len(pairs) > 0
+    assert all(isinstance(p, tuple) and len(p) == 2 for p in pairs)
+    print(f"✓ String pair collection working ({len(pairs)} pairs)")
+    return True
+
 def test_no_experimental_imports():
     """Verify experimental modules are not in public API"""
     print("Testing experimental modules are not in public API...")
@@ -210,6 +268,9 @@ def run_all_tests():
         test_variation_types,
         test_deepdiff_methods,
         test_batch_consistency,
+        test_analyzer_with_ground_truth,
+        test_field_level_consistency,
+        test_collect_string_pairs,
         test_no_experimental_imports,
     ]
     
