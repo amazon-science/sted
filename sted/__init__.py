@@ -15,7 +15,7 @@ from .utils import collect_all_values, count_json_elements
 STED = SemanticJsonTreeConsistencyEvaluator
 
 __version__ = "0.1.0"
-__author__ = "Your Name"
+__author__ = "AWS Generative AI Innovation Center"
 
 __all__ = [
     "STED",

@@ -29,14 +29,10 @@ def retry_with_count(max_attempts=3, delay=1):
         def wrapper(*args, **kwargs):
             for attempt in range(max_attempts):
                 try:
-                    print(f"Attempt {attempt + 1}/{max_attempts}")
                     return func(*args, **kwargs)
                 except Exception as e:
                     if attempt == max_attempts - 1:
-                        #raise e
-                        print(f'Error: {str(e)}')
                         return None
-                    print(f"Attempt {attempt + 1} failed: {str(e)}")
                     time.sleep(delay)
             return None
         return wrapper
@@ -140,8 +136,6 @@ def inference_with_converse_api(bedrock_client,
         "inferenceConfig": inference_config,
     }
     
-    print(f"model_id: {model_id}")
-    
     if tools:
         params["toolConfig"] = {"tools": tools}
     
@@ -161,7 +155,6 @@ def inference_with_converse_api(bedrock_client,
         
     if thinking_config:
         params["additionalModelRequestFields"]['thinking'] = thinking_config
-        print(f"Temperature must be set to 1 and top_p must be unset")
         params["inferenceConfig"]["temperature"] = 1
         
 

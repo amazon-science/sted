@@ -170,7 +170,6 @@ class StructuralConsistencyAnalyzer:
         if not similarity_values:
             return {}
         
-        print(f"similarity_values: {similarity_values}")
         similarity_array = np.array(similarity_values)
         mean_sim = float(np.mean(similarity_array))
         std_sim = float(np.std(similarity_array))

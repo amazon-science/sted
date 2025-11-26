@@ -72,8 +72,7 @@ def parse_json_outputs(outputs: List[Union[str, Dict]]) -> List[Dict]:
             try:
                 parsed.append(json.loads(output))
             except json.JSONDecodeError as e:
-                print(f"Warning: Could not parse JSON string at index {i}: {e}")
-                print(f"String preview: {output[:100]}...")
+                warnings.warn(f"Could not parse JSON string at index {i}: {e}")
         elif isinstance(output, list):
             if isinstance(output[0], dict) and len(output)>0:
                 parsed.append({"responses": output})
@@ -154,13 +153,10 @@ def getEmbeddings(text, model_id, bedrock_client, max_retries=10, initial_delay=
                 
             return np.array(embedding).astype(np.float32)
         except Exception as e:
-            # Catch other exceptions (like connection errors)
-            print(f"Unexpected error on attempt {attempt + 1}: {str(e)}")
             if attempt == max_retries - 1:
                 raise
             
             delay = exponential_delay(attempt)
-            print(f"Retrying in {delay:.2f} seconds...")
             time.sleep(delay)
 
     # This should be unreachable with the retry logic above
