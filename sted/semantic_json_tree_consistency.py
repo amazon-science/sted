@@ -149,7 +149,6 @@ class SemanticJsonTreeConsistencyEvaluator:
         if self.bedrock_client:
             try:
                 return getEmbeddings(text, self.model_id, self.bedrock_client)
-                #return [1,2,3,4,5]
             except Exception as e:
                 warnings.warn(f"Failed to get Bedrock embedding for '{text}': {e}")
                 return None
@@ -639,7 +638,6 @@ class SemanticJsonTreeConsistencyEvaluator:
         normalized_cost = total_cost / len(row_indices)
         normalized_cost = min(normalized_cost, 1.0)
         
-        #return total_cost if total_cost > 0 else 0
         return normalized_cost
     
     def calculate_tree_edit_distance_opt(self, json1: Dict[str, Any], json2: Dict[str, Any], variation_type: str = "combined") -> float:
@@ -901,7 +899,7 @@ class SemanticJsonTreeConsistencyEvaluator:
                 else:
                     try:
                         value_similarity = self._compare_numbers(float(old_value), float(new_value))
-                    except:
+                    except (ValueError, TypeError):
                         value_similarity = self._compare_strings(str(old_value), str(new_value))
                 
                 total_similarity_score += value_similarity
