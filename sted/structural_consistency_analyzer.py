@@ -177,26 +177,18 @@ class StructuralConsistencyAnalyzer:
         # Calculate coefficient of variation for use in metrics
         cv = std_sim / mean_sim if mean_sim > 1e-10 else 0.0
         
-        # === PRIMARY METRIC: Consistency Coefficient ===
+        # Primary metric: Consistency Coefficient
         # Combines accuracy (mean) with stability (penalizes high variance)
-        # This is the most comprehensive single metric
         if mean_sim > 1e-10:
             variance_penalty = min(cv ** 1.5, 1.0)
             consistency_coefficient = mean_sim * (1 - variance_penalty)
         else:
             consistency_coefficient = 0.0
         
-        # === MIXED AMPLIFICATION APPROACH ===
-        import math
-        
-        # Consistency Coefficient - power transformation (better discrimination)
+        # Consistency Coefficient - power transformation for better discrimination
         consistency_coefficient = consistency_coefficient ** 5
         
-        # Stability Score - power transformation (better discrimination)
-        # stability_score = 1.0 / (1.0 + std_sim*2)
-        # stability_score = stability_score ** 20
-        
-        # Stability Score - smart mapping with steep changes for small std variations
+        # Stability Score - power transformation for better discrimination
         n = len(similarity_values)
         if n <= 1:
             stability_score = 1.0
@@ -209,8 +201,7 @@ class StructuralConsistencyAnalyzer:
             # Normalize std to [0,1] range
             normalized_std = std_sim / max_possible_std if max_possible_std > 0 else 0.0
             
-            # Apply exponential transformation for steep changes (similar to original shape)
-            #stability_score = (1.0 - normalized_std) ** 10
+            # Apply exponential transformation for steep changes
             stability_score = 1.0 / (1.0 + normalized_std*2)
             stability_score = stability_score ** steepness_factor
         
