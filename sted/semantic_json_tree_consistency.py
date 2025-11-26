@@ -25,7 +25,7 @@ from deepdiff import DeepDiff
 
 from .json_tree_node import JsonNode
 from .similarity_cache import StringSimilarityCache
-from .utils import getEmbeddings, create_bedrock_client, count_json_elements
+from .utils import get_embeddings, create_bedrock_client, count_json_elements
 from botocore.config import Config
 
 from transformers import logging
@@ -144,7 +144,7 @@ class SemanticJsonTreeConsistencyEvaluator:
 
         if self.bedrock_client:
             try:
-                return getEmbeddings(text, self.model_id, self.bedrock_client)
+                return get_embeddings(text, self.model_id, self.bedrock_client)
             except Exception as e:
                 warnings.warn(f"Failed to get Bedrock embedding for '{text}': {e}")
                 return None

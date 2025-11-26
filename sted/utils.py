@@ -87,7 +87,7 @@ def parse_json_outputs(outputs: List[Union[str, Dict]]) -> List[Dict]:
 
     return parsed
 
-def getEmbeddings(text, model_id, bedrock_client, max_retries=10, initial_delay=2, output_embedding_length=1024):
+def get_embeddings(text, model_id, bedrock_client, max_retries=10, initial_delay=2, output_embedding_length=1024):
     """
     Get embeddings from Bedrock with proper retry and connection handling
     
