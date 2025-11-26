@@ -18,7 +18,7 @@ from bert_score import score as bert_score
 from scipy.optimize import linear_sum_assignment
 import zss
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from sentence_transformers import SentenceTransformer
 
