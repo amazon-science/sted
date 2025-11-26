@@ -182,7 +182,7 @@ python scripts/eval/calculate_consistency_metrics.py
 python scripts/visualization/visualize_consistency_scores.py
 ```
 
-![LLM Consistency Scores](results_archive/v1_2025-11-08/llm_consistency/consistency_score_by_consistency_type_with_errors.png)
+![LLM Consistency Scores](images/consistency_score_by_consistency_type_with_errors.png)
 
 For all scripts, see [Scripts Reference](./SCRIPTS_REFERENCE.md).
 
