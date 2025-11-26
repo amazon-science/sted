@@ -271,3 +271,8 @@ research/notebooks/.ipynb_checkpoints/
 
 research/
 benchmarks/
+
+# Experimental modules
+sted/gnn.py
+sted/pdc_metric.py
+sted/probabilistic_consistency.py
