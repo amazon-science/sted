@@ -269,3 +269,4 @@ research/experiments/*.zip
 research/experiments/*/llm_gen_results/
 research/notebooks/.ipynb_checkpoints/
 
+research/
