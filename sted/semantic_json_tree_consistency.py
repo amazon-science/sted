@@ -38,7 +38,6 @@ import math
 from .json_tree_node import JsonNode
 from .similarity_cache import StringSimilarityCache
 from .utils import collect_all_values, getEmbeddings, create_bedrock_client, count_json_elements
-from .gnn import compare_json
 from .bedrock_utils import build_message, get_json, inference_with_converse_api
 from botocore.config import Config
 
@@ -216,7 +215,6 @@ class SemanticJsonTreeConsistencyEvaluator:
             "bertscore": self.calculate_bertscore,
             "deepdiff": self.calculate_similarity_with_deepdiff,
             "deepdiff_opt": self.calculate_similarity_with_deepdiff_opt,
-            "gnn": self.calculate_gnn_similarity,
             "llm_judge": self.calculate_similarity_with_llm
         }
         
@@ -854,35 +852,6 @@ Provide a similarity score between 0.0 and 1.0 based on semantic equivalence, st
             traceback.print_exc()
             return {}
         
-    def calculate_gnn_similarity(self, json1: [Dict[str, Any], List], json2: [Dict[str, Any], List], **kwargs) -> float:
-        """
-        Calculate similarity using GNN approach from gnn.py.
-        
-        Args:
-            json1: First JSON object or list
-            json2: Second JSON object or list
-            
-        Returns:
-            Similarity score between 0.0 and 1.0
-        """
-        try:
-            if isinstance(json1, list):
-                json1 = {"root": json1}
-            if isinstance(json2, list):
-                json2 = {"root": json2}
-            
-            # Check if we have the embedding model
-            text_model = SentenceTransformer("all-MiniLM-L6-v2")
-            
-            # Use the compare_json function from gnn.py
-            similarity = compare_json(json1, json2, text_model)
-            
-            return float(max(0.0, min(1.0, similarity)))
-            
-        except Exception as e:
-            warnings.warn(f"Error in GNN similarity calculation: {str(e)}")
-            return 0.0
-    
     def batch_compute_llm_similarities(self, json_pairs: List[Tuple[Dict, Dict]], 
                                       llm_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0") -> Dict[Tuple[str, str], float]:
         """
