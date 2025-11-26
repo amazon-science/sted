@@ -38,81 +38,9 @@ import math
 from .json_tree_node import JsonNode
 from .similarity_cache import StringSimilarityCache
 from .utils import collect_all_values, getEmbeddings, create_bedrock_client, count_json_elements
-from .bedrock_utils import build_message, get_json, inference_with_converse_api
 from botocore.config import Config
 
 # System prompt for LLM judge to calculate similarity score between two structured data
-SYSTEM_PROMPT_JUDGE = """You are an expert evaluator tasked with assessing the similarity between two structured JSON outputs. Your goal is to provide a similarity score that aligns with human judgment.
-
-## Evaluation Criteria:
-
-1. **Semantic Equivalence** (40%): Do the outputs convey the same meaning, even if expressed differently?
-   - Consider synonyms, paraphrases, and equivalent expressions
-   - Account for different levels of detail that maintain core meaning
-   - Recognize when different structures represent the same information
-
-2. **Structural Consistency** (30%): How well do the organizational patterns match?
-   - Field names and their semantic relationships
-   - Hierarchical organization and nesting patterns
-   - Data types and their appropriateness for the content
-
-3. **Content Accuracy** (20%): How accurate are the specific values and details?
-   - Factual correctness of information
-   - Precision of numerical values
-   - Completeness of required information
-
-4. **Functional Equivalence** (10%): Would these outputs serve the same purpose in practice?
-   - Usability for downstream applications
-   - Preservation of key relationships and dependencies
-
-## Scoring Guidelines:
-
-- **0.9-1.0**: Essentially identical or semantically equivalent with minor stylistic differences
-- **0.7-0.8**: Very similar with some differences in detail or structure that don't affect core meaning
-- **0.5-0.6**: Moderately similar with notable differences but shared core concepts
-- **0.3-0.4**: Some similarities but significant differences in structure or content
-- **0.1-0.2**: Minimal similarity with only basic shared elements
-- **0.0**: Completely different or unrelated
-
-## Instructions:
-
-1. Analyze both JSON structures carefully
-2. Consider the context and likely use case
-3. Focus on semantic meaning over exact textual matches
-4. Provide a single similarity score between 0.0 and 1.0
-5. Be consistent with human judgment patterns
-
-Generate result using calculate_similarity_score."""
-
-judge_schema = [
-    {
-        "toolSpec": {
-            "name": "calculate_similarity_score",
-            "description": "Calculate the similarity score between two structured JSON outputs",
-            "inputSchema": {
-                "json": {
-                    "type": "object",
-                    "properties": {
-                        "overall_score": {
-                            "type": "number",
-                            "description": "The similarity score between two structured JSON outputs, ranging from 0.0 to 1.0"
-                        },
-                        "structural_score": {
-                            "type": "number",
-                            "description": "The structural consistency score, ranging from 0.0 to 1.0"
-                        },
-                        "content_score": {
-                            "type": "number",
-                            "description": "The semantic equivalence score for values in json outputs, ranging from 0.0 to 1.0"
-                        }
-                    },
-                    "required": ["overall_score", "structural_score", "content_score"]
-                }
-            }
-        }
-    }
-]
-
 # Define default configuration inline to avoid import issues
 def _get_default_type_change_costs() -> Dict[Tuple[str, str], float]:
     """Define default costs for type changes."""
@@ -181,7 +109,6 @@ class SemanticJsonTreeConsistencyEvaluator:
         # Initialize embedding model if available
         self.embedding_model = None
         self.bedrock_client = None
-        self.llm_client = None
         self.model_id = model_id
         
         boto_config = Config(
@@ -199,9 +126,6 @@ class SemanticJsonTreeConsistencyEvaluator:
             # Warm up the model
             self.embedding_model.encode(["test"], show_progress_bar=False)
         
-        # Initialize LLM client for similarity evaluation (using same Bedrock client)
-        self.llm_client = self.bedrock_client if self.bedrock_client else create_bedrock_client(region_name=region_name, config=boto_config)
-        
         # Cache for embeddings
         self._cache = StringSimilarityCache()
         
@@ -215,7 +139,6 @@ class SemanticJsonTreeConsistencyEvaluator:
             "bertscore": self.calculate_bertscore,
             "deepdiff": self.calculate_similarity_with_deepdiff,
             "deepdiff_opt": self.calculate_similarity_with_deepdiff_opt,
-            "llm_judge": self.calculate_similarity_with_llm
         }
         
         self.weights = weights
@@ -224,8 +147,6 @@ class SemanticJsonTreeConsistencyEvaluator:
         self.sort_arrays = sort_arrays
         
         self.batch_size_bertscore = 2000
-        
-        self.judge_model_id = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
     
     @lru_cache(maxsize=2000)
     def _get_embedding(self, text: str) -> Optional[np.ndarray]:
@@ -798,99 +719,6 @@ class SemanticJsonTreeConsistencyEvaluator:
         
         P, R, F1 = bert_score([str(processed_json1)], [str(processed_json2)], lang="en")
         return float(F1.item())
-    
-    def calculate_similarity_with_llm(self, json1: [Dict[str, Any], List], json2: [Dict[str, Any], List], 
-                                     llm_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0", 
-                                     max_retries: int = 3, **kwargs) -> float:
-        """
-        Calculate similarity between two JSON structures using an LLM judge.
-        
-        Args:
-            json1: First JSON object or list
-            json2: Second JSON object or list
-            llm_model_id: The LLM model to use for evaluation
-            max_retries: Maximum number of retry attempts
-            
-        Returns:
-            Similarity score between 0.0 and 1.0
-        """
-        try:
-            # Prepare the JSON structures for comparison
-            json1_str = json.dumps(json1, indent=2, ensure_ascii=False, sort_keys=True)
-            json2_str = json.dumps(json2, indent=2, ensure_ascii=False, sort_keys=True)
-            
-            # Create the evaluation prompt
-            user_prompt = f"""Please evaluate the similarity between these two JSON structures:
-
-JSON Structure 1:
-```json
-{json1_str}
-```
-
-JSON Structure 2:
-```json
-{json2_str}
-```
-
-Provide a similarity score between 0.0 and 1.0 based on semantic equivalence, structural consistency, content accuracy, and functional equivalence."""
-            message = build_message(texts=[user_prompt])
-            response = inference_with_converse_api(
-                self.llm_client,
-                model_id=llm_model_id,
-                messages=[message],
-                system_prompts=SYSTEM_PROMPT_JUDGE,
-                max_tokens=2000,
-                temperature=0.1,
-                tools=judge_schema
-            )
-            
-            return get_json(response, "calculate_similarity_score")
-        except Exception as e:
-            warnings.warn(f"Error in LLM similarity calculation: {str(e)}")
-            # print error trace
-            import traceback
-            traceback.print_exc()
-            return {}
-        
-    def batch_compute_llm_similarities(self, json_pairs: List[Tuple[Dict, Dict]], 
-                                      llm_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0") -> Dict[Tuple[str, str], float]:
-        """
-        Batch compute LLM similarities for multiple JSON pairs.
-        
-        Args:
-            json_pairs: List of (json1, json2) tuples to evaluate
-            llm_model_id: The LLM model to use for evaluation
-            
-        Returns:
-            Dictionary mapping JSON pair hashes to similarity scores
-        """
-        results = {}
-        
-        for json1, json2 in json_pairs:
-            # Create a hash key for caching
-            json1_str = json.dumps(json1, sort_keys=True)
-            json2_str = json.dumps(json2, sort_keys=True)
-            cache_key = (json1_str, json2_str)
-            
-            # Check cache first
-            cached_score = self._cache.get(json1_str, json2_str)
-            if cached_score is not None:
-                results[cache_key] = cached_score
-                continue
-            
-            # Calculate similarity using LLM
-            try:
-                similarity = self.calculate_similarity_with_llm(json1, json2, llm_model_id=llm_model_id)
-                results[cache_key] = similarity
-                
-                # Cache the result
-                self._cache.set(json1_str, json2_str, similarity)
-                
-            except Exception as e:
-                warnings.warn(f"Failed to calculate LLM similarity for pair: {str(e)}")
-                results[cache_key] = 0.0
-        
-        return results
     
     def calculate_similarity_with_deepdiff(self, json1: [Dict[str, Any], List], json2: [Dict[str, Any], List], **kwargs) -> float:
         diff = DeepDiff(json1, json2, ignore_order=True, cache_size=5000, get_deep_distance=True)
