@@ -11,7 +11,7 @@ class JsonNode:
     def __init__(self, label: str, value: Any = None, node_type: str = None):
         """
         Initialize a JSON node.
-        
+
         Args:
             label: The label (key or index) of the node
             value: The value of the node (for leaf nodes)
