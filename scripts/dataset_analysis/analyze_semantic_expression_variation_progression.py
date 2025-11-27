@@ -38,10 +38,11 @@ def analyze_variation_progression(file_paths, output_dir='results'):
     variation_types_map = {'structural': 'structural', 'content': 'content', 'combined': 'combined'}
     
     all_results = {}
+    total_files = len(file_paths)
     
-    for file_path in file_paths:
+    for file_idx, file_path in enumerate(file_paths, 1):
         variation_type = get_variation_type_from_filename(file_path)
-        print(f"\nProcessing {variation_type} variation: {file_path}")
+        print(f"\n[{file_idx}/{total_files}] Processing {variation_type} variation: {file_path}")
         
         # Results: {method: {variation_type: {ratio: [similarities]}}}
         results = {
@@ -52,19 +53,21 @@ def analyze_variation_progression(file_paths, output_dir='results'):
         with open(file_path, 'r') as f:
             data = json.load(f)
         
-        for sample in tqdm(data, desc=f"Processing samples"):
+        for sample_idx, sample in enumerate(tqdm(data, desc=f"Processing samples")):
             base_sample = sample.get('base_sample', {})
             variants = sample.get('variants', [])
             
             if not base_sample or not variants:
                 continue
             
-            for variant in variants:
+            for var_idx, variant in enumerate(variants):
                 variation_ratio = round(variant.get('variation_ratio', 0), 1)
                 variation = variant.get('variation', {})
                 
                 if not variation or variation_ratio == 0:
                     continue
+                
+                print(f"  Sample {sample_idx+1}, Variant {var_idx+1}/{len(variants)} (ratio={variation_ratio})", end="")
                 
                 for method in methods:
                     for vt_key, vt_name in variation_types_map.items():
@@ -83,7 +86,9 @@ def analyze_variation_progression(file_paths, output_dir='results'):
                                 )
                             results[method][vt_name][variation_ratio].append(similarity)
                         except Exception as e:
-                            print(f"Error: {method}/{vt_name} at ratio {variation_ratio}: {e}")
+                            print(f"\n    Error: {method}/{vt_name}: {e}")
+                
+                print(f" - done ({len(methods)} methods)")
         
         all_results[file_path] = {'type': variation_type, 'results': results}
     
