@@ -70,6 +70,20 @@ aws configure
 export OPENAI_API_KEY=<your-openai-api-key>
 ```
 
+### Troubleshooting
+
+**NumPy/PyTorch Compatibility Error**
+
+If you see `_ARRAY_API not found` or "module compiled using NumPy 1.x cannot be run in NumPy 2.x":
+
+```bash
+# Option 1: Downgrade NumPy (if using PyTorch < 2.4)
+pip install "numpy<2"
+
+# Option 2: Upgrade PyTorch (recommended)
+pip install --upgrade "torch>=2.4"
+```
+
 ## Quick Start
 
 ### Basic Similarity Calculation
@@ -124,6 +138,12 @@ The framework uses ShareGPT datasets for evaluation:
 - **sharegpt-structured-output-json**: 30 samples
 - **sharegpt-quizz-generation-json-output**: 50 samples
 - **Total**: 80 samples (75 valid after parsing error exclusion)
+
+### Download ShareGPT Data
+
+```bash
+python scripts/data/download_sharegpt_data.py
+```
 
 ### Generate Synthetic Datasets
 
@@ -183,6 +203,51 @@ python scripts/visualization/visualize_consistency_scores.py
 ```
 
 ![LLM Consistency Scores](images/consistency_score_by_consistency_type_with_errors.png)
+
+### Adding New Models
+
+The framework supports models from multiple providers. To add a new model, update the `provider_mapping` in `scripts/eval/generate_structured_outputs.py`:
+
+```python
+provider_mapping = {
+    # AWS Bedrock models (use cross-region inference prefix "us." for supported models)
+    "us.anthropic.claude-3-7-sonnet-20250219-v1:0": "bedrock",
+    "us.anthropic.claude-sonnet-4-20250514-v1:0": "bedrock",
+    "us.qwen.qwen3-235b-a22b-2507-v1:0": "bedrock",
+    "us.deepseek.v3-v1:0": "bedrock",
+    
+    # OpenAI-compatible API models (via OPENAI_BASE_URL)
+    "openai/gpt-4o": "openai",
+    "google/gemini-2.5-pro": "openai",
+    "x-ai/grok-4": "openai"
+}
+```
+
+**Provider Types:**
+
+| Provider | Model ID Format | API Used | Credentials |
+|----------|----------------|----------|-------------|
+| `bedrock` | `us.<provider>.<model>-v1:0` | AWS Bedrock Converse API | AWS credentials |
+| `openai` | `<provider>/<model>` | OpenAI-compatible API | `OPENAI_API_KEY`, `OPENAI_BASE_URL` |
+
+**To add a new model:**
+
+1. **For Bedrock models**: Add the model ID with `"bedrock"` as the provider. Use the `us.` prefix for cross-region inference.
+   ```python
+   "us.meta.llama3-3-70b-instruct-v1:0": "bedrock",
+   ```
+
+2. **For OpenAI-compatible APIs** (OpenAI, OpenRouter, etc.): Add the model ID with `"openai"` as the provider.
+   ```python
+   "anthropic/claude-3-opus": "openai",  # via OpenRouter
+   ```
+
+3. **Configure credentials** in `.env`:
+   ```bash
+   # For OpenAI-compatible APIs
+   OPENAI_API_KEY=<your-api-key>
+   OPENAI_BASE_URL=https://openrouter.ai/api/v1  # Optional, for OpenRouter
+   ```
 
 For all scripts, see [Scripts Reference](./SCRIPTS_REFERENCE.md).
 

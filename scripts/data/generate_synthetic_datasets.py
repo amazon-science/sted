@@ -19,6 +19,7 @@ import json
 from datetime import datetime
 import copy
 import ast
+import re
 
 user_prompt = """The original JSON data is as follows:
 {original_data}
@@ -273,6 +274,23 @@ class ExperimentDatasetGenerator:
             json.dump(all_samples, f, indent=4)
         
         return all_samples
+    
+    def _parse_python_list_string(self, variants: str) -> list:
+        """Parse a Python list string with mixed quotes into a list."""
+        # Replace newlines with space
+        variants = variants.replace('\n', ' ')
+        # Normalize curly quotes
+        variants = re.sub(r'[""]', '"', variants)
+        variants = re.sub(r"['']", "'", variants)
+        # Unescape single quotes (valid in Python, invalid in JSON)
+        variants = variants.replace("\\'", "'")
+        # Convert single-quoted strings to double-quoted: ', ' or '] or ['
+        variants = re.sub(r"', '", '", "', variants)
+        variants = re.sub(r"'\]", '"]', variants)
+        variants = re.sub(r"\['", '["', variants)
+        variants = re.sub(r"', \"", '", "', variants)
+        variants = re.sub(r"\", '", '", "', variants)
+        return json.loads(variants)
         
     def _flatten_structure(self, sample: Dict) -> Dict:
         """Flatten nested structure based on ratio"""
@@ -521,8 +539,7 @@ class ExperimentDatasetGenerator:
                         variants = get_json(response, "print_field_variants")['string_list']
                         if isinstance(variants, str):
                             print(f"variants: {variants}")
-                            #variants = json.loads(variants)
-                            variants = ast.literal_eval(variants)
+                            variants = self._parse_python_list_string(variants)
                         break
                     except Exception as e:
                         import traceback
