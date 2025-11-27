@@ -6,7 +6,7 @@ This script generates text using an LLM with parallel inference and saves the re
 It focuses solely on generation, without evaluation metrics.
 
 Usage:
-    python llm_gen_simple.py --data-dir extracted_sharegpt_data --output-dir ./generations
+    python generate_structured_outputs.py --data-dir sharegpt_data --output-dir ./generations
 """
 
 import boto3
@@ -14,12 +14,11 @@ from dotenv import load_dotenv
 from sted.bedrock_utils import build_message, inference_with_converse_api
 import argparse
 import json
-import ast
 import concurrent.futures
 import time
 import os
 import numpy as np
-from typing import List, Dict, Any, Optional, Union, Callable, Set, Tuple
+from typing import List, Dict, Any
 import sys
 from tqdm import tqdm
 import re
@@ -128,13 +127,19 @@ def read_sharegpt(dataset_dir="data"):
     
     return json_data
 
-def _single_inference(client, model_id, user_prompt, system_prompts=None, max_tokens=8000, temperature=0.1, top_p=0.9, top_k=200, task_id=None):
+def _single_inference(model_id, user_prompt, system_prompts=None, max_tokens=8000, temperature=0.1, top_p=0.9, top_k=200, task_id=None):
     """
     Helper function to run a single inference request using threads.
     """
     try:
         # Create a new client for each thread to avoid potential thread safety issues
-        thread_client = boto3.client('bedrock-runtime', region_name='us-west-2')
+        # Uses AWS credentials from environment variables or ~/.aws/credentials
+        thread_client = boto3.client(
+            'bedrock-runtime',
+            region_name=os.getenv('AWS_DEFAULT_REGION', 'us-west-2'),
+            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
+        )
         
         # Print task ID if provided (useful for debugging)
         if task_id is not None:
@@ -166,13 +171,12 @@ def _single_inference(client, model_id, user_prompt, system_prompts=None, max_to
             response = openai_client.chat.completions.create(
                 model=model_id,
                 messages=[
-                    {"role": "system", "content": f"{system_prompt}"},
+                    {"role": "system", "content": f"{system_prompts}"},
                     {"role": "user", "content": user_prompt}
                 ],
                 stream=False,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                #top_p=top_p
             )
             print(f"Response received for task {task_id}: {response}")
             response_text = response.choices[0].message.content
@@ -340,12 +344,11 @@ def create_prompt_with_schema(user_prompt, ground_truth_dict):
     
     return modified_prompt
 
-def run_inference(client, model_id, user_prompt, system_prompts=None, max_tokens=8000, temperature=0.1, top_p=0.9, top_k=200, run_num=5, max_workers=None):
+def run_inference(model_id, user_prompt, system_prompts=None, max_tokens=8000, temperature=0.1, top_p=0.9, top_k=200, run_num=5, max_workers=None):
     """
     Runs inference in parallel using ThreadPoolExecutor.
     
     Args:
-        client: Bedrock client (not used directly, each thread creates its own)
         model_id: Model ID to use
         user_prompt: The user prompt to send to the model
         system_prompts: Optional system prompts
@@ -375,7 +378,6 @@ def run_inference(client, model_id, user_prompt, system_prompts=None, max_tokens
         for i in range(run_num):
             future = executor.submit(
                 _single_inference,
-                client,  # Not used directly, each thread creates its own client
                 model_id,
                 user_prompt,
                 system_prompts,
@@ -425,21 +427,20 @@ def make_json_serializable(obj):
     elif hasattr(obj, 'item'):
         try:
             return obj.item()
-        except:
+        except (ValueError, TypeError):
             pass
     elif hasattr(obj, 'tolist'):
         try:
             return obj.tolist()
-        except:
+        except (ValueError, TypeError):
             pass
     # Handle any other NumPy types we might have missed
     elif type(obj).__module__ == 'numpy':
         try:
             return obj.item() if hasattr(obj, 'item') else obj.tolist() if hasattr(obj, 'tolist') else str(obj)
-        except:
+        except (ValueError, TypeError):
             return str(obj)
-    else:
-        return obj
+    return obj
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate text using an LLM with parallel inference.")
@@ -462,16 +463,6 @@ if __name__ == "__main__":
     
     args.include_schema = True
     
-    # Create a client with appropriate configuration
-    from botocore.config import Config
-    boto_config = Config(
-        retries={
-            'max_attempts': 10,
-            'mode': 'adaptive'
-        },
-        max_pool_connections=50  # Increase connection pool size
-    )
-    client = boto3.client('bedrock-runtime', region_name='us-west-2', config=boto_config)
     model_id = args.model_id
 
     # Configure logging based on verbose flag
@@ -608,7 +599,6 @@ if __name__ == "__main__":
             continue
         
         responses = run_inference(
-            client=client,
             model_id=model_id,
             user_prompt=modified_user_prompt,
             system_prompts=system_prompt,
