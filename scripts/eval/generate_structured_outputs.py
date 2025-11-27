@@ -32,7 +32,7 @@ load_dotenv()
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 openai_client = openai.OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
+    api_key=os.getenv("OPENAI_API_KEY", "not-set"),
     base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
 )
 

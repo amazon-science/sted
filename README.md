@@ -179,32 +179,7 @@ python scripts/visualization/visualize_schema_variation_results.py
 
 ## LLM Consistency Benchmarking
 
-### Step 1: Generate LLM Outputs
-
-```bash
-python scripts/eval/run_temperature_experiment.py \
-  --data-dir sharegpt_data \
-  --output-dir llm_gen_results \
-  --run-num 10 \
-  --model-id anthropic.claude-3-haiku-20240307-v1:0 \
-  --include-schema
-```
-
-### Step 2: Calculate Consistency Metrics
-
-```bash
-python scripts/eval/calculate_consistency_metrics.py
-```
-
-### Step 3: Visualize Results
-
-```bash
-python scripts/visualization/visualize_consistency_scores.py
-```
-
-![LLM Consistency Scores](images/consistency_score_by_consistency_type_with_errors.png)
-
-### Adding New Models
+### Model Setup
 
 The framework supports models from multiple providers. To add a new model, update the `provider_mapping` in `scripts/eval/generate_structured_outputs.py`:
 
@@ -244,10 +219,39 @@ provider_mapping = {
 
 3. **Configure credentials** in `.env`:
    ```bash
-   # For OpenAI-compatible APIs
+   # For Bedrock models - only AWS credentials needed (via aws configure)
+   
+   # For OpenAI-compatible APIs - set these environment variables
    OPENAI_API_KEY=<your-api-key>
    OPENAI_BASE_URL=https://openrouter.ai/api/v1  # Optional, for OpenRouter
    ```
+
+**Note**: When using Bedrock models, you don't need to set `OPENAI_API_KEY`. The script only requires OpenAI credentials when using models with the `"openai"` provider type.
+
+### Step 1: Generate LLM Outputs
+
+```bash
+python scripts/eval/run_temperature_experiment.py \
+  --data-dir sharegpt_data \
+  --output-dir llm_gen_results \
+  --run-num 10 \
+  --model-id anthropic.claude-3-haiku-20240307-v1:0 \
+  --include-schema
+```
+
+### Step 2: Calculate Consistency Metrics
+
+```bash
+python scripts/eval/calculate_consistency_metrics.py
+```
+
+### Step 3: Visualize Results
+
+```bash
+python scripts/visualization/visualize_consistency_scores.py
+```
+
+![LLM Consistency Scores](images/consistency_score_by_consistency_type_with_errors.png)
 
 For all scripts, see [Scripts Reference](./SCRIPTS_REFERENCE.md).
 
