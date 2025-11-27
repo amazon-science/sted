@@ -458,11 +458,13 @@ class SemanticJsonTreeConsistencyEvaluator:
                     cost_matrix[i, j] = 1.0
 
         # Use Hungarian algorithm for optimal matching
+        len1, len2 = len(arr1), len(arr2)
+        max_len = max(len1, len2)
+        
         if cost_matrix.shape[0] != cost_matrix.shape[1]:
             # Pad matrix for Hungarian algorithm
-            max_len = max(len(arr1), len(arr2))
             padded_matrix = np.ones((max_len, max_len))
-            padded_matrix[:len(arr1), :len(arr2)] = cost_matrix
+            padded_matrix[:len1, :len2] = cost_matrix
             cost_matrix = padded_matrix
 
         row_indices, col_indices = linear_sum_assignment(cost_matrix)
@@ -471,23 +473,13 @@ class SemanticJsonTreeConsistencyEvaluator:
         total_cost = 0
         matched_elements = 0
 
-        len1, len2 = len(arr1), len(arr2)
-
-        # Create a square cost matrix for Hungarian algorithm
-        max_len = max(len1, len2)
-        square_matrix = np.ones((max_len, max_len))  # Initialize with 1s (full cost for unmatched)
-        square_matrix[:len1, :len2] = cost_matrix
-
         for i, j in zip(row_indices, col_indices):
             if i < len1 and j < len2:
-                # This is a matched pair from the original arrays
-                total_cost += square_matrix[i, j]
+                total_cost += cost_matrix[i, j]
                 matched_elements += 1
             elif i < len1:
-                # Element from arr1 that couldn't be matched (deleted)
                 total_cost += 1.0  # Full deletion cost
             elif j < len2:
-                # Element from arr2 that couldn't be matched (inserted)
                 total_cost += 1.0  # Full insertion cost
 
         # Also account for any unmatched elements not covered by the assignment
