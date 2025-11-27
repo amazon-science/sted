@@ -171,10 +171,10 @@ python scripts/dataset_analysis/analyze_semantic_expression_variation_progressio
 
 ```bash
 # Expression and Semantic Variation
-python scripts/visualization/visualize_progression_expression_semantic_separate_charts.py
+python scripts/visualization/visualize_variation_progression.py
 
 # Schema Variation
-python scripts/visualization/visualize_schema_variation_results.py
+python scripts/visualization/visualize_schema_variation.py
 ```
 
 ## LLM Consistency Benchmarking
