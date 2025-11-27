@@ -1,30 +1,48 @@
 #!/usr/bin/env python3
+"""
+Calculate consistency metrics for LLM generation results.
+
+Usage:
+    python calculate_consistency_metrics.py --results-dir llm_gen_results --output-dir results
+"""
 import json
 import os
 import re
 import argparse
-import matplotlib.pyplot as plt
+
 from sted.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
 from sted.structural_consistency_analyzer import StructuralConsistencyAnalyzer
 from tqdm import tqdm
 
+
 def extract_temperature_from_path(path):
+    """Extract temperature value from directory path."""
     match = re.search(r'temp_(\d+)_(\d+)', path)
     return float(f"{match.group(1)}.{match.group(2)}") if match else None
 
+
 def extract_model_name(path):
-    if 'claude3-5-haiku' in path: return 'Claude-3.5-Haiku'
-    elif 'claude-3-haiku' in path: return 'Claude-3-Haiku'
-    elif 'llama3-3-70b' in path: return 'Llama-3.3-70B'
-    elif 'claude3-7-sonnet' in path: return 'Claude-3.7-Sonnet'
-    elif 'claude3-5-sonnet' in path: return 'Claude-3.5-Sonnet-v2'
-    elif 'nova-pro-v1' in path: return 'Nova-Pro'
-    elif 'deepseek.v3-v1' in path: return 'DeepSeek-V3.1'
-    elif 'gemini-2.5-flash-lite' in path: return 'Gemini 2.5 Flash Lite'
-    elif 'gpt-4.1-mini' in path: return 'GPT-4.1 Mini'
-    elif 'qwen3-32b-v1' in path: return 'Qwen3-32B'
-    elif 'qwen3-235b-a22b-2507' in path: return 'Qwen3-235B-A22B-Instruct-2507'
+    """Extract human-readable model name from directory path."""
+    model_mappings = {
+        'claude-3-7-sonnet': 'Claude-3.7-Sonnet',
+        'claude3-7-sonnet': 'Claude-3.7-Sonnet',
+        'claude-3-5-haiku': 'Claude-3.5-Haiku',
+        'claude3-5-haiku': 'Claude-3.5-Haiku',
+        'claude-3-haiku': 'Claude-3-Haiku',
+        'claude3-5-sonnet': 'Claude-3.5-Sonnet-v2',
+        'llama3-3-70b': 'Llama-3.3-70B',
+        'nova-pro-v1': 'Nova-Pro',
+        'deepseek.v3-v1': 'DeepSeek-V3.1',
+        'gemini-2.5-flash-lite': 'Gemini-2.5-Flash-Lite',
+        'gpt-4.1-mini': 'GPT-4.1-Mini',
+        'qwen3-32b-v1': 'Qwen3-32B',
+        'qwen3-235b-a22b-2507': 'Qwen3-235B-A22B',
+    }
+    for key, name in model_mappings.items():
+        if key in path:
+            return name
     return 'Unknown'
+
 
 def main():
     parser = argparse.ArgumentParser(description='Calculate consistency metrics for LLM results')
@@ -36,38 +54,53 @@ def main():
     
     evaluator = SemanticJsonTreeConsistencyEvaluator()
     analyzer = StructuralConsistencyAnalyzer(evaluator)
-    results = {}
     
     variation_types = ["structural", "content", "combined"]
     
     for variation_type in variation_types:
-        for model_dir in tqdm(os.listdir(args.results_dir), desc=f"{variation_type} Processing models"):
-            model_path = os.path.join(args.results_dir, model_dir)
-            if not os.path.isdir(model_path): continue
+        print(f"\n{'='*60}")
+        print(f"Processing variation type: {variation_type}")
+        print(f"{'='*60}")
+        
+        results = {}
+        
+        # Find all result directories containing all_results.json
+        result_dirs = []
+        for item in os.listdir(args.results_dir):
+            item_path = os.path.join(args.results_dir, item)
+            if not os.path.isdir(item_path):
+                continue
+            # Check if this directory contains all_results.json (flat structure)
+            if os.path.exists(os.path.join(item_path, 'all_results.json')):
+                result_dirs.append((item, item_path))
+            else:
+                # Nested structure: look for subdirectories
+                for subitem in os.listdir(item_path):
+                    subitem_path = os.path.join(item_path, subitem)
+                    if os.path.isdir(subitem_path) and os.path.exists(os.path.join(subitem_path, 'all_results.json')):
+                        result_dirs.append((subitem, subitem_path))
+        
+        for dir_name, result_path in tqdm(result_dirs, desc="Processing results"):
+            model_name = extract_model_name(dir_name)
+            temperature = extract_temperature_from_path(dir_name)
             
-            model_name = extract_model_name(model_dir)
-            results[model_name] = []
+            if temperature is None:
+                continue
             
-            for result_dir in tqdm(sorted(os.listdir(model_path)), desc=f"{variation_type} Processing temperatures"):
-                result_path = os.path.join(model_path, result_dir)
-                if not os.path.isdir(result_path): continue
+            if model_name not in results:
+                results[model_name] = []
+            
+            all_results_path = os.path.join(result_path, 'all_results.json')
+            with open(all_results_path, 'r') as f:
+                data = json.load(f)
                 
-                temperature = extract_temperature_from_path(result_dir)
-                if temperature is None: continue
-                
-                all_results_path = os.path.join(result_path, 'all_results.json')
-                if not os.path.exists(all_results_path): continue
-                
-                with open(all_results_path, 'r') as f:
-                    data = json.load(f)
-                
-                # Process all samples and all temperatures
                 for sample_idx, sample in enumerate(data['results']):
                     gt = sample['ground_truth']
                     responses = sample['responses'][:10]
                     
-                    # Use structural consistency analyzer
-                    report = analyzer.evaluate_structural_consistency(responses, gt, method_name="sted", variation_type=variation_type)
+                    report = analyzer.evaluate_structural_consistency(
+                        responses, gt, method_name="sted", variation_type=variation_type
+                    )
                     metrics = report.get('consistency_metrics', {})
                     
                     results[model_name].append({
@@ -78,59 +111,17 @@ def main():
                         'stability_score': metrics.get('stability_score', 0.0),
                         'mean_similarity': report['supporting_stats']['mean_similarity']
                     })
-                    
-                    print(f"{model_name} T={temperature} S={sample_idx}: CC={metrics.get('consistency_coefficient', 0):.3f}, "
-                        f"CV={metrics.get('normalized_cv', 0):.3f}, SS={metrics.get('stability_score', 0):.3f}")
         
+        # Save results
         output_file = os.path.join(args.output_dir, f'{variation_type}_consistency_metrics_results.json')
         with open(output_file, 'w') as f:
             json.dump(results, f, indent=2)
+        print(f"Results saved to {output_file}")
     
-    # Create visualization using mean metrics at each temperature
-    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-    metrics = ['consistency_coefficient', 'normalized_cv', 'stability_score']
-    titles = ['Consistency Coefficient', 'Normalized CV', 'Stability Score']
+    print(f"\n{'='*60}")
+    print("All consistency metrics calculated successfully!")
+    print(f"{'='*60}")
 
-    for i, (metric, title) in enumerate(zip(metrics, titles)):
-        ax = axes[i]
-        
-        for model_name, model_results in results.items():
-            # Group by temperature and calculate means
-            temp_groups = {}
-            for result in model_results:
-                temp = result['temperature']
-                if temp not in temp_groups:
-                    temp_groups[temp] = []
-                temp_groups[temp].append(result[metric])
-            
-            temperatures = sorted(temp_groups.keys())
-            mean_values = [sum(temp_groups[temp]) / len(temp_groups[temp]) for temp in temperatures]
-            
-            ax.plot(temperatures, mean_values, marker='o', label=model_name, linewidth=2, markersize=6)
-        
-        ax.set_xlabel('Temperature')
-        ax.set_ylabel(title)
-        ax.set_title(f'{title} vs Temperature (Mean)')
-        ax.grid(True, alpha=0.3)
-        ax.legend()
-        
-        if metric == 'normalized_cv':
-            ax.set_ylim(0, max(0.5, max([max([sum(temp_groups[temp]) / len(temp_groups[temp]) 
-                                             for temp in sorted(temp_groups.keys())]) 
-                                        for model_results in results.values() 
-                                        for temp_groups in [{}] 
-                                        if temp_groups.update({result['temperature']: temp_groups.get(result['temperature'], []) + [result[metric]] 
-                                                              for result in model_results}) or True]) * 1.1))
-        else:
-            ax.set_ylim(0, 1.05)
-
-    plt.tight_layout()
-    output_png = os.path.join(args.output_dir, f'{variation_type}_consistency_metrics_comparison.png')
-    plt.savefig(output_png, dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    print(f"\nResults saved to {args.output_dir}/{variation_type}_consistency_metrics_results.json")
-    print(f"Visualization saved to {output_png}")
 
 if __name__ == "__main__":
     main()

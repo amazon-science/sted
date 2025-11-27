@@ -141,15 +141,9 @@ def _single_inference(model_id, user_prompt, system_prompts=None, max_tokens=800
             aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
         )
         
-        # Print task ID if provided (useful for debugging)
-        if task_id is not None:
-            print(f"Starting task {task_id}")
-        
         provider = provider_mapping.get(model_id, "bedrock")
-        print(f"provider: {provider} for model_id: {model_id}")
         if provider == "bedrock":
             message = build_message(texts=[user_prompt])
-            # Attempt to run inference
             response = inference_with_converse_api(
                 thread_client,
                 model_id=model_id,
@@ -161,12 +155,9 @@ def _single_inference(model_id, user_prompt, system_prompts=None, max_tokens=800
             )
             
             if not response or not isinstance(response, list) or len(response) == 0:
-                print(f"Warning: Empty or invalid response received for task {task_id}")
                 return {}
         
-            print(f"Response received for task {task_id}: {len(response)} items")
             response_text = response[0].get('text', '{}')
-            print(f"original response: {response_text}")
         else:
             response = openai_client.chat.completions.create(
                 model=model_id,
@@ -178,23 +169,18 @@ def _single_inference(model_id, user_prompt, system_prompts=None, max_tokens=800
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
-            print(f"Response received for task {task_id}: {response}")
             response_text = response.choices[0].message.content
-            print(f"Response received for task {task_id}: {response_text}")
-        # remove space or new lines in ends of response_text
+        
         response_text = response_text.strip()
         
-        # Parse the response with safer error handling
         try:
             parsed_response = extract_json_from_string(response_text)
             return parsed_response
-        except (SyntaxError, ValueError) as parse_error:
-            print(f"Error parsing response for task {task_id}: {parse_error}")
-            print(f"Raw response text: {response_text}...")
+        except (SyntaxError, ValueError):
             return {}
     except Exception as e:
-        print(f"Error during inference for task {task_id}: {e}")
-        return {}  # Return an empty dict on error
+        print(f"[Task {task_id}] Error: {e}")
+        return {}
 
 def create_json_schema(ground_truth_dict, max_depth=10):
     """
@@ -367,44 +353,29 @@ def run_inference(model_id, user_prompt, system_prompts=None, max_tokens=8000, t
     
     # Determine optimal number of workers if not specified
     if max_workers is None:
-        # Use CPU count or a reasonable default for I/O bound tasks
-        max_workers = min(32, (os.cpu_count() or 4) * 4)  # 4x CPU count is good for I/O bound tasks
-        print(f"Auto-determined max_workers: {max_workers}")
+        max_workers = min(32, (os.cpu_count() or 4) * 4)
     
     # Use ThreadPoolExecutor for parallel processing
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all inference tasks
-        future_to_task = {}
-        for i in range(run_num):
-            future = executor.submit(
-                _single_inference,
-                model_id,
-                user_prompt,
-                system_prompts,
-                max_tokens,
-                temperature,
-                top_p,
-                top_k,
-                i  # Pass task ID for better logging
-            )
-            future_to_task[future] = i
+        future_to_task = {
+            executor.submit(
+                _single_inference, model_id, user_prompt, system_prompts,
+                max_tokens, temperature, top_p, top_k, i
+            ): i for i in range(run_num)
+        }
         
-        # Collect results as they complete
         for future in concurrent.futures.as_completed(future_to_task):
             task_id = future_to_task[future]
             try:
-                response = future.result()
-                responses.append(response)
-                print(f"Task {task_id} result collected")
+                responses.append(future.result())
             except Exception as e:
-                print(f"Task {task_id} failed with exception: {e}")
-                responses.append({})  # Append an empty dict on error
+                print(f"[Task {task_id}] Failed: {e}")
+                responses.append({})
     
     elapsed_time = time.time() - start_time
-    print(f"Completed {run_num} requests in {elapsed_time:.2f} seconds")
-    print(f"Average time per request: {elapsed_time/run_num:.2f} seconds")
+    valid_count = sum(1 for r in responses if r)
+    print(f"  Completed {run_num} runs in {elapsed_time:.1f}s ({valid_count}/{run_num} valid)")
     
-    print(f"final responses: {responses}")
     return responses
 
 # Function to recursively convert objects to JSON-serializable types
@@ -481,7 +452,6 @@ if __name__ == "__main__":
     # List dataset
     dataset_dict = read_sharegpt(args.data_dir)
     
-    results = []
     all_sample_results = []  # Store results for all samples
     
     # Create timestamped output directory for this run
@@ -491,21 +461,27 @@ if __name__ == "__main__":
     run_output_dir = os.path.join(args.output_dir, f"llm_gen_results_{model_name}_{temp_str}_{run_timestamp}")
     os.makedirs(run_output_dir, exist_ok=True)
     
-    print(f"Results will be saved to: {run_output_dir}")
+    # Print run configuration
+    print(f"\n{'='*60}")
+    print(f"LLM Structured Output Generation")
+    print(f"{'='*60}")
+    print(f"Model: {model_id}")
+    print(f"Temperature: {args.temperature}")
+    print(f"Runs per sample: {args.run_num}")
+    print(f"Output directory: {run_output_dir}")
+    print(f"{'='*60}\n")
     
-    print(f"Processing {len(dataset_dict)} samples, args.sample_limit: {args.sample_limit}")
     # Determine how many samples to process
     if args.sample_limit > 0:
         samples_to_process = dataset_dict[:args.sample_limit]
     else:
         samples_to_process = dataset_dict
     
-    print(f"Processing {type(samples_to_process)} samples")
-    for sample_idx, item in tqdm(enumerate(samples_to_process)):
+    total_samples = len(samples_to_process)
+    print(f"Processing {total_samples} samples...\n")
+    
+    for sample_idx, item in tqdm(enumerate(samples_to_process), total=total_samples, desc="Generating outputs"):
         sample_id = f"sample_{sample_idx:03d}"
-        print(f"\n{'='*60}")
-        print(f"PROCESSING SAMPLE {sample_idx + 1}/{len(samples_to_process)}: {sample_id}")
-        print(f"{'='*60}")
         
         system_prompt = item['conversations'][0]['value']
         user_prompt = item['conversations'][1]['value']
@@ -514,8 +490,7 @@ if __name__ == "__main__":
         try:
             gt_dict = json.loads(gt_value)            
         except json.JSONDecodeError as e:
-            print(f"Warning: Could not parse ground truth JSON for {sample_id}: {e}")
-            print(f"gt_value: {gt_value}")
+            print(f"\n[{sample_id}] Warning: Could not parse ground truth JSON: {e}")
             gt_dict = {"error": "Invalid JSON", "raw_value": gt_value}
         
         # Check estimated token count before processing
@@ -542,17 +517,11 @@ if __name__ == "__main__":
                 print(f"System estimated tokens: {system_estimated_tokens}, GT estimated tokens: {gt_estimated_tokens}")
                 continue
             
-            print(f"Truncating user prompt from {estimate_tokens(user_prompt)} to ~{available_tokens} estimated tokens")
             user_prompt = truncate_text_by_chars(user_prompt, available_tokens)
-            print(f"After truncation: {estimate_tokens(user_prompt)} estimated tokens")
         
         # Determine whether to use the original prompt or a modified one with schema
         if not args.include_schema:
-            # Use original prompt without schema
             modified_user_prompt = user_prompt
-            message = build_message(texts=[user_prompt])
-            print(f"\nRunning inference on original prompt: {user_prompt[:100]}...")
-            print(f"System prompt: {system_prompt[:100]}...")
         else:
             # Create a modified prompt with the JSON schema
             modified_user_prompt = create_prompt_with_schema(
@@ -563,14 +532,11 @@ if __name__ == "__main__":
             # Check if the modified prompt with schema exceeds limits
             modified_total_estimated_tokens = estimate_tokens(system_prompt + modified_user_prompt)
             if modified_total_estimated_tokens > MAX_CONTEXT_TOKENS:
-                print(f"WARNING: Modified prompt with schema exceeds estimated limit ({modified_total_estimated_tokens} tokens)")
-                # Try to truncate the user part of the modified prompt
                 schema_part = modified_user_prompt[len(user_prompt):]
                 schema_estimated_tokens = estimate_tokens(schema_part)
                 available_for_user = MAX_CONTEXT_TOKENS - estimate_tokens(system_prompt) - schema_estimated_tokens - 1000
                 
                 if available_for_user < 500:
-                    print(f"ERROR: Cannot fit schema - falling back to original prompt")
                     modified_user_prompt = user_prompt
                 else:
                     truncated_user = truncate_text_by_chars(user_prompt, available_for_user)
@@ -579,23 +545,15 @@ if __name__ == "__main__":
                         ground_truth_dict=gt_dict
                     )
             
-            print(f"\nRunning inference on prompt with schema")
-            print(f"Original prompt: {user_prompt[:100]}...")
-            print(f"System prompt: {system_prompt[:100]}...")
-            print(f"Schema added to prompt for better comparison with ground truth")
-            
             # Save the modified prompt for reference
             prompt_output_path = os.path.join(run_output_dir, f"{sample_id}_modified_prompt.txt")
             with open(prompt_output_path, 'w') as f:
                 f.write(modified_user_prompt)
-            print(f"Saved modified prompt to {prompt_output_path}")
         
         # Final estimated token count check
         final_estimated_tokens = estimate_tokens(system_prompt + modified_user_prompt)
-        print(f"Final estimated tokens: {final_estimated_tokens}")
-        
         if final_estimated_tokens > MAX_CONTEXT_TOKENS:
-            print(f"ERROR: Sample {sample_id} still exceeds estimated token limit after truncation. Skipping.")
+            print(f"\n[{sample_id}] Skipped: exceeds token limit")
             continue
         
         responses = run_inference(
@@ -610,11 +568,8 @@ if __name__ == "__main__":
             max_workers=args.max_workers
         )
         
-        print(f"Received {len(responses)} responses")
-        
         # Extract schema for each response
         schema_list = [extract_schema(response) for response in responses]
-        print(f"Extracted schemas for {len(schema_list)} responses")
         
         # Save the responses and metadata
         sample_results = {
@@ -644,7 +599,6 @@ if __name__ == "__main__":
         sample_output_path = os.path.join(run_output_dir, f"{sample_id}.json")
         with open(sample_output_path, 'w') as f:
             json.dump(serializable_results, f, indent=2)
-        print(f"Saved results for {sample_id} to {sample_output_path}")
     
     # Create the final results object
     final_results = {
@@ -666,4 +620,9 @@ if __name__ == "__main__":
     all_results_path = os.path.join(run_output_dir, "all_results.json")
     with open(all_results_path, 'w') as f:
         json.dump(serializable_results, f, indent=2)
-    print(f"\nAll results saved to {all_results_path}")
+    
+    print(f"\n{'='*60}")
+    print(f"Generation complete!")
+    print(f"Processed: {len(all_sample_results)} samples")
+    print(f"Results saved to: {run_output_dir}")
+    print(f"{'='*60}")
