@@ -178,6 +178,7 @@ data/processed/
 *.pkl
 *.pickle
 *.pdf
+!docs/STED_and_Consistency_Scoring.pdf
 
 # Results and outputs
 results/
