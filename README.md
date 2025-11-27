@@ -148,7 +148,7 @@ python scripts/data/download_sharegpt_data.py
 ### Generate Synthetic Datasets
 
 ```bash
-python scripts/data/generate_synthetic_datasets.py
+python scripts/data/generate_synthetic_datasets.py --base-dataset-dir sharegpt_data
 ```
 
 Creates three variation types:
