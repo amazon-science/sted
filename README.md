@@ -181,20 +181,17 @@ python scripts/visualization/visualize_schema_variation.py
 
 ### Model Setup
 
-The framework supports models from multiple providers. To add a new model, update the `provider_mapping` in `scripts/eval/generate_structured_outputs.py`:
+The framework supports models from multiple providers. Model configuration is centralized in `sted/model_config.py`:
 
 ```python
-provider_mapping = {
-    # AWS Bedrock models (use cross-region inference prefix "us." for supported models)
-    "us.anthropic.claude-3-7-sonnet-20250219-v1:0": "bedrock",
-    "us.anthropic.claude-sonnet-4-20250514-v1:0": "bedrock",
-    "us.qwen.qwen3-235b-a22b-2507-v1:0": "bedrock",
-    "us.deepseek.v3-v1:0": "bedrock",
-    
-    # OpenAI-compatible API models (via OPENAI_BASE_URL)
-    "openai/gpt-4o": "openai",
-    "google/gemini-2.5-pro": "openai",
-    "x-ai/grok-4": "openai"
+# sted/model_config.py
+MODEL_REGISTRY = {
+    # model_id -> (provider, display_name)
+    "us.anthropic.claude-3-7-sonnet-20250219-v1:0": ("bedrock", "Claude-3.7-Sonnet"),
+    "us.deepseek.v3-v1:0": ("bedrock", "DeepSeek-V3.1"),
+    "openai/gpt-4o": ("openai", "GPT-4o"),
+    "google/gemini-2.5-pro": ("openai", "Gemini-2.5-Pro"),
+    # ... add more models here
 }
 ```
 
@@ -207,17 +204,12 @@ provider_mapping = {
 
 **To add a new model:**
 
-1. **For Bedrock models**: Add the model ID with `"bedrock"` as the provider. Use the `us.` prefix for cross-region inference.
+1. Add entry to `MODEL_REGISTRY` in `sted/model_config.py`:
    ```python
-   "us.meta.llama3-3-70b-instruct-v1:0": "bedrock",
+   "us.meta.llama3-3-70b-instruct-v1:0": ("bedrock", "Llama-3.3-70B"),
    ```
 
-2. **For OpenAI-compatible APIs** (OpenAI, OpenRouter, etc.): Add the model ID with `"openai"` as the provider.
-   ```python
-   "anthropic/claude-3-opus": "openai",  # via OpenRouter
-   ```
-
-3. **Configure credentials** in `.env`:
+2. **Configure credentials** in `.env`:
    ```bash
    # For Bedrock models - only AWS credentials needed (via aws configure)
    
