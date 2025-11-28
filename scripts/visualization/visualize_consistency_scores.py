@@ -197,7 +197,7 @@ models = sorted(detailed_stats['model'].unique())
 colors = plt.cm.tab20(np.linspace(0, 1, len(models)))
 model_colors = dict(zip(models, colors))
 
-for metric in ['consistency_score', 'normalized_cv']:
+for metric in ['consistency_score']:
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
     
     for i, metric_type in enumerate(['Overall', 'Semantic', 'Structural']):
@@ -207,19 +207,15 @@ for metric in ['consistency_score', 'normalized_cv']:
             data_subset = detailed_stats[(detailed_stats['metric_type'] == metric_type) & 
                                        (detailed_stats['model'] == model)]
             
-            if metric == 'consistency_score':
-                means = data_subset['cs_mean']
-                errors = data_subset['cs_se']
-            else:
-                means = data_subset['cv_mean']
-                errors = data_subset['cv_se']
+            means = data_subset['cs_mean']
+            errors = data_subset['cs_se']
             
             ax.errorbar(data_subset['temperature'], means, yerr=errors,
                        marker='o', label=model, linewidth=2, capsize=3, capthick=1,
                        color=model_colors[model])
         
         ax.set_xlabel('Temperature')
-        ax.set_ylabel(metric.replace('_', ' ').title())
+        ax.set_ylabel('Consistency Score')
         ax.set_title(f'{metric_type} Consistency')
         ax.set_ylim(0, 1)
         ax.legend()
@@ -282,4 +278,3 @@ print(f"\nStatistical analysis complete. Files saved:")
 print("- detailed_consistency_statistics.csv")
 print("- enhanced_consistency_summary.csv")
 print("- consistency_score_by_consistency_type_with_errors.png")
-print("- normalized_cv_by_consistency_type_with_errors.png")

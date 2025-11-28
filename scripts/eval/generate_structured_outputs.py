@@ -35,16 +35,7 @@ openai_client = openai.OpenAI(
     base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
 )
 
-provider_mapping = {
-    "us.anthropic.claude-3-7-sonnet-20250219-v1:0": "bedrock",
-    "us.anthropic.claude-sonnet-4-20250514-v1:0": "bedrock",
-    "us.qwen.qwen3-235b-a22b-2507-v1:0": "bedrock",
-    "us.deepseek.v3-v1:0": "bedrock",
-    "openai/gpt-5": "openai",
-    "openai/gpt-4o": "openai",
-    "google/gemini-2.5-pro": "openai",
-    "x-ai/grok-4": "openai"
-}
+from sted.model_config import get_provider, get_display_name
 
 def estimate_tokens(text):
     """
@@ -141,7 +132,7 @@ def _single_inference(model_id, user_prompt, system_prompts=None, max_tokens=800
             aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
         )
         
-        provider = provider_mapping.get(model_id, "bedrock")
+        provider = get_provider(model_id)
         if provider == "bedrock":
             message = build_message(texts=[user_prompt])
             response = inference_with_converse_api(
@@ -457,7 +448,7 @@ if __name__ == "__main__":
     # Create timestamped output directory for this run
     run_timestamp = time.strftime('%Y%m%d_%H%M%S')
     temp_str = f"temp_{args.temperature:.2f}".replace('.', '_')
-    model_name = model_id.split('/')[-1].split(':')[0]
+    model_name = get_display_name(model_id)
     run_output_dir = os.path.join(args.output_dir, f"llm_gen_results_{model_name}_{temp_str}_{run_timestamp}")
     os.makedirs(run_output_dir, exist_ok=True)
     

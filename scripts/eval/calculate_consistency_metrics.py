@@ -21,27 +21,7 @@ def extract_temperature_from_path(path):
     return float(f"{match.group(1)}.{match.group(2)}") if match else None
 
 
-def extract_model_name(path):
-    """Extract human-readable model name from directory path."""
-    model_mappings = {
-        'claude-3-7-sonnet': 'Claude-3.7-Sonnet',
-        'claude3-7-sonnet': 'Claude-3.7-Sonnet',
-        'claude-3-5-haiku': 'Claude-3.5-Haiku',
-        'claude3-5-haiku': 'Claude-3.5-Haiku',
-        'claude-3-haiku': 'Claude-3-Haiku',
-        'claude3-5-sonnet': 'Claude-3.5-Sonnet-v2',
-        'llama3-3-70b': 'Llama-3.3-70B',
-        'nova-pro-v1': 'Nova-Pro',
-        'deepseek.v3-v1': 'DeepSeek-V3.1',
-        'gemini-2.5-flash-lite': 'Gemini-2.5-Flash-Lite',
-        'gpt-4.1-mini': 'GPT-4.1-Mini',
-        'qwen3-32b-v1': 'Qwen3-32B',
-        'qwen3-235b-a22b-2507': 'Qwen3-235B-A22B',
-    }
-    for key, name in model_mappings.items():
-        if key in path:
-            return name
-    return 'Unknown'
+from sted.model_config import get_display_name
 
 
 def main():
@@ -81,36 +61,39 @@ def main():
                         result_dirs.append((subitem, subitem_path))
         
         for dir_name, result_path in tqdm(result_dirs, desc="Processing results"):
-            model_name = extract_model_name(dir_name)
-            temperature = extract_temperature_from_path(dir_name)
+            all_results_path = os.path.join(result_path, 'all_results.json')
+            with open(all_results_path, 'r') as f:
+                data = json.load(f)
             
+            model_id = data.get('metadata', {}).get('model_id', '')
+            model_name = get_display_name(model_id) if model_id else "Unknown"
+            temperature = data.get('metadata', {}).get('temperature')
+            
+            if temperature is None:
+                temperature = extract_temperature_from_path(dir_name)
             if temperature is None:
                 continue
             
             if model_name not in results:
                 results[model_name] = []
             
-            all_results_path = os.path.join(result_path, 'all_results.json')
-            with open(all_results_path, 'r') as f:
-                data = json.load(f)
+            for sample_idx, sample in enumerate(data['results']):
+                gt = sample['ground_truth']
+                responses = sample['responses'][:10]
                 
-                for sample_idx, sample in enumerate(data['results']):
-                    gt = sample['ground_truth']
-                    responses = sample['responses'][:10]
-                    
-                    report = analyzer.evaluate_structural_consistency(
-                        responses, gt, method_name="sted", variation_type=variation_type
-                    )
-                    metrics = report.get('consistency_metrics', {})
-                    
-                    results[model_name].append({
-                        'temperature': temperature,
-                        'sample_idx': sample_idx,
-                        'consistency_coefficient': metrics.get('consistency_coefficient', 0.0),
-                        'normalized_cv': metrics.get('normalized_cv', 0.0),
-                        'stability_score': metrics.get('stability_score', 0.0),
-                        'mean_similarity': report['supporting_stats']['mean_similarity']
-                    })
+                report = analyzer.evaluate_structural_consistency(
+                    responses, gt, method_name="sted", variation_type=variation_type
+                )
+                metrics = report.get('consistency_metrics', {})
+                
+                results[model_name].append({
+                    'temperature': temperature,
+                    'sample_idx': sample_idx,
+                    'consistency_coefficient': metrics.get('consistency_coefficient', 0.0),
+                    'normalized_cv': metrics.get('normalized_cv', 0.0),
+                    'stability_score': metrics.get('stability_score', 0.0),
+                    'mean_similarity': report['supporting_stats']['mean_similarity']
+                })
         
         # Save results
         output_file = os.path.join(args.output_dir, f'{variation_type}_consistency_metrics_results.json')

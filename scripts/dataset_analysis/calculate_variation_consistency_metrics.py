@@ -16,19 +16,7 @@ def extract_temperature_from_path(path):
     match = re.search(r'temp_(\d+)_(\d+)', path)
     return float(f"{match.group(1)}.{match.group(2)}") if match else None
 
-def extract_model_name(path):
-    if 'claude3-5-haiku' in path: return 'Claude-3.5-Haiku'
-    elif 'claude-3-haiku' in path: return 'Claude-3-Haiku'
-    elif 'llama3-3-70b' in path: return 'Llama-3.3-70B'
-    elif 'claude3-7-sonnet' in path: return 'Claude-3.7-Sonnet'
-    elif 'claude3-5-sonnet' in path: return 'Claude-3.5-Sonnet-v2'
-    elif 'nova-pro-v1' in path: return 'Nova-Pro'
-    elif 'deepseek.v3-v1' in path: return 'DeepSeek-V3.1'
-    elif 'gemini-2.5-flash-lite' in path: return 'Gemini 2.5 Flash Lite'
-    elif 'gpt-4.1-mini' in path: return 'GPT-4.1 Mini'
-    elif 'qwen3-32b-v1' in path: return 'Qwen3-32B'
-    elif 'qwen3-235b-a22b-2507' in path: return 'Qwen3-235B-A22B-Instruct-2507'
-    return 'Unknown'
+from sted.model_config import get_display_name
 
 def main(results_dir="llm_gen_results", output_dir="."):
     evaluator = SemanticJsonTreeConsistencyEvaluator()
@@ -45,22 +33,25 @@ def main(results_dir="llm_gen_results", output_dir="."):
             model_path = os.path.join(results_dir, model_dir)
             if not os.path.isdir(model_path): continue
             
-            model_name = extract_model_name(model_dir)
-            if model_name not in results:
-                results[model_name] = []
-            
             for result_dir in sorted(os.listdir(model_path)):
                 result_path = os.path.join(model_path, result_dir)
                 if not os.path.isdir(result_path): continue
-                
-                temperature = extract_temperature_from_path(result_dir)
-                if temperature is None: continue
                 
                 all_results_path = os.path.join(result_path, 'all_results.json')
                 if not os.path.exists(all_results_path): continue
                 
                 with open(all_results_path, 'r') as f:
                     data = json.load(f)
+                
+                model_id = data.get('metadata', {}).get('model_id', '')
+                model_name = get_display_name(model_id) if model_id else "Unknown"
+                temperature = data.get('metadata', {}).get('temperature')
+                if temperature is None:
+                    temperature = extract_temperature_from_path(result_dir)
+                if temperature is None: continue
+                
+                if model_name not in results:
+                    results[model_name] = []
                 
                 # Process each sample
                 for sample_idx, sample in enumerate(data['results']):
