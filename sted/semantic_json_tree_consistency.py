@@ -624,13 +624,21 @@ class SemanticJsonTreeConsistencyEvaluator:
             structural_total_cost = sum(structural_cost_matrix[i][j] for i, j in zip(row_indices, col_indices))
 
             # Now calculate content cost based on the structural matching
+            # IMPORTANT: Use content_update_cost directly to avoid re-running Hungarian
             content_total_cost = 0.0
             for i, j in zip(row_indices, col_indices):
                 if i < n1 and j < n2:
-                    # Matched pair - calculate content cost
-                    content_total_cost += self._calculate_optimal_matching_cost(
-                        children1[i], children2[j], "content"
-                    )
+                    # Matched pair - calculate content cost directly
+                    # For leaves: use content_update_cost
+                    # For non-leaves: recursively use combined matching (structure-guided)
+                    if not children1[i].children and not children2[j].children:
+                        content_total_cost += self.content_update_cost(children1[i], children2[j])
+                    else:
+                        # For non-leaf nodes, recursively calculate combined cost
+                        # (which also uses structural matching to guide content)
+                        content_total_cost += self._calculate_optimal_matching_cost(
+                            children1[i], children2[j], "combined"
+                        )
                 elif i < n1:
                     # Deletion
                     content_total_cost += self.delete_cost(children1[i])
