@@ -176,9 +176,32 @@ class SemanticJsonTreeConsistencyEvaluator:
         return ' '.join(processed.lower().split())
 
     def _calculate_semantic_similarity(self, text1: str, text2: str) -> float:
-        """Calculate semantic similarity between two texts using embeddings."""
+        """
+        Calculate semantic similarity between two texts using embeddings.
+
+        For very short strings (< 4 characters), uses character-level edit distance
+        instead of embeddings, as embeddings are unreliable for short strings.
+        """
         if text1 == text2:
             return 1.0
+
+        # For very short strings, use character-level edit distance instead of embeddings
+        # Embeddings are unreliable for strings shorter than 4 characters
+        MIN_LENGTH_FOR_EMBEDDINGS = 4
+        if len(text1) < MIN_LENGTH_FOR_EMBEDDINGS or len(text2) < MIN_LENGTH_FOR_EMBEDDINGS:
+            # Use normalized Levenshtein distance
+            max_len = max(len(text1), len(text2))
+            if max_len == 0:
+                return 1.0
+
+            # Calculate edit distance
+            # Simple implementation: count character differences
+            edit_distance = sum(c1 != c2 for c1, c2 in zip(text1, text2))
+            edit_distance += abs(len(text1) - len(text2))  # Add length difference
+
+            # Normalize to [0, 1] and invert (0 = different, 1 = same)
+            similarity = 1.0 - (edit_distance / max_len)
+            return max(0.0, similarity)
 
         emb1 = self._get_embedding(text1)
         emb2 = self._get_embedding(text2)
