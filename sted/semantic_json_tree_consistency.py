@@ -27,6 +27,8 @@ from .json_tree_node import JsonNode
 from .similarity_cache import StringSimilarityCache
 from .utils import get_embeddings, create_bedrock_client, count_json_elements
 from botocore.config import Config
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
 
 from transformers import logging
 logging.set_verbosity_error()
@@ -73,6 +75,7 @@ class SemanticJsonTreeConsistencyEvaluator:
                  path_weight_decay: float = 1.0,
                  type_change_cost: Dict[Tuple[str, str], float] = None,
                  required_fields: Set[str] = None,
+                 order_sensitive_fields: Set[str] = None,
                  model_id: str = 'all-MiniLM-L6-v2',
                  chunk_size: int = 300,
                  chunk_overlap: int = 50,
@@ -83,11 +86,15 @@ class SemanticJsonTreeConsistencyEvaluator:
         ):
         """
         Initialize the evaluator with semantic capabilities.
-        
+
         Args:
             path_weight_decay: Weight decay factor for deeper paths (0-1)
             type_change_cost: Custom costs for type changes
             required_fields: Set of required field paths
+            order_sensitive_fields: Set of field names where array order matters
+                                    (e.g., {"trace", "steps", "calls"} for agent traces).
+                                    For these fields, sequential comparison is used instead
+                                    of Hungarian algorithm optimal matching.
             model_id: Name of the sentence transformer model or Bedrock model ID
             chunk_size: Size of chunks for text splitting
             chunk_overlap: Overlap between chunks
@@ -95,6 +102,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         self.path_weight_decay = path_weight_decay
         self.type_change_cost = type_change_cost or _get_default_type_change_costs()
         self.required_fields = required_fields or set()
+        self.order_sensitive_fields = order_sensitive_fields or set()
 
         # Initialize embedding model if available
         self.embedding_model = None
@@ -119,6 +127,10 @@ class SemanticJsonTreeConsistencyEvaluator:
         # Cache for embeddings
         self._cache = StringSimilarityCache()
 
+        # Pre-computed embedding dictionary: string -> np.ndarray
+        self._embedding_dict: Dict[str, np.ndarray] = {}
+        self._embedding_dict_populated = False
+
         # Text splitting configuration
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
@@ -140,11 +152,21 @@ class SemanticJsonTreeConsistencyEvaluator:
 
     @lru_cache(maxsize=2000)
     def _get_embedding(self, text: str) -> Optional[np.ndarray]:
-        """Get embedding for a text with caching."""
+        """Get embedding for a text with caching.
 
+        First checks the pre-computed embedding dictionary, then falls back
+        to individual computation if not found.
+        """
+        # Check pre-computed dictionary first
+        if text in self._embedding_dict:
+            return self._embedding_dict[text]
+
+        # Fall back to individual computation
         if self.bedrock_client:
             try:
-                return get_embeddings(text, self.model_id, self.bedrock_client)
+                emb = get_embeddings(text, self.model_id, self.bedrock_client)
+                self._embedding_dict[text] = emb  # Cache for future use
+                return emb
             except Exception as e:
                 warnings.warn(f"Failed to get Bedrock embedding for '{text}': {e}")
                 return None
@@ -153,6 +175,7 @@ class SemanticJsonTreeConsistencyEvaluator:
                 # Preprocess key names for better semantic understanding
                 processed_text = self._preprocess_key_name(text)
                 embedding = self.embedding_model.encode(processed_text, show_progress_bar=False)
+                self._embedding_dict[text] = embedding  # Cache for future use
                 return embedding
             except Exception as e:
                 warnings.warn(f"Failed to get embedding for '{text}': {e}")
@@ -174,6 +197,187 @@ class SemanticJsonTreeConsistencyEvaluator:
 
         # Clean up and lowercase
         return ' '.join(processed.lower().split())
+
+    def collect_strings_from_json(self, json_obj: Any, strings: Set[str], min_length: int = 4) -> None:
+        """
+        Recursively collect all string values and keys from a JSON object.
+
+        Args:
+            json_obj: The JSON object to extract strings from
+            strings: Set to add strings to
+            min_length: Minimum string length for embedding (shorter strings use edit distance)
+        """
+        if isinstance(json_obj, dict):
+            for key, value in json_obj.items():
+                # Add key if long enough
+                if len(key) >= min_length:
+                    strings.add(key)
+                self.collect_strings_from_json(value, strings, min_length)
+        elif isinstance(json_obj, list):
+            for item in json_obj:
+                self.collect_strings_from_json(item, strings, min_length)
+        elif isinstance(json_obj, str):
+            if len(json_obj) >= min_length and len(json_obj) < self.chunk_size:
+                strings.add(json_obj)
+
+    def precompute_embeddings(self, json_objects: List[Any], batch_size: int = 64,
+                               show_progress: bool = True) -> int:
+        """
+        Pre-compute embeddings for all unique strings in the given JSON objects.
+
+        This should be called BEFORE running similarity calculations to batch all
+        embedding computations and significantly speed up the process.
+
+        Args:
+            json_objects: List of JSON objects to extract strings from
+            batch_size: Batch size for SentenceTransformer encoding
+            show_progress: Whether to show progress bar
+
+        Returns:
+            Number of unique strings embedded
+        """
+        # Collect all unique strings
+        all_strings: Set[str] = set()
+        for json_obj in json_objects:
+            if json_obj:  # Skip None/empty
+                self.collect_strings_from_json(json_obj, all_strings)
+
+        # Filter out strings already in the embedding dict
+        new_strings = [s for s in all_strings if s not in self._embedding_dict]
+
+        if not new_strings:
+            self._embedding_dict_populated = True
+            return 0
+
+        if show_progress:
+            print(f"Pre-computing embeddings for {len(new_strings)} unique strings...")
+
+        if self.embedding_model:
+            # Use SentenceTransformer batch encoding
+            self._batch_encode_sentence_transformer(new_strings, batch_size, show_progress)
+        elif self.bedrock_client:
+            # Use parallel Bedrock API calls
+            self._batch_encode_bedrock(new_strings, show_progress)
+
+        self._embedding_dict_populated = True
+        return len(new_strings)
+
+    def _batch_encode_sentence_transformer(self, strings: List[str], batch_size: int = 64,
+                                            show_progress: bool = True) -> None:
+        """Batch encode strings using SentenceTransformer."""
+        # Preprocess all strings
+        processed_strings = [self._preprocess_key_name(s) for s in strings]
+
+        # Encode in batches
+        iterator = range(0, len(processed_strings), batch_size)
+        if show_progress:
+            iterator = tqdm(iterator, desc="Encoding batches", total=len(processed_strings) // batch_size + 1)
+
+        for i in iterator:
+            batch = processed_strings[i:i + batch_size]
+            original_batch = strings[i:i + batch_size]
+
+            try:
+                embeddings = self.embedding_model.encode(batch, show_progress_bar=False, batch_size=batch_size)
+                for orig_str, emb in zip(original_batch, embeddings):
+                    self._embedding_dict[orig_str] = emb
+            except Exception as e:
+                warnings.warn(f"Batch encoding failed: {e}")
+
+    def _batch_encode_bedrock(self, strings: List[str], show_progress: bool = True,
+                               max_workers: int = 10) -> None:
+        """Batch encode strings using Bedrock API with parallel calls."""
+        def encode_single(text: str) -> Tuple[str, Optional[np.ndarray]]:
+            try:
+                emb = get_embeddings(text, self.model_id, self.bedrock_client)
+                return (text, emb)
+            except Exception as e:
+                warnings.warn(f"Bedrock embedding failed for '{text[:50]}...': {e}")
+                return (text, None)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(encode_single, s): s for s in strings}
+
+            iterator = as_completed(futures)
+            if show_progress:
+                iterator = tqdm(iterator, total=len(strings), desc="Bedrock embeddings")
+
+            for future in iterator:
+                text, emb = future.result()
+                if emb is not None:
+                    self._embedding_dict[text] = emb
+
+    def clear_embedding_cache(self) -> None:
+        """Clear the pre-computed embedding dictionary."""
+        self._embedding_dict.clear()
+        self._embedding_dict_populated = False
+
+    def save_embedding_dict(self, filepath: str) -> int:
+        """
+        Save the pre-computed embedding dictionary to disk for reuse.
+
+        Args:
+            filepath: Path to save the embedding dictionary (.npz format recommended)
+
+        Returns:
+            Number of embeddings saved
+        """
+        if not self._embedding_dict:
+            warnings.warn("No embeddings to save. Run precompute_embeddings() first.")
+            return 0
+
+        # Separate strings and embeddings for numpy savez
+        strings = list(self._embedding_dict.keys())
+        embeddings = np.array([self._embedding_dict[s] for s in strings])
+
+        # Save metadata along with embeddings
+        np.savez_compressed(
+            filepath,
+            strings=np.array(strings, dtype=object),
+            embeddings=embeddings,
+            model_id=np.array([self.model_id], dtype=object)
+        )
+
+        print(f"Saved {len(strings)} embeddings to {filepath}")
+        return len(strings)
+
+    def load_embedding_dict(self, filepath: str, strict_model_check: bool = True) -> int:
+        """
+        Load a pre-computed embedding dictionary from disk.
+
+        Args:
+            filepath: Path to the saved embedding dictionary (.npz file)
+            strict_model_check: If True, warn if model_id doesn't match
+
+        Returns:
+            Number of embeddings loaded
+        """
+        import os
+        if not os.path.exists(filepath):
+            warnings.warn(f"Embedding file not found: {filepath}")
+            return 0
+
+        data = np.load(filepath, allow_pickle=True)
+
+        # Check model compatibility
+        if strict_model_check and 'model_id' in data:
+            saved_model_id = str(data['model_id'][0])
+            if saved_model_id != self.model_id:
+                warnings.warn(
+                    f"Model ID mismatch: saved with '{saved_model_id}', "
+                    f"current is '{self.model_id}'. Embeddings may not be compatible."
+                )
+
+        strings = data['strings']
+        embeddings = data['embeddings']
+
+        # Populate the dictionary
+        for s, emb in zip(strings, embeddings):
+            self._embedding_dict[str(s)] = emb
+
+        self._embedding_dict_populated = True
+        print(f"Loaded {len(strings)} embeddings from {filepath}")
+        return len(strings)
 
     def _calculate_semantic_similarity(self, text1: str, text2: str) -> float:
         """
@@ -450,7 +654,16 @@ class SemanticJsonTreeConsistencyEvaluator:
         return cost * avg_path_weight
 
     def _compare_arrays_unordered(self, arr1: List[Any], arr2: List[Any], arr1_label: str, arr2_label: str, variation_type="content") -> float:
-        """Compare arrays without considering order using optimal matching."""
+        """
+        Compare arrays using optimal matching (order-insensitive by default).
+
+        If the field is in order_sensitive_fields, delegates to _compare_arrays_ordered
+        for sequential comparison instead.
+        """
+        # Check if this field should use order-sensitive comparison
+        if self._is_order_sensitive_field(arr1_label) or self._is_order_sensitive_field(arr2_label):
+            return self._compare_arrays_ordered(arr1, arr2, arr1_label, arr2_label, variation_type)
+
         if len(arr1) == 0 and len(arr2) == 0:
             return 0  # Both empty arrays are identical
         if len(arr1) == 0 or len(arr2) == 0:
@@ -470,8 +683,10 @@ class SemanticJsonTreeConsistencyEvaluator:
                     cost_matrix[i, j] = 1-self._compare_numbers(float(item1), float(item2))
                 elif isinstance(item1, dict):
                     # Recursive comparison for nested objects
-                    tree1 = JsonNode.from_dict(item1, f"{arr1_label}", sort_arrays=self.sort_arrays, sort_keys=self.sort_keys)
-                    tree2 = JsonNode.from_dict(item2, f"{arr2_label}", sort_arrays=self.sort_arrays, sort_keys=self.sort_keys)
+                    tree1 = JsonNode.from_dict(item1, f"{arr1_label}", sort_arrays=self.sort_arrays, sort_keys=self.sort_keys,
+                                               order_sensitive_fields=self.order_sensitive_fields)
+                    tree2 = JsonNode.from_dict(item2, f"{arr2_label}", sort_arrays=self.sort_arrays, sort_keys=self.sort_keys,
+                                               order_sensitive_fields=self.order_sensitive_fields)
                     cost_matrix[i, j] = self._calculate_optimal_matching_cost(tree1, tree2, variation_type=variation_type)
                 elif isinstance(item1, list):
                     # Recursive array comparison
@@ -517,13 +732,114 @@ class SemanticJsonTreeConsistencyEvaluator:
 
         return min(normalized_cost, 1)
 
+    def _compare_arrays_ordered(self, arr1: List[Any], arr2: List[Any], arr1_label: str, arr2_label: str, variation_type="content") -> float:
+        """
+        Compare arrays with order sensitivity using sequential alignment.
+
+        This method compares elements in order (index 0 vs 0, 1 vs 1, etc.) and handles
+        length differences as insertions/deletions. Use this for fields where order matters
+        (e.g., agent call traces, execution steps).
+
+        Args:
+            arr1: First array
+            arr2: Second array
+            arr1_label: Label for first array (for nested comparison)
+            arr2_label: Label for second array (for nested comparison)
+            variation_type: Type of variation ("structural", "content", or "combined")
+
+        Returns:
+            Cost value between 0 (identical) and 1 (completely different)
+        """
+        if len(arr1) == 0 and len(arr2) == 0:
+            return 0  # Both empty arrays are identical
+        if len(arr1) == 0 or len(arr2) == 0:
+            return 1  # One empty, one not
+
+        len1, len2 = len(arr1), len(arr2)
+        max_len = max(len1, len2)
+        min_len = min(len1, len2)
+
+        # Compare elements sequentially
+        total_cost = 0.0
+
+        for i in range(min_len):
+            item1 = arr1[i]
+            item2 = arr2[i]
+
+            # Calculate cost for this position
+            if not isinstance(item1, type(item2)):
+                cost = 1.0
+            elif isinstance(item1, str):
+                cost = 1 - self._compare_strings(str(item1), str(item2))
+            elif isinstance(item1, (int, float)):
+                cost = 1 - self._compare_numbers(float(item1), float(item2))
+            elif isinstance(item1, dict):
+                # Recursive comparison for nested objects
+                tree1 = JsonNode.from_dict(item1, f"{arr1_label}[{i}]", sort_arrays=self.sort_arrays, sort_keys=self.sort_keys,
+                                           order_sensitive_fields=self.order_sensitive_fields)
+                tree2 = JsonNode.from_dict(item2, f"{arr2_label}[{i}]", sort_arrays=self.sort_arrays, sort_keys=self.sort_keys,
+                                           order_sensitive_fields=self.order_sensitive_fields)
+                cost = self._calculate_optimal_matching_cost(tree1, tree2, variation_type=variation_type)
+            elif isinstance(item1, list):
+                # Check if nested list should also be order-sensitive
+                nested_label1 = f"{arr1_label}[{i}]"
+                nested_label2 = f"{arr2_label}[{i}]"
+                if self._is_order_sensitive_field(nested_label1) or self._is_order_sensitive_field(nested_label2):
+                    cost = self._compare_arrays_ordered(item1, item2, nested_label1, nested_label2, variation_type=variation_type)
+                else:
+                    cost = self._compare_arrays_unordered(item1, item2, nested_label1, nested_label2, variation_type=variation_type)
+            elif item1 == item2:
+                cost = 0.0
+            else:
+                cost = 1.0
+
+            total_cost += cost
+
+        # Add insertion/deletion costs for length differences
+        # Each extra element costs 1.0 (full insertion/deletion cost)
+        length_diff = abs(len1 - len2)
+        total_cost += length_diff
+
+        # Normalize by the maximum array length
+        normalized_cost = total_cost / max_len if max_len > 0 else 0
+
+        return min(normalized_cost, 1)
+
+    def _is_order_sensitive_field(self, field_label: str) -> bool:
+        """
+        Check if a field should use order-sensitive comparison.
+
+        Args:
+            field_label: The field label/path to check
+
+        Returns:
+            True if the field is in order_sensitive_fields, False otherwise
+        """
+        if not self.order_sensitive_fields:
+            return False
+
+        # Extract field name from label (handle nested paths like "root.trace[0]")
+        # Check if any part of the path matches order_sensitive_fields
+        field_parts = field_label.replace('[', '.').replace(']', '').split('.')
+
+        for part in field_parts:
+            # Remove array indices if present
+            clean_part = part.strip()
+            if clean_part and not clean_part.isdigit():
+                if clean_part in self.order_sensitive_fields:
+                    return True
+
+        return False
+
     def calculate_field_level_similarity(self, json1: Dict[str, Any], json2: Dict[str, Any], exact_match_fields: Set[str] = None) -> Dict[str, Dict[str, Any]]:
         """Calculate content similarity for each matching field pair."""
         json1 = {"root": json1} if isinstance(json1, dict) else json1
         json2 = {"root": json2} if isinstance(json2, dict) else json2
 
-        tree1 = JsonNode.from_dict(json1, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys)
-        tree2 = JsonNode.from_dict(json2, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys)
+        tree1 = JsonNode.from_dict(json1, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys,
+                                   order_sensitive_fields=self.order_sensitive_fields)
+        tree2 = JsonNode.from_dict(json2, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys,
+                                   order_sensitive_fields=self.order_sensitive_fields)
 
         field_similarities = {}
         self.exact_match_fields = exact_match_fields or set()
@@ -567,11 +883,75 @@ class SemanticJsonTreeConsistencyEvaluator:
                     if i < n1 and j < n2 and cost_matrix[i][j] < 0.7:
                         self._collect_field_similarities(tree1.children[i], tree2.children[j], similarities)
 
+    def _calculate_sequential_matching_cost(
+        self, tree1: JsonNode, tree2: JsonNode, variation_type: str = "combined"
+    ) -> float:
+        """
+        Calculate matching cost using sequential (positional) matching for order-sensitive arrays.
+        Elements are compared by position (index 0 with index 0, etc.).
+
+        Args:
+            tree1: First tree (array node)
+            tree2: Second tree (array node)
+            variation_type: "structural", "content", or "combined"
+
+        Returns:
+            Normalized cost between 0 and 1
+        """
+        children1 = tree1.children
+        children2 = tree2.children
+        n1, n2 = len(children1), len(children2)
+
+        if n1 == 0 and n2 == 0:
+            return 0.0
+
+        total_cost = 0.0
+        matched_count = min(n1, n2)
+
+        # Compare elements by position
+        for i in range(matched_count):
+            if variation_type == "structural":
+                total_cost += self._calculate_optimal_matching_cost(
+                    children1[i], children2[i], "structural"
+                )
+            elif variation_type == "content":
+                total_cost += self._calculate_optimal_matching_cost(
+                    children1[i], children2[i], "content"
+                )
+            else:  # combined
+                total_cost += self._calculate_optimal_matching_cost(
+                    children1[i], children2[i], "combined"
+                )
+
+        # Add deletion costs for extra elements in tree1
+        for i in range(matched_count, n1):
+            total_cost += self.delete_cost(children1[i])
+
+        # Add insertion costs for extra elements in tree2
+        for j in range(matched_count, n2):
+            total_cost += self.insert_cost(children2[j])
+
+        # Add length penalty
+        length_diff = abs(n1 - n2)
+        max_len = max(n1, n2)
+        length_penalty = length_diff * 0.1 if max_len > 0 else 0
+
+        total_cost += length_penalty
+
+        # Normalize by total elements
+        num_elements = max(n1, n2)
+        if num_elements == 0:
+            return 0.0
+
+        normalized_cost = total_cost / num_elements
+        return min(normalized_cost, 1.0)
+
     def _calculate_optimal_matching_cost(
         self, tree1: JsonNode, tree2: JsonNode, variation_type: str = "combined"
     ) -> float:
         """
         Calculate optimal matching cost between two trees using Hungarian algorithm.
+        For order-sensitive array fields, uses sequential (positional) matching instead.
 
         Args:
             tree1: First tree
@@ -602,9 +982,20 @@ class SemanticJsonTreeConsistencyEvaluator:
                 self.delete_cost(child) for child in tree1.children
             ) + self.insert_cost(tree2)
 
-        # Both have children - use Hungarian algorithm for optimal matching
+        # Both have children
         children1 = tree1.children
         children2 = tree2.children
+
+        # Check if this is an order-sensitive array field
+        is_order_sensitive = (
+            tree1.node_type == "array" and
+            tree2.node_type == "array" and
+            (self._is_order_sensitive_field(tree1.label) or self._is_order_sensitive_field(tree2.label))
+        )
+
+        # For order-sensitive arrays, use sequential matching
+        if is_order_sensitive:
+            return self._calculate_sequential_matching_cost(tree1, tree2, variation_type)
 
         if not children1 and not children2:
             if variation_type == "structural":
@@ -733,22 +1124,24 @@ class SemanticJsonTreeConsistencyEvaluator:
     def calculate_tree_edit_distance(self, json1: Dict[str, Any], json2: Dict[str, Any], original_zss=True, variation_type: str = "combined") -> float:
         """
         Calculate tree edit distance between two JSON objects.
-        
+
         Args:
             json1: First JSON object
             json2: Second JSON object
             original_zss: Whether to use original ZSS algorithm
             variation_type: "structural", "content", or "combined"
-            
+
         Returns:
             similarity_score
         """
         json1 = {"root": json1} if isinstance(json1, dict) else json1
         json2 = {"root": json2} if isinstance(json2, dict) else json2
 
-        # Convert JSONs to trees
-        tree1 = JsonNode.from_dict(json1, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys)
-        tree2 = JsonNode.from_dict(json2, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys)
+        # Convert JSONs to trees (pass order_sensitive_fields to preserve order for those arrays)
+        tree1 = JsonNode.from_dict(json1, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys,
+                                   order_sensitive_fields=self.order_sensitive_fields)
+        tree2 = JsonNode.from_dict(json2, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys,
+                                   order_sensitive_fields=self.order_sensitive_fields)
 
         if original_zss:
             try:
