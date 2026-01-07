@@ -2,7 +2,7 @@
 
 A comprehensive framework for evaluating and improving consistency in LLM-generated structured outputs. This framework combines STED (Semantic Tree Edit Distance), a novel similarity metric that balances semantic flexibility with structural strictness, with a consistency scoring framework that aggregates multiple STED measurements to quantify output reliability.
 
-> 📄 **Paper**: Accepted at NeurIPS 2025 Workshop on Structured Probabilistic Inference & Generative Modeling
+> 📄 **Paper**: [STED and Consistency Scoring: A Framework for Evaluating LLM Structured Output Reliability](docs/STED_and_Consistency_Scoring.pdf) - Accepted at NeurIPS 2025 Workshop on Structured Probabilistic Inference & Generative Modeling
 
 ## Table of Contents
 
@@ -41,7 +41,7 @@ Through systematic experiments on synthetic datasets with controlled schema, exp
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/amazon-science/sted.git
 cd sted
 
 # Install the library
@@ -68,6 +68,20 @@ aws configure
 **OpenAI API Key** (optional, for OpenAI model evaluation):
 ```bash
 export OPENAI_API_KEY=<your-openai-api-key>
+```
+
+### Troubleshooting
+
+**NumPy/PyTorch Compatibility Error**
+
+If you see `_ARRAY_API not found` or "module compiled using NumPy 1.x cannot be run in NumPy 2.x":
+
+```bash
+# Option 1: Downgrade NumPy (if using PyTorch < 2.4)
+pip install "numpy<2"
+
+# Option 2: Upgrade PyTorch (recommended)
+pip install --upgrade "torch>=2.4"
 ```
 
 ## Quick Start
@@ -120,15 +134,38 @@ For more examples, see `examples/basic_usage.py` and [Library Usage Guide](./LIB
 
 ## Dataset
 
-The framework uses ShareGPT datasets for evaluation:
-- **sharegpt-structured-output-json**: 30 samples
-- **sharegpt-quizz-generation-json-output**: 50 samples
+The framework supports two datasets for evaluation:
+
+### ShareGPT Dataset (Structured Output)
+
+JSON structured output generation tasks:
+- **sharegpt-structured-output-json**: 30 samples (report extraction, data parsing)
+- **sharegpt-quizz-generation-json-output**: 50 samples (MCQ generation)
 - **Total**: 80 samples (75 valid after parsing error exclusion)
+
+```bash
+# Download ShareGPT data
+python scripts/data/download_sharegpt_data.py
+```
+
+### Toucan Dataset (Tool Calling)
+
+Tool/function calling evaluation dataset:
+- **Source**: [Nexusflow/Toucan](https://huggingface.co/datasets/Nexusflow/Toucan)
+- **Content**: Multi-turn conversations with tool calls
+- **Use case**: Evaluating LLM tool calling consistency
+
+```bash
+# Download Toucan data
+python scripts/data/download_toucan_data.py
+```
 
 ### Generate Synthetic Datasets
 
+For STED effectiveness verification:
+
 ```bash
-python scripts/data/generate_synthetic_datasets.py
+python scripts/data/generate_synthetic_datasets.py --base-dataset-dir sharegpt_data
 ```
 
 Creates three variation types:
@@ -151,23 +188,132 @@ python scripts/dataset_analysis/analyze_semantic_expression_variation_progressio
 
 ```bash
 # Expression and Semantic Variation
-python scripts/visualization/visualize_progression_expression_semantic_separate_charts.py
+python scripts/visualization/visualize_variation_progression.py
 
 # Schema Variation
-python scripts/visualization/visualize_schema_variation_results.py
+python scripts/visualization/visualize_schema_variation.py
 ```
 
 ## LLM Consistency Benchmarking
 
+The framework supports two experiment modes for different datasets:
+
+| Mode | Dataset | Use Case |
+|------|---------|----------|
+| `structured` | ShareGPT | JSON structured output generation (MCQ, reports, etc.) |
+| `tool-calling` | Toucan | Tool/function calling evaluation |
+
+### Model Setup
+
+The framework supports models from multiple providers. Model configuration is centralized in `sted/model_config.py`:
+
+```python
+# sted/model_config.py
+MODEL_REGISTRY = {
+    # model_id -> (provider, display_name)
+    "us.anthropic.claude-3-7-sonnet-20250219-v1:0": ("bedrock", "Claude-3.7-Sonnet"),
+    "us.deepseek.v3-v1:0": ("bedrock", "DeepSeek-V3.1"),
+    "openai/gpt-4o": ("openai", "GPT-4o"),
+    "google/gemini-2.5-pro": ("openai", "Gemini-2.5-Pro"),
+    # ... add more models here
+}
+```
+
+**Provider Types:**
+
+| Provider | Model ID Format | API Used | Credentials |
+|----------|----------------|----------|-------------|
+| `bedrock` | `us.<provider>.<model>-v1:0` | AWS Bedrock Converse API | AWS credentials |
+| `openai` | `<provider>/<model>` | OpenAI-compatible API | `OPENAI_API_KEY`, `OPENAI_BASE_URL` |
+
+**To add a new model:**
+
+1. Add entry to `MODEL_REGISTRY` in `sted/model_config.py`:
+   ```python
+   "us.meta.llama3-3-70b-instruct-v1:0": ("bedrock", "Llama-3.3-70B"),
+   ```
+
+2. **Configure credentials** in `.env`:
+   ```bash
+   # For Bedrock models - only AWS credentials needed (via aws configure)
+   
+   # For OpenAI-compatible APIs - set these environment variables
+   OPENAI_API_KEY=<your-api-key>
+   OPENAI_BASE_URL=https://openrouter.ai/api/v1  # Optional, for OpenRouter
+   ```
+
+**Note**: When using Bedrock models, you don't need to set `OPENAI_API_KEY`. The script only requires OpenAI credentials when using models with the `"openai"` provider type.
+
 ### Step 1: Generate LLM Outputs
 
+#### ShareGPT Experiment (Structured Output)
+
+For JSON structured output generation tasks (MCQ generation, report extraction, etc.):
+
 ```bash
+# Download ShareGPT data first
+python scripts/data/download_sharegpt_data.py
+
+# Run temperature experiment
 python scripts/eval/run_temperature_experiment.py \
+  --mode structured \
   --data-dir sharegpt_data \
-  --output-dir llm_gen_results \
-  --run-num 10 \
-  --model-id anthropic.claude-3-haiku-20240307-v1:0 \
-  --include-schema
+  --output-dir llm_gen_results/sharegpt \
+  --model-id us.anthropic.claude-3-5-haiku-20241022-v1:0 \
+  --max-tokens 8000
+```
+
+**Key parameters:**
+- `--mode structured`: Use structured output mode (default)
+- `--data-dir`: Directory containing ShareGPT JSON files
+- `--run-num`: Number of inference runs per sample (default: 10)
+- `--sample-limit`: Maximum samples to process (default: all samples)
+- `--include-schema`: Include JSON schema in prompt for better formatting
+
+#### Toucan Experiment (Tool Calling)
+
+For tool/function calling evaluation:
+
+```bash
+# Download Toucan data first
+python scripts/data/download_toucan_data.py
+
+# Run temperature experiment
+python scripts/eval/run_temperature_experiment.py \
+  --mode tool-calling \
+  --dataset-path toucan_data/toucan_tool_calls.json \
+  --output-dir llm_gen_results/toucan \
+  --model-id us.anthropic.claude-3-5-haiku-20241022-v1:0 \
+  --max-tokens 1024
+```
+
+**Key parameters:**
+- `--mode tool-calling`: Use tool calling mode
+- `--dataset-path`: Path to Toucan dataset JSON file
+- `--run-num`: Number of inference runs per sample (default: 10)
+- `--sample-limit`: Maximum samples to process (default: all samples)
+- `--max-workers`: Parallel workers for inference (default: 10)
+- `--start-idx`: Starting index in dataset (default: 0)
+
+#### Running Individual Temperatures
+
+For finer control, you can run `generate_structured_outputs.py` or `generate_tool_calls.py` directly:
+
+```bash
+# ShareGPT - single temperature
+python scripts/eval/generate_structured_outputs.py \
+  --data-dir sharegpt_data \
+  --output-dir llm_gen_results/sharegpt/generations-model-timestamp \
+  --temperature 0.5 \
+  --model-id us.anthropic.claude-3-5-haiku-20241022-v1:0
+
+# Toucan - single temperature
+python scripts/eval/generate_tool_calls.py \
+  --dataset-path toucan_data/toucan_tool_calls.json \
+  --dataset-type toucan \
+  --output-dir llm_gen_results/toucan/generations-model-timestamp \
+  --temperature 0.5 \
+  --model us.anthropic.claude-3-5-haiku-20241022-v1:0
 ```
 
 ### Step 2: Calculate Consistency Metrics
@@ -182,7 +328,7 @@ python scripts/eval/calculate_consistency_metrics.py
 python scripts/visualization/visualize_consistency_scores.py
 ```
 
-![LLM Consistency Scores](results_archive/v1_2025-11-08/llm_consistency/consistency_score_by_consistency_type_with_errors.png)
+![LLM Consistency Scores](images/consistency_score_by_consistency_type_with_errors.png)
 
 For all scripts, see [Scripts Reference](./SCRIPTS_REFERENCE.md).
 

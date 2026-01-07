@@ -22,6 +22,7 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
@@ -88,7 +89,7 @@ def run_tool_calling_generation(
         Path to the generated results file
     """
     cmd = [
-        "python3", "scripts/eval/generate_tool_calls.py",
+        sys.executable, "scripts/eval/generate_tool_calls.py",
         "--dataset-path", dataset_path,
         "--dataset-type", "toucan",
         "--output-dir", output_dir,
@@ -157,7 +158,7 @@ def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: 
         Path to the generated results file
     """
     cmd = [
-        "python3", "scripts/eval/generate_structured_outputs.py",
+        sys.executable, "scripts/eval/generate_structured_outputs.py",
         "--data-dir", data_dir,
         "--output-dir", output_dir,
         "--temperature", str(temperature),
@@ -323,8 +324,8 @@ Examples:
                         help="Number of runs per temperature.")
     parser.add_argument("--model-id", type=str, default="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
                         help="Model ID to use.")
-    parser.add_argument("--sample-limit", type=int, default=100,
-                        help="Maximum number of samples to process.")
+    parser.add_argument("--sample-limit", type=int, default=-1,
+                        help="Maximum number of samples to process (-1 for all samples).")
     parser.add_argument("--max-tokens", type=int, default=1024,
                         help="Maximum tokens for LLM generation.")
 

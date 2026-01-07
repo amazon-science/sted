@@ -6,46 +6,71 @@ This script generates text using an LLM with parallel inference and saves the re
 It focuses solely on generation, without evaluation metrics.
 
 Usage:
-    python llm_gen_simple.py --data-dir extracted_sharegpt_data --output-dir ./generations
+    python generate_structured_outputs.py --data-dir sharegpt_data --output-dir ./generations
 """
 
 import boto3
 from dotenv import load_dotenv
-from sted.bedrock_utils import build_message, inference_with_converse_api
 import argparse
 import json
-import ast
 import concurrent.futures
 import time
 import os
 import numpy as np
-from typing import List, Dict, Any, Optional, Union, Callable, Set, Tuple
+from typing import List, Dict, Any
 import sys
 from tqdm import tqdm
 import re
 import openai
+import logging
+from datetime import datetime
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from .env file (override=True to override existing env vars)
+load_dotenv(override=True)
+
+# Setup logging
+def setup_logging(output_dir=None, log_level=logging.INFO):
+    """Setup logging configuration with both file and console handlers."""
+    logger = logging.getLogger(__name__)
+    logger.setLevel(log_level)
+
+    # Clear existing handlers
+    logger.handlers = []
+
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level)
+    console_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
+    console_handler.setFormatter(console_format)
+    logger.addHandler(console_handler)
+
+    # File handler (if output_dir provided)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+        log_file = os.path.join(output_dir, f"generation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.DEBUG)  # File gets all debug info
+        file_format = logging.Formatter('%(asctime)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s')
+        file_handler.setFormatter(file_format)
+        logger.addHandler(file_handler)
+        logger.info(f"Logging to file: {log_file}")
+
+    return logger
+
+# Initialize logger (will be reconfigured with output_dir in main)
+logger = logging.getLogger(__name__)
 
 # Add the project root to the path to import modules
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 openai_client = openai.OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
+    api_key=os.getenv("OPENAI_API_KEY", "not-set"),
     base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
 )
 
-provider_mapping = {
-    "us.anthropic.claude-3-7-sonnet-20250219-v1:0": "bedrock",
-    "us.anthropic.claude-sonnet-4-20250514-v1:0": "bedrock",
-    "us.qwen.qwen3-235b-a22b-2507-v1:0": "bedrock",
-    "us.deepseek.v3-v1:0": "bedrock",
-    "openai/gpt-5": "openai",
-    "openai/gpt-4o": "openai",
-    "google/gemini-2.5-pro": "openai",
-    "x-ai/grok-4": "openai"
-}
+# Import directly from submodules to avoid __init__.py which requires bert_score
+from sted.model_config import get_provider, get_display_name
+from sted.bedrock_utils import build_message, inference_with_converse_api
 
 def estimate_tokens(text):
     """
@@ -70,6 +95,10 @@ def extract_json_from_string(input_string):
     Extract JSON data from a string with a prefix.
     Handles both object {} and array [] formats without modification.
     """
+    # Strip markdown code block wrappers (e.g., ```json ... ```)
+    input_string = re.sub(r'^```(?:json)?\s*\n?', '', input_string.strip())
+    input_string = re.sub(r'\n?```\s*$', '', input_string)
+
     # Find the first { or [
     match = re.search(r'[{[]', input_string)
     if not match:
@@ -128,23 +157,39 @@ def read_sharegpt(dataset_dir="data"):
     
     return json_data
 
-def _single_inference(client, model_id, user_prompt, system_prompts=None, max_tokens=8000, temperature=0.1, top_p=0.9, top_k=200, task_id=None):
+def _single_inference(model_id, user_prompt, system_prompts=None, max_tokens=8000, temperature=0.1, top_p=0.9, top_k=200, task_id=None):
     """
     Helper function to run a single inference request using threads.
     """
+    import time
+    start_time = time.time()
+
+    logger.debug(f"[Task {task_id}] Starting inference with model={model_id}, temp={temperature}, max_tokens={max_tokens}")
+    logger.debug(f"[Task {task_id}] User prompt length: {len(user_prompt)} chars")
+
     try:
         # Create a new client for each thread to avoid potential thread safety issues
-        thread_client = boto3.client('bedrock-runtime', region_name='us-west-2')
-        
-        # Print task ID if provided (useful for debugging)
-        if task_id is not None:
-            print(f"Starting task {task_id}")
-        
-        provider = provider_mapping.get(model_id, "bedrock")
-        print(f"provider: {provider} for model_id: {model_id}")
+        # Uses AWS credentials from environment variables or ~/.aws/credentials
+        aws_region = os.getenv('AWS_DEFAULT_REGION', 'us-west-2')
+        aws_key_id = os.getenv('AWS_ACCESS_KEY_ID')
+        aws_secret = os.getenv('AWS_SECRET_ACCESS_KEY')
+
+        logger.debug(f"[Task {task_id}] AWS Region: {aws_region}, Key ID present: {bool(aws_key_id)}, Secret present: {bool(aws_secret)}")
+
+        thread_client = boto3.client(
+            'bedrock-runtime',
+            region_name=aws_region,
+            aws_access_key_id=aws_key_id,
+            aws_secret_access_key=aws_secret
+        )
+
+        provider = get_provider(model_id)
+        logger.info(f"[Task {task_id}] Using provider: {provider}")
+
         if provider == "bedrock":
             message = build_message(texts=[user_prompt])
-            # Attempt to run inference
+            logger.debug(f"[Task {task_id}] Calling Bedrock Converse API...")
+
             response = inference_with_converse_api(
                 thread_client,
                 model_id=model_id,
@@ -155,42 +200,58 @@ def _single_inference(client, model_id, user_prompt, system_prompts=None, max_to
                 top_p=top_p
             )
             
+            print(f"response: {response}")
+
             if not response or not isinstance(response, list) or len(response) == 0:
-                print(f"Warning: Empty or invalid response received for task {task_id}")
+                logger.warning(f"[Task {task_id}] Empty or invalid response from Bedrock")
                 return {}
-        
-            print(f"Response received for task {task_id}: {len(response)} items")
+
             response_text = response[0].get('text', '{}')
-            print(f"original response: {response_text}")
+
+            # Handle models that return reasoningContent + text (e.g., Minimax-M2)
+            # Response format: [{'reasoningContent': {...}}, {'text': '[actual JSON]'}]
+            if response_text == '{}' and len(response) > 1:
+                for item in response:
+                    if isinstance(item, dict) and 'text' in item:
+                        response_text = item['text']
+                        break
+            logger.debug(f"[Task {task_id}] Bedrock response received, length: {len(response_text)} chars")
         else:
+            logger.debug(f"[Task {task_id}] Calling OpenAI-compatible API...")
             response = openai_client.chat.completions.create(
                 model=model_id,
                 messages=[
-                    {"role": "system", "content": f"{system_prompt}"},
+                    {"role": "system", "content": f"{system_prompts}"},
                     {"role": "user", "content": user_prompt}
                 ],
                 stream=False,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                #top_p=top_p
             )
-            print(f"Response received for task {task_id}: {response}")
             response_text = response.choices[0].message.content
-            print(f"Response received for task {task_id}: {response_text}")
-        # remove space or new lines in ends of response_text
+            logger.debug(f"[Task {task_id}] OpenAI response received, length: {len(response_text)} chars")
+
         response_text = response_text.strip()
-        
-        # Parse the response with safer error handling
+        elapsed_time = time.time() - start_time
+        logger.info(f"[Task {task_id}] API call completed in {elapsed_time:.2f}s, response length: {len(response_text)} chars")
+
         try:
             parsed_response = extract_json_from_string(response_text)
+            logger.info(f"[Task {task_id}] JSON extraction successful")
             return parsed_response
-        except (SyntaxError, ValueError) as parse_error:
-            print(f"Error parsing response for task {task_id}: {parse_error}")
-            print(f"Raw response text: {response_text}...")
-            return {}
+        except (SyntaxError, ValueError) as e:
+            # Log the failed extraction for debugging
+            logger.error(f"[Task {task_id}] JSON extraction failed: {e}")
+            logger.error(f"[Task {task_id}] Response length: {len(response_text)} chars")
+            logger.debug(f"[Task {task_id}] Response preview (first 500 chars): {response_text[:500]}")
+            logger.debug(f"[Task {task_id}] Response preview (last 200 chars): {response_text[-200:] if len(response_text) > 200 else response_text}")
+            return {"_extraction_error": str(e), "_response_preview": response_text[:1000]}
     except Exception as e:
-        print(f"Error during inference for task {task_id}: {e}")
-        return {}  # Return an empty dict on error
+        elapsed_time = time.time() - start_time
+        logger.error(f"[Task {task_id}] API Error after {elapsed_time:.2f}s: {e}")
+        import traceback
+        logger.debug(f"[Task {task_id}] Full traceback: {traceback.format_exc()}")
+        return {"_api_error": str(e)}
 
 def create_json_schema(ground_truth_dict, max_depth=10):
     """
@@ -340,12 +401,11 @@ def create_prompt_with_schema(user_prompt, ground_truth_dict):
     
     return modified_prompt
 
-def run_inference(client, model_id, user_prompt, system_prompts=None, max_tokens=8000, temperature=0.1, top_p=0.9, top_k=200, run_num=5, max_workers=None):
+def run_inference(model_id, user_prompt, system_prompts=None, max_tokens=8000, temperature=0.1, top_p=0.9, top_k=200, run_num=5, max_workers=None):
     """
     Runs inference in parallel using ThreadPoolExecutor.
     
     Args:
-        client: Bedrock client (not used directly, each thread creates its own)
         model_id: Model ID to use
         user_prompt: The user prompt to send to the model
         system_prompts: Optional system prompts
@@ -361,48 +421,36 @@ def run_inference(client, model_id, user_prompt, system_prompts=None, max_tokens
     """
     responses = []
     start_time = time.time()
-    
+
     # Determine optimal number of workers if not specified
     if max_workers is None:
-        # Use CPU count or a reasonable default for I/O bound tasks
-        max_workers = min(32, (os.cpu_count() or 4) * 4)  # 4x CPU count is good for I/O bound tasks
-        print(f"Auto-determined max_workers: {max_workers}")
-    
+        max_workers = min(32, (os.cpu_count() or 4) * 4)
+
+    logger.info(f"Starting {run_num} parallel inference runs with {max_workers} workers")
+    logger.debug(f"Model: {model_id}, Temperature: {temperature}, Max tokens: {max_tokens}")
+
     # Use ThreadPoolExecutor for parallel processing
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all inference tasks
-        future_to_task = {}
-        for i in range(run_num):
-            future = executor.submit(
-                _single_inference,
-                client,  # Not used directly, each thread creates its own client
-                model_id,
-                user_prompt,
-                system_prompts,
-                max_tokens,
-                temperature,
-                top_p,
-                top_k,
-                i  # Pass task ID for better logging
-            )
-            future_to_task[future] = i
-        
-        # Collect results as they complete
+        future_to_task = {
+            executor.submit(
+                _single_inference, model_id, user_prompt, system_prompts,
+                max_tokens, temperature, top_p, top_k, i
+            ): i for i in range(run_num)
+        }
+
         for future in concurrent.futures.as_completed(future_to_task):
             task_id = future_to_task[future]
             try:
-                response = future.result()
-                responses.append(response)
-                print(f"Task {task_id} result collected")
+                responses.append(future.result())
             except Exception as e:
-                print(f"Task {task_id} failed with exception: {e}")
-                responses.append({})  # Append an empty dict on error
-    
+                logger.error(f"[Task {task_id}] Failed: {e}")
+                responses.append({})
+
     elapsed_time = time.time() - start_time
-    print(f"Completed {run_num} requests in {elapsed_time:.2f} seconds")
-    print(f"Average time per request: {elapsed_time/run_num:.2f} seconds")
+    valid_count = sum(1 for r in responses if r)
+    logger.info(f"Completed {run_num} runs in {elapsed_time:.1f}s ({valid_count}/{run_num} valid)")
+    print(f"  Completed {run_num} runs in {elapsed_time:.1f}s ({valid_count}/{run_num} valid)")
     
-    print(f"final responses: {responses}")
     return responses
 
 # Function to recursively convert objects to JSON-serializable types
@@ -425,28 +473,27 @@ def make_json_serializable(obj):
     elif hasattr(obj, 'item'):
         try:
             return obj.item()
-        except:
+        except (ValueError, TypeError):
             pass
     elif hasattr(obj, 'tolist'):
         try:
             return obj.tolist()
-        except:
+        except (ValueError, TypeError):
             pass
     # Handle any other NumPy types we might have missed
     elif type(obj).__module__ == 'numpy':
         try:
             return obj.item() if hasattr(obj, 'item') else obj.tolist() if hasattr(obj, 'tolist') else str(obj)
-        except:
+        except (ValueError, TypeError):
             return str(obj)
-    else:
-        return obj
+    return obj
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate text using an LLM with parallel inference.")
     parser.add_argument("--model-id", type=str, default="us.anthropic.claude-3-5-sonnet-20241022-v2:0", help="The ID of the Bedrock model to use.")
     parser.add_argument("--data-dir", type=str, required=True, help="The directory containing the data files.")
     parser.add_argument("--max-workers", type=int, default=None, help="Maximum number of parallel workers for inference. Default is auto-determined based on CPU count.")
-    parser.add_argument("--run-num", type=int, default=5, help="Number of inference runs to perform.")
+    parser.add_argument("--run-num", type=int, default=10, help="Number of inference runs to perform.")
     parser.add_argument("--temperature", type=float, default=0, help="Temperature for sampling (0.1-2.0). Higher values produce more random outputs.")
     parser.add_argument("--top-p", type=float, default=0.9, help="Top-p (nucleus) sampling parameter.")
     parser.add_argument("--top-k", type=int, default=200, help="Top-k sampling parameter.")
@@ -462,22 +509,15 @@ if __name__ == "__main__":
     
     args.include_schema = True
     
-    # Create a client with appropriate configuration
-    from botocore.config import Config
-    boto_config = Config(
-        retries={
-            'max_attempts': 10,
-            'mode': 'adaptive'
-        },
-        max_pool_connections=50  # Increase connection pool size
-    )
-    client = boto3.client('bedrock-runtime', region_name='us-west-2', config=boto_config)
     model_id = args.model_id
 
     # Configure logging based on verbose flag
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    # Reconfigure the module-level logger with output directory
+    setup_logging(args.output_dir, log_level)
+
     if not args.verbose:
         # Reduce boto3 logging noise
-        import logging
         logging.getLogger('boto3').setLevel(logging.WARNING)
         logging.getLogger('botocore').setLevel(logging.WARNING)
         logging.getLogger('urllib3').setLevel(logging.WARNING)
@@ -490,54 +530,66 @@ if __name__ == "__main__":
     # List dataset
     dataset_dict = read_sharegpt(args.data_dir)
     
-    results = []
     all_sample_results = []  # Store results for all samples
     
     # Create timestamped output directory for this run
     run_timestamp = time.strftime('%Y%m%d_%H%M%S')
     temp_str = f"temp_{args.temperature:.2f}".replace('.', '_')
-    model_name = model_id.split('/')[-1].split(':')[0]
+    model_name = get_display_name(model_id)
     run_output_dir = os.path.join(args.output_dir, f"llm_gen_results_{model_name}_{temp_str}_{run_timestamp}")
     os.makedirs(run_output_dir, exist_ok=True)
     
-    print(f"Results will be saved to: {run_output_dir}")
+    # Print run configuration
+    print(f"\n{'='*60}")
+    print(f"LLM Structured Output Generation")
+    print(f"{'='*60}")
+    print(f"Model: {model_id}")
+    print(f"Temperature: {args.temperature}")
+    print(f"Runs per sample: {args.run_num}")
+    print(f"Output directory: {run_output_dir}")
+    print(f"{'='*60}\n")
     
-    print(f"Processing {len(dataset_dict)} samples, args.sample_limit: {args.sample_limit}")
     # Determine how many samples to process
     if args.sample_limit > 0:
         samples_to_process = dataset_dict[:args.sample_limit]
     else:
         samples_to_process = dataset_dict
     
-    print(f"Processing {type(samples_to_process)} samples")
-    for sample_idx, item in tqdm(enumerate(samples_to_process)):
+    total_samples = len(samples_to_process)
+    print(f"Processing {total_samples} samples...\n")
+    
+    for sample_idx, item in tqdm(enumerate(samples_to_process), total=total_samples, desc="Generating outputs"):
         sample_id = f"sample_{sample_idx:03d}"
-        print(f"\n{'='*60}")
-        print(f"PROCESSING SAMPLE {sample_idx + 1}/{len(samples_to_process)}: {sample_id}")
-        print(f"{'='*60}")
-        
+        logger.info(f"Processing {sample_id} ({sample_idx + 1}/{total_samples})")
+
         system_prompt = item['conversations'][0]['value']
         user_prompt = item['conversations'][1]['value']
         gt_value = item['conversations'][2]['value']
-        
+
+        logger.debug(f"[{sample_id}] System prompt length: {len(system_prompt)}, User prompt length: {len(user_prompt)}")
+
         try:
-            gt_dict = json.loads(gt_value)            
+            gt_dict = json.loads(gt_value)
+            logger.debug(f"[{sample_id}] Ground truth parsed successfully, keys: {list(gt_dict.keys()) if isinstance(gt_dict, dict) else 'list'}")
         except json.JSONDecodeError as e:
-            print(f"Warning: Could not parse ground truth JSON for {sample_id}: {e}")
-            print(f"gt_value: {gt_value}")
+            logger.warning(f"[{sample_id}] Could not parse ground truth JSON: {e}")
+            print(f"\n[{sample_id}] Warning: Could not parse ground truth JSON: {e}")
             gt_dict = {"error": "Invalid JSON", "raw_value": gt_value}
         
         # Check estimated token count before processing
         total_estimated_tokens = estimate_tokens(system_prompt + user_prompt + gt_value)
+        logger.debug(f"[{sample_id}] Estimated total tokens: {total_estimated_tokens}")
         print(f"Estimated total tokens: {total_estimated_tokens}")
-        
+
         # Use command line argument for max context length
         MAX_CONTEXT_TOKENS = args.max_context_tokens
-        
+
         if total_estimated_tokens > MAX_CONTEXT_TOKENS:
+            logger.warning(f"[{sample_id}] Exceeds estimated token limit ({total_estimated_tokens} > {MAX_CONTEXT_TOKENS})")
             print(f"WARNING: Sample {sample_id} exceeds estimated token limit ({total_estimated_tokens} > {MAX_CONTEXT_TOKENS})")
-            
+
             if args.skip_long_samples:
+                logger.info(f"[{sample_id}] Skipping due to --skip-long-samples flag")
                 print(f"Skipping sample {sample_id} due to --skip-long-samples flag")
                 continue
             
@@ -551,17 +603,11 @@ if __name__ == "__main__":
                 print(f"System estimated tokens: {system_estimated_tokens}, GT estimated tokens: {gt_estimated_tokens}")
                 continue
             
-            print(f"Truncating user prompt from {estimate_tokens(user_prompt)} to ~{available_tokens} estimated tokens")
             user_prompt = truncate_text_by_chars(user_prompt, available_tokens)
-            print(f"After truncation: {estimate_tokens(user_prompt)} estimated tokens")
         
         # Determine whether to use the original prompt or a modified one with schema
         if not args.include_schema:
-            # Use original prompt without schema
             modified_user_prompt = user_prompt
-            message = build_message(texts=[user_prompt])
-            print(f"\nRunning inference on original prompt: {user_prompt[:100]}...")
-            print(f"System prompt: {system_prompt[:100]}...")
         else:
             # Create a modified prompt with the JSON schema
             modified_user_prompt = create_prompt_with_schema(
@@ -572,14 +618,11 @@ if __name__ == "__main__":
             # Check if the modified prompt with schema exceeds limits
             modified_total_estimated_tokens = estimate_tokens(system_prompt + modified_user_prompt)
             if modified_total_estimated_tokens > MAX_CONTEXT_TOKENS:
-                print(f"WARNING: Modified prompt with schema exceeds estimated limit ({modified_total_estimated_tokens} tokens)")
-                # Try to truncate the user part of the modified prompt
                 schema_part = modified_user_prompt[len(user_prompt):]
                 schema_estimated_tokens = estimate_tokens(schema_part)
                 available_for_user = MAX_CONTEXT_TOKENS - estimate_tokens(system_prompt) - schema_estimated_tokens - 1000
                 
                 if available_for_user < 500:
-                    print(f"ERROR: Cannot fit schema - falling back to original prompt")
                     modified_user_prompt = user_prompt
                 else:
                     truncated_user = truncate_text_by_chars(user_prompt, available_for_user)
@@ -588,27 +631,20 @@ if __name__ == "__main__":
                         ground_truth_dict=gt_dict
                     )
             
-            print(f"\nRunning inference on prompt with schema")
-            print(f"Original prompt: {user_prompt[:100]}...")
-            print(f"System prompt: {system_prompt[:100]}...")
-            print(f"Schema added to prompt for better comparison with ground truth")
-            
             # Save the modified prompt for reference
             prompt_output_path = os.path.join(run_output_dir, f"{sample_id}_modified_prompt.txt")
             with open(prompt_output_path, 'w') as f:
                 f.write(modified_user_prompt)
-            print(f"Saved modified prompt to {prompt_output_path}")
         
         # Final estimated token count check
         final_estimated_tokens = estimate_tokens(system_prompt + modified_user_prompt)
-        print(f"Final estimated tokens: {final_estimated_tokens}")
-        
         if final_estimated_tokens > MAX_CONTEXT_TOKENS:
-            print(f"ERROR: Sample {sample_id} still exceeds estimated token limit after truncation. Skipping.")
+            logger.warning(f"[{sample_id}] Skipped: exceeds token limit ({final_estimated_tokens} > {MAX_CONTEXT_TOKENS})")
+            print(f"\n[{sample_id}] Skipped: exceeds token limit")
             continue
-        
+
+        logger.info(f"[{sample_id}] Starting inference with final token count: {final_estimated_tokens}")
         responses = run_inference(
-            client=client,
             model_id=model_id,
             user_prompt=modified_user_prompt,
             system_prompts=system_prompt,
@@ -620,11 +656,8 @@ if __name__ == "__main__":
             max_workers=args.max_workers
         )
         
-        print(f"Received {len(responses)} responses")
-        
         # Extract schema for each response
         schema_list = [extract_schema(response) for response in responses]
-        print(f"Extracted schemas for {len(schema_list)} responses")
         
         # Save the responses and metadata
         sample_results = {
@@ -649,12 +682,15 @@ if __name__ == "__main__":
         serializable_results = make_json_serializable(sample_results)
         
         all_sample_results.append(serializable_results)
-        
+
         # Save individual sample results
         sample_output_path = os.path.join(run_output_dir, f"{sample_id}.json")
         with open(sample_output_path, 'w') as f:
             json.dump(serializable_results, f, indent=2)
-        print(f"Saved results for {sample_id} to {sample_output_path}")
+
+        # Handle both dict and list responses - lists are valid JSON responses
+        valid_responses = sum(1 for r in responses if r and (isinstance(r, list) or (isinstance(r, dict) and not r.get('_api_error') and not r.get('_extraction_error'))))
+        logger.info(f"[{sample_id}] Completed - {valid_responses}/{len(responses)} valid responses, saved to {sample_output_path}")
     
     # Create the final results object
     final_results = {
@@ -676,4 +712,12 @@ if __name__ == "__main__":
     all_results_path = os.path.join(run_output_dir, "all_results.json")
     with open(all_results_path, 'w') as f:
         json.dump(serializable_results, f, indent=2)
-    print(f"\nAll results saved to {all_results_path}")
+
+    logger.info(f"All results saved to: {all_results_path}")
+    logger.info(f"Generation complete! Processed {len(all_sample_results)} samples")
+
+    print(f"\n{'='*60}")
+    print(f"Generation complete!")
+    print(f"Processed: {len(all_sample_results)} samples")
+    print(f"Results saved to: {run_output_dir}")
+    print(f"{'='*60}")
