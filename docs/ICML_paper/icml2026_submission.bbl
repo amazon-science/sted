@@ -1,17 +1,9 @@
-\begin{thebibliography}{39}
+\begin{thebibliography}{38}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
   \providecommand{\doi}[1]{doi: #1}\else
   \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
-
-\bibitem[Atil et~al.(2025)Atil, Chittams, Fu, Ture, Xu, and
-  Baldwin]{atil2024llm}
-Atil, B., Chittams, A., Fu, L., Ture, F., Xu, L., and Baldwin, B.
-\newblock Llm stability: A detailed analysis with some surprises.
-\newblock \emph{arXiv preprint arXiv:2408.04667}, 2025.
-\newblock URL \url{https://arxiv.org/abs/2408.04667}.
-\newblock v2.
 
 \bibitem[Baldwin et~al.(2025)Baldwin, Rando, and
   Tramèr]{baldwin2024nondeterminism}
@@ -20,6 +12,12 @@ Baldwin, B., Rando, J., and Tramèr, F.
 \newblock \emph{arXiv preprint arXiv:2408.04667}, 2025.
 \newblock URL \url{https://arxiv.org/abs/2408.04667}.
 \newblock Version v5.
+
+\bibitem[beyoru(2024)]{toucan2024}
+beyoru.
+\newblock Toucan-1.5m-structured-qwen, 2024.
+\newblock URL
+  \url{https://huggingface.co/datasets/beyoru/Toucan-1.5M-structured-Qwen}.
 
 \bibitem[Bryan et~al.(2013)Bryan, Zyp, and Nottingham]{RFC6902}
 Bryan, P., Zyp, K., and Nottingham, M.
@@ -48,7 +46,7 @@ Dehpour, S.
 \newblock Deepdiff: Deep difference and search of any {Python} object/data,
   2024.
 \newblock URL \url{https://github.com/seperman/deepdiff}.
-\newblock Version 7.0.
+\newblock Version 7.0. Available at \url{https://zepworks.com/deepdiff/}.
 
 \bibitem[Devlin et~al.(2019)Devlin, Chang, Lee, and Toutanova]{Devlin2019}
 Devlin, J., Chang, M.-W., Lee, K., and Toutanova, K.
@@ -185,13 +183,6 @@ Renze, M. and Guven, E.
   language models, 2025.
 \newblock URL \url{https://arxiv.org/abs/2402.05201}.
 \newblock arXiv:2402.05201v3 [cs.CL] 2 Oct 2024.
-
-\bibitem[Services(2025)]{toucan2024}
-Services, A.~W.
-\newblock Toucan: A large-scale multilingual dataset for tool calling.
-\newblock
-  \url{https://huggingface.co/datasets/beyoru/Toucan-1.5M-structured-Qwen},
-  2025.
 
 \bibitem[Shorten et~al.(2025)Shorten, Pierse, Smith, Cardenas, Sharma,
   Trengrove, and van Luijt]{shorten2024structuredrag}

@@ -312,7 +312,7 @@ for metric in ['consistency_score']:
 
         ax.set_xlabel('Temperature', fontsize=10)
         ax.set_ylabel('Penalized Stability Score ($S_\\alpha \\cdot r_v$)', fontsize=10)
-        ax.set_title(f'{metric_type} Consistency ($S_\\alpha = (1/(1+2\\hat{{D}}_{{std}}))^{{\\alpha}}$, $\\alpha$=20)', fontsize=11, fontweight='bold')
+        ax.set_title(f'{metric_type} Stability ($S_\\alpha = (1/(1+2\\hat{{\\sigma}}))^{{\\alpha}}$, $\\alpha$=20)', fontsize=11, fontweight='bold')
         ax.set_ylim(0, 1)
         ax.grid(True, alpha=0.3)
 
@@ -327,7 +327,7 @@ for metric in ['consistency_score']:
 
     output_path = os.path.join(args.output_dir, f'{metric}_by_consistency_type_with_errors.png')
     save_figure(fig, output_path)
-    plt.show()
+    plt.close(fig)
 
 # Print LaTeX tables with confidence intervals for 0.1 and 0.9 temperatures
 temp_filter = [0.1, 0.9]
@@ -396,7 +396,7 @@ print("\nValidity Rate by Model (sorted by mean):")
 print(validity_by_model.to_string())
 
 # Save validity rate statistics
-validity_by_model.to_csv(os.path.join(args.output_dir, 'validity_rate_by_model.csv'))
+validity_by_model.to_csv(os.path.join(args.output_dir, 'rv_by_model.csv'))
 
 # Create validity rate bar chart
 fig, ax = plt.subplots(figsize=(14, 8))
@@ -408,18 +408,18 @@ stds = validity_by_model['validity_std'].values
 colors = plt.cm.RdYlGn(means)
 
 bars = ax.barh(models_sorted, means, xerr=stds, capsize=3, color=colors, edgecolor='black', linewidth=0.5)
-ax.set_xlabel('Validity Rate', fontsize=12)
+ax.set_xlabel('$r_v$ (Validity)', fontsize=12)
 ax.set_ylabel('Model', fontsize=12)
-ax.set_title('Validity Rate by Model (Mean ± Std across temperatures)', fontsize=14)
+ax.set_title('$r_v$ (Validity Rate) by Model', fontsize=14)
 ax.set_xlim(0, 1.05)
 ax.axvline(x=0.9, color='red', linestyle='--', alpha=0.5, label='90% threshold')
 ax.legend()
 ax.grid(True, alpha=0.3, axis='x')
 
 plt.tight_layout()
-validity_bar_path = os.path.join(args.output_dir, 'validity_rate_by_model.png')
+validity_bar_path = os.path.join(args.output_dir, 'rv_by_model.png')
 save_figure(fig, validity_bar_path)
-plt.show()
+plt.close(fig)
 
 # Create validity rate heatmap by model and temperature
 validity_pivot = validity_df.pivot_table(
@@ -443,7 +443,7 @@ ax.set_yticklabels(validity_pivot.index)
 
 # Add colorbar
 cbar = ax.figure.colorbar(im, ax=ax)
-cbar.ax.set_ylabel('Validity Rate', rotation=-90, va="bottom")
+cbar.ax.set_ylabel('$r_v$ (Validity)', rotation=-90, va="bottom")
 
 # Add text annotations
 for i in range(len(validity_pivot.index)):
@@ -454,15 +454,15 @@ for i in range(len(validity_pivot.index)):
 
 ax.set_xlabel('Temperature', fontsize=12)
 ax.set_ylabel('Model', fontsize=12)
-ax.set_title('Validity Rate by Model and Temperature', fontsize=14)
+ax.set_title('$r_v$ (Validity) by Model and Temperature', fontsize=14)
 
 plt.tight_layout()
-validity_heatmap_path = os.path.join(args.output_dir, 'validity_rate_heatmap.png')
+validity_heatmap_path = os.path.join(args.output_dir, 'rv_heatmap.png')
 save_figure(fig, validity_heatmap_path)
-plt.show()
+plt.close(fig)
 
 # Save validity pivot table
-validity_pivot.to_csv(os.path.join(args.output_dir, 'validity_rate_by_temperature.csv'))
+validity_pivot.to_csv(os.path.join(args.output_dir, 'rv_by_temperature.csv'))
 
 # ============================================================================
 # Generate LaTeX Tables for Paper
@@ -694,10 +694,10 @@ print(f"\nStatistical analysis complete. Files saved:")
 print("- detailed_consistency_statistics.csv")
 print("- enhanced_consistency_summary.csv")
 print("- consistency_score_by_consistency_type_with_errors.png")
-print("- validity_rate_by_model.csv")
-print("- validity_rate_by_model.png")
-print("- validity_rate_heatmap.png")
-print("- validity_rate_by_temperature.csv")
+print("- rv_by_model.csv")
+print("- rv_by_model.png")
+print("- rv_heatmap.png")
+print("- rv_by_temperature.csv")
 print("- appendix_model_coverage.csv")
 print("- latex_tables.tex (includes Appendix tables)")
 
@@ -777,9 +777,9 @@ for idx, metric_type in enumerate(['Overall', 'Semantic', 'Structural']):
                    fontsize=6, alpha=0.8, ha='center', va='bottom',
                    xytext=(0, 5), textcoords='offset points')
 
-    ax.set_xlabel('$C_{mean}$ (Mean Pairwise Consistency)', fontsize=10)
-    ax.set_ylabel('$D_{std}$ (Dispersion)', fontsize=10)
-    ax.set_title(f'{metric_type}: Mean vs Dispersion Tradeoff', fontsize=11, fontweight='bold')
+    ax.set_xlabel('$C_{mean}$ (Consistency)', fontsize=10)
+    ax.set_ylabel('$\\sigma$ (Std. Deviation)', fontsize=10)
+    ax.set_title(f'{metric_type}: Consistency vs Dispersion Tradeoff', fontsize=11, fontweight='bold')
     ax.set_xlim(0, 1.05)
     ax.set_ylim(0, max(0.3, model_avg['d_std'].max() * 1.2))
     ax.grid(True, alpha=0.3)
@@ -790,9 +790,9 @@ for idx, metric_type in enumerate(['Overall', 'Semantic', 'Structural']):
                bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.3))
 
 plt.tight_layout()
-scatter_path = os.path.join(args.output_dir, 'cmean_vs_dstd_scatter.png')
+scatter_path = os.path.join(args.output_dir, 'Cmean_vs_sigma_scatter.png')
 save_figure(fig, scatter_path)
-plt.show()
+plt.close(fig)
 
 # ============================================================================
 # 2. Radar/Spider Chart: Multi-dimensional Model Comparison
@@ -849,7 +849,7 @@ ax.grid(True, alpha=0.3)
 plt.tight_layout()
 radar_path = os.path.join(args.output_dir, 'radar_model_comparison.png')
 save_figure(fig, radar_path)
-plt.show()
+plt.close(fig)
 
 # ============================================================================
 # 3. Box Plots: Distribution of Raw Similarities
@@ -879,16 +879,16 @@ for idx, metric_type in enumerate(['Overall', 'Semantic', 'Structural']):
         patch.set_alpha(0.7)
 
     ax.set_xlabel('Model', fontsize=10)
-    ax.set_ylabel('$C_{mean}$ Distribution', fontsize=10)
-    ax.set_title(f'{metric_type}: Consistency Distribution by Model', fontsize=11, fontweight='bold')
+    ax.set_ylabel('$C_{mean}$ (Consistency)', fontsize=10)
+    ax.set_title(f'{metric_type}: $C_{{mean}}$ Distribution by Model', fontsize=11, fontweight='bold')
     plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
     ax.set_ylim(0, 1.05)
     ax.grid(True, alpha=0.3, axis='y')
 
 plt.tight_layout()
-boxplot_path = os.path.join(args.output_dir, 'cmean_boxplots.png')
+boxplot_path = os.path.join(args.output_dir, 'Cmean_boxplots.png')
 save_figure(fig, boxplot_path)
-plt.show()
+plt.close(fig)
 
 # ============================================================================
 # 4. Heatmap: C_adj (Validity-Adjusted Consistency) by Model x Temperature
@@ -926,7 +926,7 @@ ax.set_yticklabels(cadj_pivot.index)
 
 # Add colorbar
 cbar = ax.figure.colorbar(im, ax=ax)
-cbar.ax.set_ylabel('$C_{adj}$ (Validity-Adjusted Consistency)', rotation=-90, va="bottom")
+cbar.ax.set_ylabel('$C_{adj} = r_v \\times C_{mean}$', rotation=-90, va="bottom")
 
 # Add text annotations
 for i in range(len(cadj_pivot.index)):
@@ -938,12 +938,12 @@ for i in range(len(cadj_pivot.index)):
 
 ax.set_xlabel('Temperature', fontsize=12)
 ax.set_ylabel('Model', fontsize=12)
-ax.set_title('$C_{adj} = r_v \\times C_{mean}$ (Validity-Adjusted Consistency)', fontsize=14, fontweight='bold')
+ax.set_title('$C_{adj} = r_v \\times C_{mean}$ (Adjusted Consistency)', fontsize=14, fontweight='bold')
 
 plt.tight_layout()
 cadj_heatmap_path = os.path.join(args.output_dir, 'cadj_heatmap.png')
 save_figure(fig, cadj_heatmap_path)
-plt.show()
+plt.close(fig)
 
 # ============================================================================
 # 5. Grouped Bar Chart: Structural vs Semantic Consistency
@@ -978,8 +978,8 @@ bars3 = ax.bar(x + width, [overall_data.get(m, 0) for m in common_models],
                width, label='Overall (Combined)', color='forestgreen', alpha=0.8)
 
 ax.set_xlabel('Model', fontsize=12)
-ax.set_ylabel('$C_{mean}$ (Mean Pairwise Consistency)', fontsize=12)
-ax.set_title('Structural vs Semantic Consistency by Model', fontsize=14, fontweight='bold')
+ax.set_ylabel('$C_{mean}$ (Consistency)', fontsize=12)
+ax.set_title('Structural vs Semantic $C_{mean}$ by Model', fontsize=14, fontweight='bold')
 ax.set_xticks(x)
 ax.set_xticklabels(common_models, rotation=45, ha='right')
 ax.legend(loc='upper right')
@@ -1003,7 +1003,7 @@ add_labels(bars3)
 plt.tight_layout()
 grouped_bar_path = os.path.join(args.output_dir, 'structural_vs_semantic_bars.png')
 save_figure(fig, grouped_bar_path)
-plt.show()
+plt.close(fig)
 
 # ============================================================================
 # 6. Pareto Frontier: C_adj vs S_α (Identifying Optimal Models)
@@ -1060,9 +1060,9 @@ if len(pareto_points) > 1:
     ax.scatter(pareto_points['c_adj'], pareto_points['stability_score'],
               s=100, facecolors='none', edgecolors='green', linewidth=2)
 
-ax.set_xlabel('$C_{adj}$ (Validity-Adjusted Consistency)', fontsize=12)
-ax.set_ylabel('$S_\\alpha$ (Stability Score)', fontsize=12)
-ax.set_title('Pareto Frontier: Consistency $\\times$ Stability', fontsize=14, fontweight='bold')
+ax.set_xlabel('$C_{adj} = r_v \\times C_{mean}$ (Adjusted Consistency)', fontsize=12)
+ax.set_ylabel('$S_\\alpha$ (Stability)', fontsize=12)
+ax.set_title('Pareto Frontier: $C_{adj}$ vs $S_\\alpha$', fontsize=14, fontweight='bold')
 ax.set_xlim(0, 1.05)
 ax.set_ylim(0, 1.05)
 ax.grid(True, alpha=0.3)
@@ -1081,7 +1081,7 @@ ax.annotate('Low Consistency\nLow Stability',
 plt.tight_layout()
 pareto_path = os.path.join(args.output_dir, 'pareto_frontier.png')
 save_figure(fig, pareto_path)
-plt.show()
+plt.close(fig)
 
 # ============================================================================
 # 7. Ranking Score Heatmap (R = r_v * C_mean * S_α)
@@ -1126,208 +1126,410 @@ for i in range(len(ranking_pivot.index)):
 
 ax.set_xlabel('Temperature', fontsize=12)
 ax.set_ylabel('Model', fontsize=12)
-ax.set_title('$R = r_v \\times C_{mean} \\times S_\\alpha$ (Combined Ranking Score)', fontsize=14, fontweight='bold')
+ax.set_title('$R = r_v \\times C_{mean} \\times S_\\alpha$ (Ranking Score)', fontsize=14, fontweight='bold')
 
 plt.tight_layout()
-ranking_heatmap_path = os.path.join(args.output_dir, 'ranking_score_heatmap.png')
+ranking_heatmap_path = os.path.join(args.output_dir, 'R_heatmap.png')
 save_figure(fig, ranking_heatmap_path)
-plt.show()
+plt.close(fig)
 
 # Save pivot tables as CSV
 cadj_pivot.to_csv(os.path.join(args.output_dir, 'cadj_by_temperature.csv'))
-ranking_pivot.to_csv(os.path.join(args.output_dir, 'ranking_score_by_temperature.csv'))
+ranking_pivot.to_csv(os.path.join(args.output_dir, 'R_by_temperature.csv'))
 
 # ============================================================================
-# NEW: C_mean and Scalability Score by Model and Temperature
+# SECTION 3.7: CONSISTENCY AGGREGATION (per ICML paper)
+# ============================================================================
+# This section implements the aggregation metrics from Section 3.7:
+#   - C_mean: Average pairwise STED similarity (2/m(m-1) * sum(s_ij))
+#   - r_v: Validity rate (fraction of parseable outputs = m/n)
+#   - S_alpha: Stability Score = (1/(1 + 2*sigma_hat))^alpha
+#     where sigma_hat = sigma / sigma_max, sigma_max = 0.5
+#   - R: Ranking Score = r_v * C_mean * S_alpha
 # ============================================================================
 print("\n" + "="*80)
-print("C_MEAN AND SCALABILITY SCORE BY MODEL AND TEMPERATURE")
+print("SECTION 3.7: CONSISTENCY AGGREGATION METRICS BY TYPE")
 print("="*80)
 
-# Create C_mean pivot table for each model at each temperature
-cmean_pivot = overall_metrics.pivot_table(
-    values='c_mean',
-    index='model',
-    columns='temperature',
-    aggfunc='mean'
-).round(4)
+def calculate_metrics_by_type(metrics_subset, metric_type_name):
+    """
+    Calculate consistency aggregation metrics per ICML paper Section 3.7.
 
-# Sort by mean C_mean
-cmean_pivot = cmean_pivot.loc[cmean_pivot.mean(axis=1).sort_values(ascending=False).index]
+    Metrics computed:
+    - C_mean: Mean pairwise consistency ("how similar are two random runs?")
+    - r_v: Validity rate (fraction of successful parses)
+    - S_alpha: Stability score with power transformation (alpha=20)
+    - R: Ranking score = r_v * C_mean * S_alpha
+    """
 
-# Create stability score pivot table
-stability_pivot = overall_metrics.pivot_table(
-    values='stability_score',
-    index='model',
-    columns='temperature',
-    aggfunc='mean'
-).round(4)
-stability_pivot = stability_pivot.loc[cmean_pivot.index]  # Same order
+    # Create C_mean pivot table for each model at each temperature
+    cmean_pivot = metrics_subset.pivot_table(
+        values='c_mean',
+        index='model',
+        columns='temperature',
+        aggfunc='mean'
+    ).round(4)
 
-# Calculate Scalability Score: ratio of high-temp to low-temp consistency
-# Higher scalability = better at maintaining consistency across temperatures
-# Formula: S_scalability = C_mean(T=0.9) / C_mean(T=0.1) * (1 - decay_penalty)
-# Or simply: S_scalability = mean(C_mean across all temps) / C_mean(T=0.1)
+    # Sort by mean C_mean
+    cmean_pivot = cmean_pivot.loc[cmean_pivot.mean(axis=1).sort_values(ascending=False).index]
 
-scalability_results = []
-for model in cmean_pivot.index:
-    model_data = overall_metrics[overall_metrics['model'] == model]
+    # Create stability score pivot table
+    stability_pivot = metrics_subset.pivot_table(
+        values='stability_score',
+        index='model',
+        columns='temperature',
+        aggfunc='mean'
+    ).round(4)
+    stability_pivot = stability_pivot.reindex(cmean_pivot.index)
 
-    # Get C_mean at different temperatures
-    cmean_t01 = model_data[model_data['temperature'] == 0.1]['c_mean'].mean() if 0.1 in model_data['temperature'].values else np.nan
-    cmean_t05 = model_data[model_data['temperature'] == 0.5]['c_mean'].mean() if 0.5 in model_data['temperature'].values else np.nan
-    cmean_t09 = model_data[model_data['temperature'] == 0.9]['c_mean'].mean() if 0.9 in model_data['temperature'].values else np.nan
-    cmean_t10 = model_data[model_data['temperature'] == 1.0]['c_mean'].mean() if 1.0 in model_data['temperature'].values else np.nan
-    cmean_mean = model_data['c_mean'].mean()
+    # Create ranking score pivot table
+    ranking_pivot = metrics_subset.pivot_table(
+        values='ranking_score',
+        index='model',
+        columns='temperature',
+        aggfunc='mean'
+    ).round(4)
+    ranking_pivot = ranking_pivot.reindex(cmean_pivot.index)
 
-    # Get stability scores at different temperatures
-    stability_t01 = model_data[model_data['temperature'] == 0.1]['stability_score'].mean() if 0.1 in model_data['temperature'].values else np.nan
-    stability_t05 = model_data[model_data['temperature'] == 0.5]['stability_score'].mean() if 0.5 in model_data['temperature'].values else np.nan
-    stability_t09 = model_data[model_data['temperature'] == 0.9]['stability_score'].mean() if 0.9 in model_data['temperature'].values else np.nan
-    stability_t10 = model_data[model_data['temperature'] == 1.0]['stability_score'].mean() if 1.0 in model_data['temperature'].values else np.nan
-    stability_mean = model_data['stability_score'].mean()
+    # Create r_v (validity rate) pivot table - Section 3.7 metric
+    rv_pivot = metrics_subset.pivot_table(
+        values='r_v',
+        index='model',
+        columns='temperature',
+        aggfunc='mean'
+    ).round(4)
+    rv_pivot = rv_pivot.reindex(cmean_pivot.index)
 
-    # Calculate scalability metrics
-    # 1. Retention ratio: how much consistency is retained at high temp vs low temp
-    retention_09_01 = cmean_t09 / cmean_t01 if cmean_t01 > 0 else np.nan
-    retention_10_01 = cmean_t10 / cmean_t01 if cmean_t01 > 0 else np.nan
+    # Calculate scalability metrics for each model
+    scalability_results = []
+    for model in cmean_pivot.index:
+        model_data = metrics_subset[metrics_subset['model'] == model]
 
-    # 2. Decay rate: normalized decay from T=0.1 to T=0.9
-    decay_rate = (cmean_t01 - cmean_t09) / cmean_t01 if cmean_t01 > 0 else np.nan
+        # Get r_v (validity rate) at different temperatures - Section 3.7
+        rv_t01 = model_data[model_data['temperature'] == 0.1]['r_v'].mean() if 0.1 in model_data['temperature'].values else np.nan
+        rv_t05 = model_data[model_data['temperature'] == 0.5]['r_v'].mean() if 0.5 in model_data['temperature'].values else np.nan
+        rv_t09 = model_data[model_data['temperature'] == 0.9]['r_v'].mean() if 0.9 in model_data['temperature'].values else np.nan
+        rv_t10 = model_data[model_data['temperature'] == 1.0]['r_v'].mean() if 1.0 in model_data['temperature'].values else np.nan
+        rv_mean = model_data['r_v'].mean()
 
-    # 3. Scalability score: combines mean consistency with retention
-    # Higher = more consistent AND maintains that consistency at high temps
-    scalability_score = cmean_mean * retention_09_01 if not np.isnan(retention_09_01) else np.nan
+        # Get C_mean at different temperatures
+        cmean_t01 = model_data[model_data['temperature'] == 0.1]['c_mean'].mean() if 0.1 in model_data['temperature'].values else np.nan
+        cmean_t05 = model_data[model_data['temperature'] == 0.5]['c_mean'].mean() if 0.5 in model_data['temperature'].values else np.nan
+        cmean_t09 = model_data[model_data['temperature'] == 0.9]['c_mean'].mean() if 0.9 in model_data['temperature'].values else np.nan
+        cmean_t10 = model_data[model_data['temperature'] == 1.0]['c_mean'].mean() if 1.0 in model_data['temperature'].values else np.nan
+        cmean_mean = model_data['c_mean'].mean()
 
-    # 4. Temperature robustness: 1 - coefficient of variation across temperatures
-    temp_cv = model_data.groupby('temperature')['c_mean'].mean().std() / cmean_mean if cmean_mean > 0 else np.nan
-    temp_robustness = 1 - temp_cv if not np.isnan(temp_cv) else np.nan
+        # Get stability scores at different temperatures
+        stability_t01 = model_data[model_data['temperature'] == 0.1]['stability_score'].mean() if 0.1 in model_data['temperature'].values else np.nan
+        stability_t05 = model_data[model_data['temperature'] == 0.5]['stability_score'].mean() if 0.5 in model_data['temperature'].values else np.nan
+        stability_t09 = model_data[model_data['temperature'] == 0.9]['stability_score'].mean() if 0.9 in model_data['temperature'].values else np.nan
+        stability_t10 = model_data[model_data['temperature'] == 1.0]['stability_score'].mean() if 1.0 in model_data['temperature'].values else np.nan
+        stability_mean = model_data['stability_score'].mean()
 
-    scalability_results.append({
-        'model': model,
-        'c_mean_T0.1': cmean_t01,
-        'c_mean_T0.5': cmean_t05,
-        'c_mean_T0.9': cmean_t09,
-        'c_mean_T1.0': cmean_t10,
-        'c_mean_avg': cmean_mean,
-        'stability_T0.1': stability_t01,
-        'stability_T0.5': stability_t05,
-        'stability_T0.9': stability_t09,
-        'stability_T1.0': stability_t10,
-        'stability_avg': stability_mean,
-        'retention_ratio_0.9/0.1': retention_09_01,
-        'retention_ratio_1.0/0.1': retention_10_01,
-        'decay_rate': decay_rate,
-        'scalability_score': scalability_score,
-        'temp_robustness': temp_robustness
-    })
+        # Get ranking scores at different temperatures
+        ranking_t01 = model_data[model_data['temperature'] == 0.1]['ranking_score'].mean() if 0.1 in model_data['temperature'].values else np.nan
+        ranking_t05 = model_data[model_data['temperature'] == 0.5]['ranking_score'].mean() if 0.5 in model_data['temperature'].values else np.nan
+        ranking_t09 = model_data[model_data['temperature'] == 0.9]['ranking_score'].mean() if 0.9 in model_data['temperature'].values else np.nan
+        ranking_t10 = model_data[model_data['temperature'] == 1.0]['ranking_score'].mean() if 1.0 in model_data['temperature'].values else np.nan
+        ranking_mean = model_data['ranking_score'].mean()
 
-scalability_df = pd.DataFrame(scalability_results)
-scalability_df = scalability_df.sort_values('scalability_score', ascending=False)
+        # Calculate scalability metrics
+        retention_09_01 = cmean_t09 / cmean_t01 if cmean_t01 > 0 else np.nan
+        retention_10_01 = cmean_t10 / cmean_t01 if cmean_t01 > 0 else np.nan
+        decay_rate = (cmean_t01 - cmean_t09) / cmean_t01 if cmean_t01 > 0 else np.nan
+        scalability_score = cmean_mean * retention_09_01 if not np.isnan(retention_09_01) else np.nan
+        temp_cv = model_data.groupby('temperature')['c_mean'].mean().std() / cmean_mean if cmean_mean > 0 else np.nan
+        temp_robustness = 1 - temp_cv if not np.isnan(temp_cv) else np.nan
 
-# Print summary table
-print("\n=== C_mean by Temperature ===")
-print(cmean_pivot.to_string())
+        scalability_results.append({
+            'model': model,
+            'metric_type': metric_type_name,
+            # Section 3.7 Core Metrics: r_v (validity rate)
+            'r_v_T0.1': rv_t01,
+            'r_v_T0.5': rv_t05,
+            'r_v_T0.9': rv_t09,
+            'r_v_T1.0': rv_t10,
+            'r_v_avg': rv_mean,
+            # Section 3.7 Core Metrics: C_mean (mean pairwise consistency)
+            'c_mean_T0.1': cmean_t01,
+            'c_mean_T0.5': cmean_t05,
+            'c_mean_T0.9': cmean_t09,
+            'c_mean_T1.0': cmean_t10,
+            'c_mean_avg': cmean_mean,
+            # Section 3.7 Core Metrics: S_alpha (stability score)
+            'stability_T0.1': stability_t01,
+            'stability_T0.5': stability_t05,
+            'stability_T0.9': stability_t09,
+            'stability_T1.0': stability_t10,
+            'stability_avg': stability_mean,
+            # Section 3.7 Core Metrics: R = r_v * C_mean * S_alpha (ranking score)
+            'ranking_T0.1': ranking_t01,
+            'ranking_T0.5': ranking_t05,
+            'ranking_T0.9': ranking_t09,
+            'ranking_T1.0': ranking_t10,
+            'ranking_avg': ranking_mean,
+            # Scalability metrics (temperature robustness analysis)
+            'retention_ratio_0.9/0.1': retention_09_01,
+            'retention_ratio_1.0/0.1': retention_10_01,
+            'decay_rate': decay_rate,
+            'scalability_score': scalability_score,
+            'temp_robustness': temp_robustness
+        })
 
-print("\n=== Stability Score by Temperature ===")
-print(stability_pivot.to_string())
+    scalability_df = pd.DataFrame(scalability_results)
+    scalability_df = scalability_df.sort_values('scalability_score', ascending=False)
 
-print("\n=== Scalability Metrics Summary ===")
-print(f"{'Model':<25} {'C_mean(T=0.1)':<14} {'C_mean(T=0.9)':<14} {'Retention':<12} {'Scalability':<12} {'Robustness':<12}")
-print("-" * 95)
-for _, row in scalability_df.iterrows():
-    print(f"{row['model']:<25} {row['c_mean_T0.1']:.4f}        {row['c_mean_T0.9']:.4f}        {row['retention_ratio_0.9/0.1']:.4f}       {row['scalability_score']:.4f}       {row['temp_robustness']:.4f}")
+    return cmean_pivot, stability_pivot, ranking_pivot, rv_pivot, scalability_df
 
-# Save to CSV
-cmean_pivot.to_csv(os.path.join(args.output_dir, 'cmean_by_temperature.csv'))
-stability_pivot.to_csv(os.path.join(args.output_dir, 'stability_by_temperature.csv'))
-scalability_df.to_csv(os.path.join(args.output_dir, 'scalability_metrics.csv'), index=False)
+# Process each metric type
+all_scalability_results = []
+for metric_type in ['Overall', 'Semantic', 'Structural']:
+    print(f"\n{'='*80}")
+    print(f"{metric_type.upper()} METRICS (Section 3.7 Consistency Aggregation)")
+    print("="*80)
 
-print(f"\nSaved: cmean_by_temperature.csv")
-print(f"Saved: stability_by_temperature.csv")
-print(f"Saved: scalability_metrics.csv")
+    metric_subset = metrics_df[metrics_df['metric_type'] == metric_type]
 
-# Create visualization: C_mean heatmap
-print("\nCreating C_mean heatmap...")
-n_models_cmean = len(cmean_pivot)
-fig_height_cmean = max(6, min(12, n_models_cmean * 0.5 + 2))
-fig, ax = plt.subplots(figsize=(14, fig_height_cmean))
-im = ax.imshow(cmean_pivot.values, cmap='RdYlGn', aspect='auto', vmin=0, vmax=1)
+    cmean_pivot, stability_pivot, ranking_pivot, rv_pivot, scalability_df = calculate_metrics_by_type(
+        metric_subset, metric_type
+    )
 
-ax.set_xticks(np.arange(len(cmean_pivot.columns)))
-ax.set_yticks(np.arange(len(cmean_pivot.index)))
-ax.set_xticklabels([f'{t:.1f}' for t in cmean_pivot.columns])
-ax.set_yticklabels(cmean_pivot.index)
+    # Print summary tables (Section 3.7 metrics)
+    print(f"\n=== {metric_type} r_v (Validity Rate) by Temperature ===")
+    print(rv_pivot.to_string())
 
-cbar = ax.figure.colorbar(im, ax=ax)
-cbar.ax.set_ylabel('$C_{mean}$ (Mean Pairwise Consistency)', rotation=-90, va="bottom")
+    print(f"\n=== {metric_type} C_mean (Mean Pairwise Consistency) by Temperature ===")
+    print(cmean_pivot.to_string())
 
-for i in range(len(cmean_pivot.index)):
-    for j in range(len(cmean_pivot.columns)):
-        val = cmean_pivot.iloc[i, j]
-        if not np.isnan(val):
-            text_color = 'white' if val < 0.5 else 'black'
-            ax.text(j, i, f'{val:.3f}', ha='center', va='center', color=text_color, fontsize=7)
+    print(f"\n=== {metric_type} S_alpha (Stability Score) by Temperature ===")
+    print(stability_pivot.to_string())
 
-ax.set_xlabel('Temperature', fontsize=12)
-ax.set_ylabel('Model', fontsize=12)
-ax.set_title('$C_{mean}$ (Mean Pairwise Consistency) by Model and Temperature', fontsize=14, fontweight='bold')
+    print(f"\n=== {metric_type} R (Ranking Score = r_v * C_mean * S_alpha) by Temperature ===")
+    print(ranking_pivot.to_string())
 
-plt.tight_layout()
-cmean_heatmap_path = os.path.join(args.output_dir, 'cmean_heatmap.png')
-save_figure(fig, cmean_heatmap_path)
-plt.show()
+    print(f"\n=== {metric_type} Section 3.7 Aggregation Summary ===")
+    print(f"{'Model':<25} {'r_v(avg)':<10} {'C_mean(avg)':<12} {'S_alpha(avg)':<12} {'R(avg)':<12}")
+    print("-" * 80)
+    for _, row in scalability_df.iterrows():
+        rv_avg = row.get('r_v_avg', np.nan)
+        cmean_avg = row['c_mean_avg']
+        stability_avg = row['stability_avg']
+        ranking_avg = row['ranking_avg']
+        print(f"{row['model']:<25} {rv_avg:.4f}    {cmean_avg:.4f}       {stability_avg:.4f}       {ranking_avg:.4f}")
 
-# Create visualization: Scalability comparison bar chart
-print("Creating scalability comparison chart...")
-fig, ax = plt.subplots(figsize=(14, 8))
+    # Save to CSV
+    metric_type_lower = metric_type.lower()
+    rv_pivot.to_csv(os.path.join(args.output_dir, f'rv_by_temperature_{metric_type_lower}.csv'))
+    cmean_pivot.to_csv(os.path.join(args.output_dir, f'Cmean_by_temperature_{metric_type_lower}.csv'))
+    stability_pivot.to_csv(os.path.join(args.output_dir, f'S_alpha_by_temperature_{metric_type_lower}.csv'))
+    ranking_pivot.to_csv(os.path.join(args.output_dir, f'R_by_temperature_{metric_type_lower}.csv'))
+    scalability_df.to_csv(os.path.join(args.output_dir, f'scalability_metrics_{metric_type_lower}.csv'), index=False)
 
-# Sort by scalability score
-scalability_sorted = scalability_df.sort_values('scalability_score', ascending=True)
+    print(f"\nSaved: rv_by_temperature_{metric_type_lower}.csv")
+    print(f"Saved: Cmean_by_temperature_{metric_type_lower}.csv")
+    print(f"Saved: S_alpha_by_temperature_{metric_type_lower}.csv")
+    print(f"Saved: R_by_temperature_{metric_type_lower}.csv")
+    print(f"Saved: scalability_metrics_{metric_type_lower}.csv")
 
-colors = plt.cm.RdYlGn(scalability_sorted['scalability_score'].values / scalability_sorted['scalability_score'].max())
-bars = ax.barh(scalability_sorted['model'], scalability_sorted['scalability_score'],
-               color=colors, edgecolor='black', linewidth=0.5)
+    # Collect for combined analysis
+    all_scalability_results.append(scalability_df)
 
-ax.set_xlabel('Scalability Score ($C_{mean}^{avg} \\times$ Retention Ratio)', fontsize=12)
-ax.set_ylabel('Model', fontsize=12)
-ax.set_title('Model Scalability: Consistency Retention Across Temperatures', fontsize=14, fontweight='bold')
-ax.grid(True, alpha=0.3, axis='x')
+    # Create visualization: C_mean bar chart for this metric type
+    print(f"\nCreating {metric_type} C_mean bar chart...")
+    cmean_avg = cmean_pivot.mean(axis=1).sort_values(ascending=True)
+    n_models_cmean = len(cmean_avg)
+    fig_height_cmean = max(6, n_models_cmean * 0.4 + 1)
+    fig, ax = plt.subplots(figsize=(10, fig_height_cmean))
 
-# Add value labels
-for bar, val in zip(bars, scalability_sorted['scalability_score']):
-    if not np.isnan(val):
+    colors = plt.cm.RdYlGn(cmean_avg.values / max(cmean_avg.max(), 0.01))
+    bars = ax.barh(range(n_models_cmean), cmean_avg.values, color=colors, edgecolor='black', linewidth=0.5)
+
+    ax.set_yticks(range(n_models_cmean))
+    ax.set_yticklabels([f'{i+1}. {m}' for i, m in enumerate(reversed(cmean_avg.index))], fontsize=11)
+    ax.invert_yaxis()  # Top rank at top
+
+    # Add value labels
+    for i, (bar, val) in enumerate(zip(bars, cmean_avg.values)):
         ax.text(val + 0.01, bar.get_y() + bar.get_height()/2, f'{val:.3f}',
-               va='center', fontsize=8)
+                va='center', fontsize=10, fontweight='bold')
 
+    ax.set_xlabel('$C_{mean}$ (Average across temperatures)', fontsize=12)
+    ax.set_title(f'{metric_type} $C_{{mean}}$ Model Ranking', fontsize=14, fontweight='bold')
+    ax.set_xlim(0, 1.1)
+    ax.grid(True, alpha=0.3, axis='x')
+
+    plt.tight_layout()
+    cmean_bar_path = os.path.join(args.output_dir, f'Cmean_ranking_{metric_type_lower}.png')
+    save_figure(fig, cmean_bar_path)
+    plt.close(fig)
+
+    # Create visualization: R (Ranking Score) bar chart for this metric type
+    print(f"Creating {metric_type} R (Ranking Score) bar chart...")
+    ranking_avg = ranking_pivot.mean(axis=1).sort_values(ascending=True)
+    n_models_r = len(ranking_avg)
+    fig_height_r = max(6, n_models_r * 0.4 + 1)
+    fig, ax = plt.subplots(figsize=(10, fig_height_r))
+
+    colors = plt.cm.RdYlGn(ranking_avg.values / max(ranking_avg.max(), 0.01))
+    bars = ax.barh(range(n_models_r), ranking_avg.values, color=colors, edgecolor='black', linewidth=0.5)
+
+    ax.set_yticks(range(n_models_r))
+    ax.set_yticklabels([f'{i+1}. {m}' for i, m in enumerate(reversed(ranking_avg.index))], fontsize=11)
+    ax.invert_yaxis()
+
+    for i, (bar, val) in enumerate(zip(bars, ranking_avg.values)):
+        ax.text(val + 0.01, bar.get_y() + bar.get_height()/2, f'{val:.3f}',
+                va='center', fontsize=10, fontweight='bold')
+
+    ax.set_xlabel('$R = r_v \\times C_{mean} \\times S_\\alpha$ (Average)', fontsize=12)
+    ax.set_title(f'{metric_type} Ranking Score ($R$) Model Ranking', fontsize=14, fontweight='bold')
+    ax.set_xlim(0, 1.1)
+    ax.grid(True, alpha=0.3, axis='x')
+
+    plt.tight_layout()
+    r_bar_path = os.path.join(args.output_dir, f'R_ranking_{metric_type_lower}.png')
+    save_figure(fig, r_bar_path)
+    plt.close(fig)
+
+    # Create visualization: S_alpha (Stability Score) bar chart for this metric type
+    print(f"Creating {metric_type} S_alpha (Stability Score) bar chart...")
+    stability_avg = stability_pivot.mean(axis=1).sort_values(ascending=True)
+    n_models_s = len(stability_avg)
+    fig_height_s = max(6, n_models_s * 0.4 + 1)
+    fig, ax = plt.subplots(figsize=(10, fig_height_s))
+
+    colors = plt.cm.RdYlGn(stability_avg.values / max(stability_avg.max(), 0.01))
+    bars = ax.barh(range(n_models_s), stability_avg.values, color=colors, edgecolor='black', linewidth=0.5)
+
+    ax.set_yticks(range(n_models_s))
+    ax.set_yticklabels([f'{i+1}. {m}' for i, m in enumerate(reversed(stability_avg.index))], fontsize=11)
+    ax.invert_yaxis()
+
+    for i, (bar, val) in enumerate(zip(bars, stability_avg.values)):
+        ax.text(val + 0.01, bar.get_y() + bar.get_height()/2, f'{val:.3f}',
+                va='center', fontsize=10, fontweight='bold')
+
+    ax.set_xlabel('$S_\\alpha$ (Average across temperatures)', fontsize=12)
+    ax.set_title(f'{metric_type} $S_\\alpha$ (Stability) Model Ranking', fontsize=14, fontweight='bold')
+    ax.set_xlim(0, 1.1)
+    ax.grid(True, alpha=0.3, axis='x')
+
+    plt.tight_layout()
+    s_bar_path = os.path.join(args.output_dir, f'S_alpha_ranking_{metric_type_lower}.png')
+    save_figure(fig, s_bar_path)
+    plt.close(fig)
+
+    # Create visualization: r_v (Validity Rate) bar chart for this metric type
+    print(f"Creating {metric_type} r_v (Validity Rate) bar chart...")
+    rv_avg = rv_pivot.mean(axis=1).sort_values(ascending=True)
+    n_models_rv = len(rv_avg)
+    fig_height_rv = max(6, n_models_rv * 0.4 + 1)
+    fig, ax = plt.subplots(figsize=(10, fig_height_rv))
+
+    colors = plt.cm.RdYlGn(rv_avg.values)
+    bars = ax.barh(range(n_models_rv), rv_avg.values, color=colors, edgecolor='black', linewidth=0.5)
+
+    ax.set_yticks(range(n_models_rv))
+    ax.set_yticklabels([f'{i+1}. {m}' for i, m in enumerate(reversed(rv_avg.index))], fontsize=11)
+    ax.invert_yaxis()
+
+    for i, (bar, val) in enumerate(zip(bars, rv_avg.values)):
+        ax.text(val + 0.01, bar.get_y() + bar.get_height()/2, f'{val:.1%}',
+                va='center', fontsize=10, fontweight='bold')
+
+    ax.set_xlabel('$r_v$ (Validity Rate, Average)', fontsize=12)
+    ax.set_title(f'{metric_type} $r_v$ (Validity) Model Ranking', fontsize=14, fontweight='bold')
+    ax.set_xlim(0, 1.15)
+    ax.axvline(x=0.9, color='red', linestyle='--', alpha=0.5, label='90% threshold')
+    ax.legend(loc='lower right')
+    ax.grid(True, alpha=0.3, axis='x')
+
+    plt.tight_layout()
+    rv_bar_path = os.path.join(args.output_dir, f'rv_ranking_{metric_type_lower}.png')
+    save_figure(fig, rv_bar_path)
+    plt.close(fig)
+
+    print(f"Saved: Cmean_ranking_{metric_type_lower}.png")
+    print(f"Saved: R_ranking_{metric_type_lower}.png")
+    print(f"Saved: S_alpha_ranking_{metric_type_lower}.png")
+    print(f"Saved: rv_ranking_{metric_type_lower}.png")
+
+# Combine all scalability results
+combined_scalability = pd.concat(all_scalability_results, ignore_index=True)
+combined_scalability.to_csv(os.path.join(args.output_dir, 'scalability_metrics_all.csv'), index=False)
+print(f"\nSaved: scalability_metrics_all.csv (all metric types combined)")
+
+# Create comparison visualization: Scalability by metric type
+print("\nCreating scalability comparison chart by metric type...")
+fig, axes = plt.subplots(1, 3, figsize=(18, 8))
+
+for idx, metric_type in enumerate(['Overall', 'Semantic', 'Structural']):
+    ax = axes[idx]
+    subset = combined_scalability[combined_scalability['metric_type'] == metric_type]
+    subset_sorted = subset.sort_values('scalability_score', ascending=True)
+
+    colors = plt.cm.RdYlGn(subset_sorted['scalability_score'].values / max(subset_sorted['scalability_score'].max(), 0.01))
+    bars = ax.barh(subset_sorted['model'], subset_sorted['scalability_score'],
+                   color=colors, edgecolor='black', linewidth=0.5)
+
+    ax.set_xlabel('Scalability Score', fontsize=10)
+    if idx == 0:
+        ax.set_ylabel('Model', fontsize=10)
+    ax.set_title(f'{metric_type}', fontsize=12, fontweight='bold')
+    ax.grid(True, alpha=0.3, axis='x')
+    ax.set_xlim(0, 1)
+
+    # Add value labels
+    for bar, val in zip(bars, subset_sorted['scalability_score']):
+        if not np.isnan(val):
+            ax.text(val + 0.01, bar.get_y() + bar.get_height()/2, f'{val:.2f}',
+                   va='center', fontsize=7)
+
+plt.suptitle('Scalability Score by Metric Type ($C_{mean}^{avg} \\times$ Retention Ratio)', fontsize=14, fontweight='bold')
 plt.tight_layout()
-scalability_bar_path = os.path.join(args.output_dir, 'scalability_comparison.png')
-save_figure(fig, scalability_bar_path)
-plt.show()
+scalability_comparison_path = os.path.join(args.output_dir, 'scalability_comparison_by_type.png')
+save_figure(fig, scalability_comparison_path)
+plt.close(fig)
 
-print(f"Saved: cmean_heatmap.png")
-print(f"Saved: scalability_comparison.png")
+# Create comparison visualization: Ranking score by metric type
+print("Creating ranking score comparison chart by metric type...")
+fig, axes = plt.subplots(1, 3, figsize=(18, 8))
+
+for idx, metric_type in enumerate(['Overall', 'Semantic', 'Structural']):
+    ax = axes[idx]
+    subset = combined_scalability[combined_scalability['metric_type'] == metric_type]
+    subset_sorted = subset.sort_values('ranking_avg', ascending=True)
+
+    colors = plt.cm.RdYlGn(subset_sorted['ranking_avg'].values / max(subset_sorted['ranking_avg'].max(), 0.01))
+    bars = ax.barh(subset_sorted['model'], subset_sorted['ranking_avg'],
+                   color=colors, edgecolor='black', linewidth=0.5)
+
+    ax.set_xlabel('Ranking Score (avg)', fontsize=10)
+    if idx == 0:
+        ax.set_ylabel('Model', fontsize=10)
+    ax.set_title(f'{metric_type}', fontsize=12, fontweight='bold')
+    ax.grid(True, alpha=0.3, axis='x')
+    ax.set_xlim(0, 1)
+
+    # Add value labels
+    for bar, val in zip(bars, subset_sorted['ranking_avg']):
+        if not np.isnan(val):
+            ax.text(val + 0.01, bar.get_y() + bar.get_height()/2, f'{val:.2f}',
+                   va='center', fontsize=7)
+
+plt.suptitle('Ranking Score by Metric Type ($R = r_v \\times C_{mean} \\times S_\\alpha$)', fontsize=14, fontweight='bold')
+plt.tight_layout()
+ranking_comparison_path = os.path.join(args.output_dir, 'ranking_comparison_by_type.png')
+save_figure(fig, ranking_comparison_path)
+plt.close(fig)
+
+print(f"\nSaved: scalability_comparison_by_type.png")
+print(f"Saved: ranking_comparison_by_type.png")
 
 # ============================================================================
-# 8. Appendix Figure: Stability Distribution + Key Models Temperature Curves
+# 8. Appendix Figures: Stability Distribution + Temperature Curves (SEPARATE)
 # ============================================================================
-print("\n8. Creating appendix stability distribution figure...")
-
-# Define key representative models for panel (b)
-KEY_MODELS = [
-    'Claude-Opus-4.5',      # Most powerful proprietary
-    'Qwen3-235B-A22B',      # Most powerful open source
-    'GPT-4.1-Mini',         # Cost-effective option
-    'Grok-4.1-Fast',        # Fast inference
-    'Nova-2-Lite',          # AWS option
-]
-
-# Filter to models that exist in the dataset
-available_models = df['model'].unique()
-key_models_available = [m for m in KEY_MODELS if m in available_models]
-
-# Create two-panel figure
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5), gridspec_kw={'width_ratios': [1.2, 1]})
+print("\n8. Creating appendix stability figures (separate)...")
 
 # Panel (a): Box plots of stability score by model
 overall_df = df[df['metric_type'] == 'Overall']
@@ -1341,15 +1543,26 @@ if args.top_n_boxplot and args.top_n_boxplot < len(sorted_models):
     sorted_models = sorted_models[:args.top_n_boxplot]
     print(f"  Showing top {args.top_n_boxplot} models in boxplot")
 
+n_models_box = len(sorted_models)
+
+# ============================================================================
+# 8a. FIGURE 1: Box plots showing stability distribution for all models
+# ============================================================================
+print("  Creating stability distribution boxplot (all models)...")
+
+# Calculate figure height based on number of models
+fig_height_box = max(8, n_models_box * 0.45 + 2)
+
+fig1, ax1 = plt.subplots(figsize=(10, fig_height_box))
+
 # Create box plot data
 box_data = [overall_df[overall_df['model'] == m]['consistency_score'].values for m in sorted_models]
 
 # Create gradient colors (red to green based on rank)
-n_models_box = len(sorted_models)
 gradient_colors = plt.cm.RdYlGn(np.linspace(0.2, 0.8, n_models_box))
 
-bp = ax1.boxplot(box_data, labels=sorted_models, patch_artist=True,
-                 showfliers=True, flierprops={'marker': 'o', 'markersize': 2, 'alpha': 0.5},
+bp = ax1.boxplot(box_data, labels=sorted_models, patch_artist=True, vert=False,
+                 showfliers=True, flierprops={'marker': 'o', 'markersize': 3, 'alpha': 0.5},
                  medianprops={'color': 'red', 'linewidth': 1.5})
 
 # Color boxes with gradient
@@ -1357,31 +1570,23 @@ for patch, color in zip(bp['boxes'], gradient_colors):
     patch.set_facecolor(color)
     patch.set_alpha(0.8)
 
-ax1.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5, linewidth=1)
-ax1.set_xlabel('Model', fontsize=10)
-ax1.set_ylabel('Stability Score ($S_\\alpha$)', fontsize=10)
-ax1.set_title('(a) Stability Score Distribution by Model', fontsize=11, fontweight='bold')
-plt.setp(ax1.get_xticklabels(), rotation=45, ha='right')
-ax1.set_ylim(0, 1.05)
-ax1.grid(True, alpha=0.3, axis='y')
+ax1.axvline(x=1.0, color='gray', linestyle='--', alpha=0.5, linewidth=1)
+ax1.set_ylabel('Model', fontsize=12)
+ax1.set_xlabel('$S_\\alpha$ (Stability Score)', fontsize=12)
+ax1.set_title('$S_\\alpha$ Distribution by Model (All Models)', fontsize=13, fontweight='bold')
+ax1.set_xlim(0, 1.05)
+ax1.grid(True, alpha=0.3, axis='x')
+ax1.tick_params(axis='y', labelsize=11)
 
-# Panel (b): Line plot showing key models' consistency vs temperature
-# Define colors for key models
-key_model_colors = {
-    'Claude-Opus-4.5': '#E63946',      # Red
-    'Qwen3-235B-A22B': '#457B9D',      # Blue
-    'GPT-4.1-Mini': '#2A9D8F',         # Teal
-    'Grok-4.1-Fast': '#E9C46A',        # Yellow
-    'Nova-2-Lite': '#9B5DE5',          # Purple
-}
+plt.tight_layout()
+boxplot_path = os.path.join(args.output_dir, 'appendix_stability_boxplot.png')
+save_figure(fig1, boxplot_path)
+plt.close(fig1)
 
-key_model_markers = {
-    'Claude-Opus-4.5': 'o',
-    'Qwen3-235B-A22B': 's',
-    'GPT-4.1-Mini': '^',
-    'Grok-4.1-Fast': 'D',
-    'Nova-2-Lite': 'v',
-}
+# ============================================================================
+# 8b. FIGURE 2: Temperature curves for ALL models
+# ============================================================================
+print("  Creating temperature curves (all models)...")
 
 # Calculate mean consistency score by model and temperature
 temp_curves = overall_df.groupby(['model', 'temperature']).agg({
@@ -1389,49 +1594,264 @@ temp_curves = overall_df.groupby(['model', 'temperature']).agg({
 }).reset_index()
 temp_curves.columns = ['model', 'temperature', 'cs_mean']
 
-for model in key_models_available:
+fig2, ax2 = plt.subplots(figsize=(12, 8))
+
+# Use distinct colors for all models
+all_model_colors = plt.cm.tab20(np.linspace(0, 1, n_models_box))
+markers = ['o', 's', '^', 'D', 'v', 'p', 'h', '*', 'X', 'P', '<', '>', '8', 'H', 'd', '1', '2', '3']
+
+for i, model in enumerate(sorted_models):
     model_data = temp_curves[temp_curves['model'] == model].sort_values('temperature')
-    color = key_model_colors.get(model, 'gray')
-    marker = key_model_markers.get(model, 'o')
+    color = all_model_colors[i]
+    marker = markers[i % len(markers)]
 
     ax2.plot(model_data['temperature'], model_data['cs_mean'],
-             marker=marker, label=model, linewidth=2.5,
-             color=color, markersize=7, alpha=0.9)
+             marker=marker, label=model, linewidth=2,
+             color=color, markersize=6, alpha=0.85)
 
-ax2.set_xlabel('Temperature', fontsize=10)
-ax2.set_ylabel('Stability Score ($S_\\alpha$)', fontsize=10)
-ax2.set_title('(b) Key Models: Stability vs Temperature', fontsize=11, fontweight='bold')
+ax2.set_xlabel('Temperature', fontsize=12)
+ax2.set_ylabel('$S_\\alpha$ (Stability Score)', fontsize=12)
+ax2.set_title('$S_\\alpha$ vs Temperature (All Models)', fontsize=13, fontweight='bold')
 ax2.set_xlim(-0.05, 1.05)
 ax2.set_ylim(0, 1.05)
 ax2.grid(True, alpha=0.3)
-ax2.legend(loc='lower left', fontsize=8, framealpha=0.9)
 
-# Add annotation for temperature effect
-ax2.annotate('Higher temperature\n→ Lower stability',
-            xy=(0.85, 0.25), fontsize=8, color='gray', alpha=0.8,
-            ha='center', style='italic')
+# Place legend outside the plot
+ax2.legend(loc='center left', bbox_to_anchor=(1.02, 0.5), fontsize=9, framealpha=0.9)
+
+plt.tight_layout()
+temp_curves_path = os.path.join(args.output_dir, 'appendix_stability_temperature.png')
+save_figure(fig2, temp_curves_path)
+plt.close(fig2)
+
+# Also create combined figure - HORIZONTAL LAYOUT (models in one row)
+print("  Creating combined figure (horizontal layout)...")
+fig_width_combined = max(16, n_models_box * 0.9 + 4)
+fig3, (ax3a, ax3b) = plt.subplots(2, 1, figsize=(fig_width_combined, 10), gridspec_kw={'height_ratios': [1, 1]})
+
+# Panel (a): Box plots - VERTICAL (models on X-axis in one row)
+box_data = [overall_df[overall_df['model'] == m]['consistency_score'].values for m in sorted_models]
+bp3 = ax3a.boxplot(box_data, labels=sorted_models, patch_artist=True, vert=True,
+                   showfliers=True, flierprops={'marker': 'o', 'markersize': 3, 'alpha': 0.5},
+                   medianprops={'color': 'red', 'linewidth': 1.5})
+for patch, color in zip(bp3['boxes'], gradient_colors):
+    patch.set_facecolor(color)
+    patch.set_alpha(0.8)
+ax3a.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5, linewidth=1)
+ax3a.set_xlabel('Model', fontsize=12)
+ax3a.set_ylabel('$S_\\alpha$ (Stability)', fontsize=12)
+ax3a.set_title('(a) $S_\\alpha$ Distribution by Model (All Models)', fontsize=13, fontweight='bold')
+ax3a.set_ylim(0, 1.05)
+ax3a.grid(True, alpha=0.3, axis='y')
+plt.setp(ax3a.get_xticklabels(), rotation=45, ha='right', fontsize=10)
+
+# Panel (b): Temperature curves for all models
+for i, model in enumerate(sorted_models):
+    model_data = temp_curves[temp_curves['model'] == model].sort_values('temperature')
+    color = all_model_colors[i]
+    marker = markers[i % len(markers)]
+    ax3b.plot(model_data['temperature'], model_data['cs_mean'],
+             marker=marker, label=model, linewidth=2,
+             color=color, markersize=6, alpha=0.85)
+
+ax3b.set_xlabel('Temperature', fontsize=12)
+ax3b.set_ylabel('$S_\\alpha$ (Stability)', fontsize=12)
+ax3b.set_title('(b) $S_\\alpha$ vs Temperature (All Models)', fontsize=13, fontweight='bold')
+ax3b.set_xlim(-0.05, 1.05)
+ax3b.set_ylim(0, 1.05)
+ax3b.grid(True, alpha=0.3)
+ax3b.legend(loc='center left', bbox_to_anchor=(1.02, 0.5), fontsize=9, framealpha=0.9)
 
 plt.tight_layout()
 appendix_stability_path = os.path.join(args.output_dir, 'appendix_stability_distribution.png')
-save_figure(fig, appendix_stability_path)
-plt.show()
+save_figure(fig3, appendix_stability_path)
+plt.close(fig3)
 
 print("\n" + "="*80)
 print("ENHANCED VISUALIZATIONS COMPLETE")
 print("="*80)
 print("\nAdditional files saved:")
-print("- cmean_vs_dstd_scatter.png (Mean-Variance Tradeoff)")
+print("- Cmean_vs_sigma_scatter.png (Mean-Variance Tradeoff)")
 print("- radar_model_comparison.png (Multi-dimensional Comparison)")
-print("- cmean_boxplots.png (Consistency Distributions)")
+print("- Cmean_boxplots.png (Consistency Distributions)")
 print("- cadj_heatmap.png (Validity-Adjusted Consistency)")
 print("- structural_vs_semantic_bars.png (Component Comparison)")
 print("- pareto_frontier.png (Optimal Model Selection)")
-print("- ranking_score_heatmap.png (Combined Ranking Score)")
-print("- cmean_heatmap.png (C_mean by Model and Temperature)")
-print("- scalability_comparison.png (Scalability Score Comparison)")
+print("- R_heatmap.png (Combined Ranking Score)")
+print("- scalability_comparison_by_type.png (Scalability Score Comparison)")
+print("- ranking_comparison_by_type.png (Ranking Score Comparison)")
 print("- appendix_stability_distribution.png (Stability Distribution + Key Models)")
 print("- cadj_by_temperature.csv")
-print("- ranking_score_by_temperature.csv")
-print("- cmean_by_temperature.csv (C_mean by Model and Temperature)")
-print("- stability_by_temperature.csv (Stability Score by Model and Temperature)")
-print("- scalability_metrics.csv (Scalability Score and Related Metrics)")
+print("- R_by_temperature.csv")
+print("- scalability_metrics_all.csv (All metric types combined)")
+print("\nPer-type files (for each of Overall, Semantic, Structural):")
+print("- Cmean_ranking_{type}.png (C_mean Model Ranking Bar Chart)")
+print("- R_ranking_{type}.png (Ranking Score Model Ranking Bar Chart)")
+print("- S_alpha_ranking_{type}.png (Stability Score Model Ranking Bar Chart)")
+print("- rv_ranking_{type}.png (Validity Rate Model Ranking Bar Chart)")
+print("- rv_by_temperature_{type}.csv")
+print("- Cmean_by_temperature_{type}.csv")
+print("- S_alpha_by_temperature_{type}.csv")
+print("- R_by_temperature_{type}.csv")
+print("- scalability_metrics_{type}.csv")
+
+# ============================================================================
+# 9. Structural vs Semantic Temperature Behavior Analysis
+# ============================================================================
+# Expected behavior:
+#   - Schema/Structural: Should be STABLE across all temperatures
+#   - Content/Semantic: Should VARY more as temperature increases (expected)
+# ============================================================================
+print("\n" + "="*80)
+print("STRUCTURAL VS SEMANTIC TEMPERATURE BEHAVIOR ANALYSIS")
+print("="*80)
+print("Expectation: Schema STABLE across temperatures, Content VARIES with temperature")
+
+# Load structural and semantic scalability metrics
+struct_path = os.path.join(args.output_dir, 'scalability_metrics_structural.csv')
+sem_path = os.path.join(args.output_dir, 'scalability_metrics_semantic.csv')
+
+if os.path.exists(struct_path) and os.path.exists(sem_path):
+    struct_df = pd.read_csv(struct_path)
+    sem_df = pd.read_csv(sem_path)
+
+    # Calculate temperature drop for each model
+    temp_behavior_data = []
+    for _, row in struct_df.iterrows():
+        model = row['model']
+        sem_row = sem_df[sem_df['model'] == model]
+        if len(sem_row) == 0:
+            continue
+
+        struct_t01 = row['stability_T0.1']
+        struct_t10 = row['stability_T1.0']
+        sem_t01 = sem_row['stability_T0.1'].values[0]
+        sem_t10 = sem_row['stability_T1.0'].values[0]
+
+        struct_drop = (struct_t01 - struct_t10) / struct_t01 * 100 if struct_t01 > 0 else 0
+        sem_drop = (sem_t01 - sem_t10) / sem_t01 * 100 if sem_t01 > 0 else 0
+
+        schema_stable = struct_drop < 15  # <15% drop considered stable
+
+        temp_behavior_data.append({
+            'model': model,
+            'struct_t01': struct_t01,
+            'struct_t10': struct_t10,
+            'struct_drop_pct': struct_drop,
+            'sem_t01': sem_t01,
+            'sem_t10': sem_t10,
+            'sem_drop_pct': sem_drop,
+            'schema_stable': schema_stable
+        })
+
+    temp_behavior_df = pd.DataFrame(temp_behavior_data)
+    temp_behavior_df = temp_behavior_df.sort_values('struct_drop_pct', ascending=True)
+
+    # Print summary table
+    print(f"\n{'Model':<22} | Struct Drop | Sem Drop | Schema Stable?")
+    print("-"*65)
+    for _, row in temp_behavior_df.iterrows():
+        stable_str = 'YES' if row['schema_stable'] else 'NO'
+        print(f"{row['model']:<22} | {row['struct_drop_pct']:5.0f}%     | {row['sem_drop_pct']:5.0f}%   | {stable_str}")
+
+    # Save to CSV
+    temp_behavior_path = os.path.join(args.output_dir, 'temperature_behavior_analysis.csv')
+    temp_behavior_df.to_csv(temp_behavior_path, index=False)
+    print(f"\nSaved: temperature_behavior_analysis.csv")
+
+    # Create visualization: Structural vs Semantic Drop Scatter Plot
+    print("\n9. Creating structural vs semantic temperature drop scatter plot...")
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Color by schema stability
+    colors = ['green' if s else 'red' for s in temp_behavior_df['schema_stable']]
+
+    scatter = ax.scatter(temp_behavior_df['struct_drop_pct'],
+                        temp_behavior_df['sem_drop_pct'],
+                        c=colors, s=150, alpha=0.7, edgecolors='black', linewidth=0.5)
+
+    # Add model labels
+    for _, row in temp_behavior_df.iterrows():
+        ax.annotate(row['model'],
+                   (row['struct_drop_pct'], row['sem_drop_pct']),
+                   fontsize=8, alpha=0.9, ha='left', va='bottom',
+                   xytext=(3, 3), textcoords='offset points')
+
+    # Add reference lines
+    ax.axvline(x=15, color='red', linestyle='--', alpha=0.5, linewidth=2, label='Schema Stability Threshold (15%)')
+    ax.axhline(y=30, color='blue', linestyle=':', alpha=0.5, linewidth=2, label='Expected Semantic Variation (30%)')
+
+    # Add quadrant labels
+    ax.annotate('IDEAL: Schema stable,\nContent varies',
+               xy=(5, 50), fontsize=10, color='green', alpha=0.8,
+               bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.3),
+               ha='center')
+    ax.annotate('PROBLEM: Schema\nunstable',
+               xy=(35, 50), fontsize=10, color='red', alpha=0.8,
+               bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.3),
+               ha='center')
+
+    ax.set_xlabel('Structural Stability Drop (T0.1 → T1.0) %', fontsize=12)
+    ax.set_ylabel('Semantic Stability Drop (T0.1 → T1.0) %', fontsize=12)
+    ax.set_title('Temperature Behavior: Schema vs Content Stability Drop', fontsize=14, fontweight='bold')
+    ax.legend(loc='lower right', fontsize=9)
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim(-10, max(60, temp_behavior_df['struct_drop_pct'].max() + 5))
+    ax.set_ylim(-5, max(80, temp_behavior_df['sem_drop_pct'].max() + 5))
+
+    plt.tight_layout()
+    temp_scatter_path = os.path.join(args.output_dir, 'temperature_behavior_scatter.png')
+    save_figure(fig, temp_scatter_path)
+    plt.close(fig)
+
+    # Create bar chart: Side-by-side structural vs semantic drop
+    print("Creating structural vs semantic drop comparison bar chart...")
+
+    n_models = len(temp_behavior_df)
+    fig_height = max(8, n_models * 0.5 + 2)
+    fig, ax = plt.subplots(figsize=(12, fig_height))
+
+    y_pos = np.arange(n_models)
+    bar_height = 0.35
+
+    # Sort by structural drop for better visualization
+    temp_behavior_sorted = temp_behavior_df.sort_values('struct_drop_pct', ascending=False)
+
+    bars1 = ax.barh(y_pos - bar_height/2, temp_behavior_sorted['struct_drop_pct'],
+                   bar_height, label='Structural (Schema) Drop', color='steelblue', alpha=0.8)
+    bars2 = ax.barh(y_pos + bar_height/2, temp_behavior_sorted['sem_drop_pct'],
+                   bar_height, label='Semantic (Content) Drop', color='coral', alpha=0.8)
+
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(temp_behavior_sorted['model'], fontsize=10)
+    ax.axvline(x=15, color='red', linestyle='--', alpha=0.7, linewidth=2, label='Schema Stability Threshold')
+    ax.set_xlabel('Stability Drop (T0.1 → T1.0) %', fontsize=12)
+    ax.set_ylabel('Model', fontsize=12)
+    ax.set_title('Structural vs Semantic Stability Drop by Model', fontsize=14, fontweight='bold')
+    ax.legend(loc='lower right', fontsize=9)
+    ax.grid(True, alpha=0.3, axis='x')
+
+    plt.tight_layout()
+    temp_bar_path = os.path.join(args.output_dir, 'temperature_behavior_bars.png')
+    save_figure(fig, temp_bar_path)
+    plt.close(fig)
+
+    # Summary statistics
+    stable_models = temp_behavior_df[temp_behavior_df['schema_stable']]['model'].tolist()
+    unstable_models = temp_behavior_df[~temp_behavior_df['schema_stable']]['model'].tolist()
+
+    print(f"\n=== Summary ===")
+    print(f"Schema Stable Models ({len(stable_models)}): {', '.join(stable_models)}")
+    print(f"Schema Unstable Models ({len(unstable_models)}): {', '.join(unstable_models)}")
+    print(f"\nAvg Structural Drop: {temp_behavior_df['struct_drop_pct'].mean():.1f}%")
+    print(f"Avg Semantic Drop: {temp_behavior_df['sem_drop_pct'].mean():.1f}%")
+
+    print(f"\nSaved: temperature_behavior_scatter.png")
+    print(f"Saved: temperature_behavior_bars.png")
+else:
+    print("Skipping temperature behavior analysis - structural/semantic CSV files not found")
+
+print("\n" + "="*80)
+print("ALL ANALYSIS COMPLETE")
+print("="*80)
