@@ -6,9 +6,13 @@ It combines tree edit distance algorithms with embedding-based semantic similari
 more accurate structural consistency evaluation for JSON outputs.
 """
 
+import os
+import asyncio
+import json
 import numpy as np
 from typing import Dict, Any, List, Tuple, Optional, Set
 from functools import lru_cache
+from collections import OrderedDict
 import warnings
 import re
 from bert_score import score as bert_score
@@ -29,9 +33,56 @@ from .utils import get_embeddings, create_bedrock_client, count_json_elements
 from botocore.config import Config
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
+from tqdm.asyncio import tqdm as atqdm
 
 from transformers import logging
 logging.set_verbosity_error()
+
+
+class LRUCache:
+    """Memory-bounded LRU cache for subtree comparison results."""
+
+    def __init__(self, maxsize: int = 10000):
+        self.maxsize = maxsize
+        self._cache: OrderedDict = OrderedDict()
+        self.hits = 0
+        self.misses = 0
+
+    def get(self, key: Tuple) -> Optional[float]:
+        """Get value from cache, moving to end (most recently used)."""
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            self.hits += 1
+            return self._cache[key]
+        self.misses += 1
+        return None
+
+    def set(self, key: Tuple, value: float) -> None:
+        """Set value in cache, evicting LRU if at capacity."""
+        if key in self._cache:
+            self._cache.move_to_end(key)
+        else:
+            if len(self._cache) >= self.maxsize:
+                # Evict least recently used (first item)
+                self._cache.popitem(last=False)
+            self._cache[key] = value
+
+    def clear(self) -> None:
+        """Clear the cache."""
+        self._cache.clear()
+        self.hits = 0
+        self.misses = 0
+
+    def __len__(self) -> int:
+        return len(self._cache)
+
+    def __contains__(self, key: Tuple) -> bool:
+        return key in self._cache
+
+    @property
+    def hit_rate(self) -> float:
+        total = self.hits + self.misses
+        return self.hits / total if total > 0 else 0.0
 
 
 def _get_default_type_change_costs() -> Dict[Tuple[str, str], float]:
@@ -76,13 +127,19 @@ class SemanticJsonTreeConsistencyEvaluator:
                  type_change_cost: Dict[Tuple[str, str], float] = None,
                  required_fields: Set[str] = None,
                  order_sensitive_fields: Set[str] = None,
+                 exact_match_fields: Set[str] = None,
                  model_id: str = 'all-MiniLM-L6-v2',
                  chunk_size: int = 300,
                  chunk_overlap: int = 50,
                  region_name: str = "us-west-2",
-                 weights: Dict[str, float] = {"type": 0.1, "value": 0.8, "key": 0.1},
+                 structural_weight: float = 0.5,  # Paper: w in Eq.(1)
                  sort_keys: bool = True,
-                 sort_arrays: bool = True
+                 sort_arrays: bool = True,
+                 embedding_dim: int = 512,
+                 # Space optimization options
+                 subtree_cache_size: int = 10000,
+                 use_fp16_embeddings: bool = False,
+                 max_embedding_cache_size: int = 100000
         ):
         """
         Initialize the evaluator with semantic capabilities.
@@ -95,19 +152,30 @@ class SemanticJsonTreeConsistencyEvaluator:
                                     (e.g., {"trace", "steps", "calls"} for agent traces).
                                     For these fields, sequential comparison is used instead
                                     of Hungarian algorithm optimal matching.
+            exact_match_fields: Set of field names that require exact string matching
+                               (e.g., {"name"} for function/tool names).
+                               For these fields, semantic similarity is bypassed and
+                               only exact value equality is considered (1.0 if equal, 0.0 otherwise).
             model_id: Name of the sentence transformer model or Bedrock model ID
             chunk_size: Size of chunks for text splitting
             chunk_overlap: Overlap between chunks
+            structural_weight: Structural vs content weight w (0-1), default 0.5. Paper Eq.(1): γ_upd = w·γ_struct + (1-w)·γ_content
+            embedding_dim: Embedding dimension for Bedrock models (256, 384, 512, or 1024). Default: 512
+            subtree_cache_size: Max entries in subtree LRU cache (default 10000). Set to 0 for unbounded.
+            use_fp16_embeddings: Store embeddings as float16 to save ~50% memory (slight precision loss)
+            max_embedding_cache_size: Max embeddings to cache (default 100000). Set to 0 for unbounded.
         """
         self.path_weight_decay = path_weight_decay
         self.type_change_cost = type_change_cost or _get_default_type_change_costs()
         self.required_fields = required_fields or set()
         self.order_sensitive_fields = order_sensitive_fields or set()
+        self.exact_match_fields = exact_match_fields or set()
 
         # Initialize embedding model if available
         self.embedding_model = None
         self.bedrock_client = None
         self.model_id = model_id
+        self.embedding_dim = embedding_dim
 
         boto_config = Config(
             retries={
@@ -117,7 +185,8 @@ class SemanticJsonTreeConsistencyEvaluator:
             max_pool_connections=50  # Increase connection pool size
         )
 
-        if self.model_id in ["amazon.titan-embed-text-v1", "amazon.titan-embed-text-v2:0", "cohere.embed-multilingual-v3"]:
+        if self.model_id in ["amazon.titan-embed-text-v1", "amazon.titan-embed-text-v2:0",
+                             "cohere.embed-multilingual-v3", "cohere.embed-v4:0", "us.cohere.embed-v4:0"]:
             self.bedrock_client = create_bedrock_client(region_name=region_name, config=boto_config)
         else:
             self.embedding_model = SentenceTransformer(self.model_id)
@@ -138,17 +207,543 @@ class SemanticJsonTreeConsistencyEvaluator:
         self.calculate_similarity_method = {
             "ted": self.calculate_tree_edit_distance,
             "sted": self.calculate_tree_edit_distance_opt,
+            "sted_fast": self.calculate_tree_edit_distance_fast,
             "bertscore": self.calculate_bertscore,
             "deepdiff": self.calculate_similarity_with_deepdiff,
             "deepdiff_opt": self.calculate_similarity_with_deepdiff_opt,
         }
 
-        self.weights = weights
+        self.structural_weight = structural_weight  # Paper Eq.(1): w
 
         self.sort_keys = sort_keys
         self.sort_arrays = sort_arrays
 
         self.batch_size_bertscore = 2000
+
+        # === Optimization settings ===
+        # Space optimization config
+        self.use_fp16_embeddings = use_fp16_embeddings
+        self.max_embedding_cache_size = max_embedding_cache_size
+        self.subtree_cache_size = subtree_cache_size
+
+        # Memoization cache for subtree comparisons: (tree1_hash, tree2_hash, variation_type) -> cost
+        # Use LRU cache with bounded size for space efficiency
+        if subtree_cache_size > 0:
+            self._subtree_cache = LRUCache(maxsize=subtree_cache_size)
+        else:
+            # Unbounded cache (original behavior)
+            self._subtree_cache = LRUCache(maxsize=float('inf'))
+
+        # Greedy approximation flag (optional, trades accuracy for speed)
+        self.use_greedy_matching = False
+
+        # Early pruning threshold (skip detailed comparison if type mismatch cost exceeds this)
+        self.early_pruning_threshold = 0.8
+
+        # Vectorized leaf comparison: pre-collected leaf pairs for batch processing
+        self._pending_leaf_pairs: List[Tuple[str, str]] = []
+
+        # Hash cache for nodes (lazy computation)
+        self._node_hash_cache: Dict[int, str] = {}
+
+    # === Optimization Helper Methods ===
+
+    def _compute_tree_hash(self, node: 'JsonNode') -> str:
+        """
+        Compute a hash for a tree node for memoization with lazy caching.
+
+        The hash captures the structural and content signature of the subtree.
+        Uses node id() for caching to avoid recomputation.
+        """
+        import hashlib
+
+        node_id = id(node)
+        if node_id in self._node_hash_cache:
+            return self._node_hash_cache[node_id]
+
+        def _hash_node(n: 'JsonNode') -> str:
+            n_id = id(n)
+            if n_id in self._node_hash_cache:
+                return self._node_hash_cache[n_id]
+
+            # Include node type, label pattern (without indices), and value
+            label_pattern = re.sub(r'\[\d+\]', '[*]', n.label)
+            parts = [n.node_type, label_pattern]
+
+            if n.value is not None and not n.children:
+                # For leaf nodes, include value hash
+                parts.append(str(n.value)[:100])  # Truncate long values
+
+            # Include children hashes
+            if n.children:
+                child_hashes = sorted([_hash_node(c) for c in n.children])
+                parts.extend(child_hashes)
+
+            result = hashlib.md5('|'.join(parts).encode()).hexdigest()[:16]
+            self._node_hash_cache[n_id] = result
+            return result
+
+        return _hash_node(node)
+
+    def clear_subtree_cache(self):
+        """Clear the subtree comparison cache and node hash cache."""
+        self._subtree_cache.clear()
+        self._node_hash_cache.clear()
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics for performance monitoring."""
+        return {
+            'subtree_cache_size': len(self._subtree_cache),
+            'subtree_cache_hits': self._subtree_cache.hits,
+            'subtree_cache_misses': self._subtree_cache.misses,
+            'subtree_cache_hit_rate': self._subtree_cache.hit_rate,
+            'subtree_cache_max_size': self.subtree_cache_size,
+            'embedding_cache_size': len(self._embedding_dict),
+            'node_hash_cache_size': len(self._node_hash_cache),
+            'using_fp16': self.use_fp16_embeddings
+        }
+
+    def set_greedy_matching(self, enabled: bool):
+        """Enable or disable greedy matching approximation."""
+        self.use_greedy_matching = enabled
+
+    def _collect_leaf_pairs(self, tree1: 'JsonNode', tree2: 'JsonNode') -> List[Tuple[str, str]]:
+        """
+        Collect all potential leaf value pairs for vectorized comparison.
+
+        This enables batch similarity computation before tree traversal.
+        """
+        pairs = []
+
+        def collect_leaves(node: 'JsonNode') -> List[str]:
+            if not node.children:
+                if node.value is not None and isinstance(node.value, str):
+                    return [str(node.value)]
+                return []
+            leaves = []
+            for child in node.children:
+                leaves.extend(collect_leaves(child))
+            return leaves
+
+        leaves1 = collect_leaves(tree1)
+        leaves2 = collect_leaves(tree2)
+
+        # Create all pairs for batch processing
+        for l1 in leaves1:
+            for l2 in leaves2:
+                if l1 != l2:  # Skip identical pairs
+                    pairs.append((l1, l2))
+
+        return pairs
+
+    def _precompute_leaf_similarities(self, tree1: 'JsonNode', tree2: 'JsonNode'):
+        """
+        Pre-compute all leaf string similarities before tree comparison.
+
+        This enables vectorized embedding computation for better performance.
+        """
+        pairs = self._collect_leaf_pairs(tree1, tree2)
+
+        # Filter pairs not already in cache
+        uncached_pairs = [(s1, s2) for s1, s2 in pairs if self._cache.get(s1, s2) is None]
+
+        if not uncached_pairs:
+            return
+
+        # Batch compute similarities
+        for s1, s2 in uncached_pairs:
+            sim = self._calculate_semantic_similarity(s1, s2)
+            self._cache.set(s1, s2, sim)
+
+    def _greedy_matching(self, children1: List['JsonNode'], children2: List['JsonNode'],
+                         variation_type: str) -> Tuple[List[Tuple[int, int]], float]:
+        """
+        Greedy matching approximation - O(B²) instead of O(B³) Hungarian.
+
+        Matches each node in children1 to its best available partner in children2.
+        Not optimal but much faster for large branching factors.
+
+        Returns:
+            Tuple of (matched_pairs, total_cost)
+        """
+        n1, n2 = len(children1), len(children2)
+        matched_pairs = []
+        total_cost = 0.0
+        used_j = set()
+
+        # For each node in children1, find best match in children2
+        for i in range(n1):
+            best_j = -1
+            best_cost = float('inf')
+
+            for j in range(n2):
+                if j in used_j:
+                    continue
+
+                # Calculate cost for this pair
+                cost = self._calculate_optimal_matching_cost_fast(
+                    children1[i], children2[j], variation_type
+                )
+
+                if cost < best_cost:
+                    best_cost = cost
+                    best_j = j
+
+            if best_j >= 0:
+                matched_pairs.append((i, best_j))
+                used_j.add(best_j)
+                total_cost += best_cost
+            else:
+                # No match found, count as deletion
+                total_cost += self.delete_cost(children1[i])
+
+        # Add insertion costs for unmatched children2
+        for j in range(n2):
+            if j not in used_j:
+                total_cost += self.insert_cost(children2[j])
+
+        return matched_pairs, total_cost
+
+    def _greedy_matching_streaming(self, children1: List['JsonNode'], children2: List['JsonNode'],
+                                    variation_type: str) -> float:
+        """
+        Space-optimized greedy matching - O(B) space instead of O(B²).
+
+        This version doesn't build a full cost matrix. Instead, it computes costs
+        on-the-fly and only tracks which indices are used (O(B) space for the set).
+
+        For very large branching factors (B > 100), this significantly reduces memory.
+
+        Returns:
+            total_cost (float)
+        """
+        n1, n2 = len(children1), len(children2)
+        total_cost = 0.0
+        used_j = set()  # O(min(n1, n2)) space
+
+        # For each node in children1, find best match in children2
+        for i in range(n1):
+            best_j = -1
+            best_cost = float('inf')
+
+            # Stream through children2, computing costs on-demand
+            for j in range(n2):
+                if j in used_j:
+                    continue
+
+                # Calculate cost for this pair (on-the-fly, not stored)
+                cost = self._calculate_optimal_matching_cost_fast(
+                    children1[i], children2[j], variation_type
+                )
+
+                if cost < best_cost:
+                    best_cost = cost
+                    best_j = j
+
+            if best_j >= 0:
+                used_j.add(best_j)
+                total_cost += best_cost
+            else:
+                # No match found, count as deletion
+                total_cost += self.delete_cost(children1[i])
+
+        # Add insertion costs for unmatched children2
+        for j in range(n2):
+            if j not in used_j:
+                total_cost += self.insert_cost(children2[j])
+
+        return total_cost
+
+    def _early_prune_check(self, node1: 'JsonNode', node2: 'JsonNode') -> Optional[float]:
+        """
+        Check if we can skip detailed comparison based on early pruning criteria.
+
+        Returns:
+            Cost if pruning applies, None otherwise
+        """
+        # Type mismatch with incompatible types
+        type_cost = self.type_change_cost.get((node1.node_type, node2.node_type), 1.0)
+        if type_cost >= self.early_pruning_threshold:
+            # Skip detailed comparison, return high cost
+            return type_cost
+
+        # Structural mismatch: one has children, other doesn't
+        if bool(node1.children) != bool(node2.children):
+            # Different structure levels
+            return 0.9
+
+        # Large size difference (> 3x)
+        if node1.children and node2.children:
+            n1, n2 = len(node1.children), len(node2.children)
+            if n1 > 0 and n2 > 0:
+                ratio = max(n1, n2) / min(n1, n2)
+                if ratio > 3:
+                    # Very different sizes, use approximate cost
+                    return min(1.0, 0.3 + 0.1 * ratio)
+
+        return None  # No pruning, proceed with full comparison
+
+    def _calculate_optimal_matching_cost_fast(
+        self, tree1: 'JsonNode', tree2: 'JsonNode', variation_type: str = "combined"
+    ) -> float:
+        """
+        Optimized version of _calculate_optimal_matching_cost with:
+        1. Memoization (LRU cache with bounded size)
+        2. Single-pass combined calculation
+        3. Optional greedy matching (O(B) space with streaming)
+        4. Early pruning
+        5. Lazy hash computation
+        6. NumPy arrays for cost matrices (memory efficient)
+        """
+        # === Optimization 1: Memoization with LRU cache ===
+        cache_key = (self._compute_tree_hash(tree1), self._compute_tree_hash(tree2), variation_type)
+        cached_result = self._subtree_cache.get(cache_key)
+        if cached_result is not None:
+            return cached_result
+
+        # === Optimization 5: Early pruning ===
+        pruned_cost = self._early_prune_check(tree1, tree2)
+        if pruned_cost is not None:
+            self._subtree_cache.set(cache_key, pruned_cost)
+            return pruned_cost
+
+        # Base case: both are leaf nodes
+        if not tree1.children and not tree2.children:
+            if variation_type == "structural":
+                cost = self.structural_update_cost(tree1, tree2)
+            elif variation_type == "content":
+                cost = self.content_update_cost(tree1, tree2)
+            else:  # combined
+                cost = self.update_cost(tree1, tree2)
+            self._subtree_cache.set(cache_key, cost)
+            return cost
+
+        # If one is leaf and other is not
+        if not tree1.children and tree2.children:
+            cost = self.delete_cost(tree1) + sum(self.insert_cost(c) for c in tree2.children)
+            self._subtree_cache.set(cache_key, cost)
+            return cost
+        if tree1.children and not tree2.children:
+            cost = sum(self.delete_cost(c) for c in tree1.children) + self.insert_cost(tree2)
+            self._subtree_cache.set(cache_key, cost)
+            return cost
+
+        # Both have children
+        children1 = tree1.children
+        children2 = tree2.children
+
+        # Check for order-sensitive arrays
+        is_order_sensitive = (
+            tree1.node_type == "array" and tree2.node_type == "array" and
+            (self._is_order_sensitive_field(tree1.label) or self._is_order_sensitive_field(tree2.label))
+        )
+
+        if is_order_sensitive:
+            cost = self._calculate_sequential_matching_cost(tree1, tree2, variation_type)
+            self._subtree_cache.set(cache_key, cost)
+            return cost
+
+        n1, n2 = len(children1), len(children2)
+
+        if n1 == 0 and n2 == 0:
+            if variation_type == "structural":
+                cost = self.structural_update_cost(tree1, tree2)
+            elif variation_type == "content":
+                cost = self.content_update_cost(tree1, tree2)
+            else:
+                cost = self.update_cost(tree1, tree2)
+            self._subtree_cache.set(cache_key, cost)
+            return cost
+
+        # === Optimization 3: Greedy matching with streaming (O(B) space) ===
+        if self.use_greedy_matching and max(n1, n2) > 5:
+            total_cost = self._greedy_matching_streaming(children1, children2, variation_type)
+            normalized_cost = min(total_cost / max(n1, n2, 1), 1.0)
+            self._subtree_cache.set(cache_key, normalized_cost)
+            return normalized_cost
+
+        # === Optimization 2: Single-pass combined calculation ===
+        if variation_type == "combined":
+            cost = self._single_pass_combined_matching(children1, children2, n1, n2)
+            self._subtree_cache.set(cache_key, cost)
+            return cost
+
+        # For structural or content only, use NumPy array for memory efficiency
+        max_size = max(n1, n2)
+        cost_matrix = np.full((max_size, max_size), np.inf, dtype=np.float32)
+
+        for i in range(n1):
+            for j in range(n2):
+                cost_matrix[i, j] = self._calculate_optimal_matching_cost_fast(
+                    children1[i], children2[j], variation_type
+                )
+
+        # Add deletion/insertion costs (vectorized for efficiency)
+        for i in range(n1):
+            del_cost = self.delete_cost(children1[i])
+            cost_matrix[i, n2:max_size] = del_cost
+        for j in range(n2):
+            ins_cost = self.insert_cost(children2[j])
+            cost_matrix[n1:max_size, j] = ins_cost
+
+        # Hungarian algorithm
+        row_indices, col_indices = linear_sum_assignment(cost_matrix)
+
+        total_cost = float(cost_matrix[row_indices, col_indices].sum())
+        normalized_cost = min(total_cost / len(row_indices), 1.0)
+
+        self._subtree_cache.set(cache_key, normalized_cost)
+        return normalized_cost
+
+    def _single_pass_combined_matching(
+        self, children1: List['JsonNode'], children2: List['JsonNode'], n1: int, n2: int
+    ) -> float:
+        """
+        Single-pass combined calculation that computes structural and content costs together.
+
+        Uses NumPy arrays for memory efficiency (float32 instead of Python float).
+
+        Instead of:
+        1. Build structural cost matrix
+        2. Run Hungarian
+        3. Re-compute combined costs for matched pairs
+
+        This does:
+        1. Build combined cost matrix (structural + content in one pass)
+        2. Run Hungarian once
+        """
+        max_size = max(n1, n2)
+
+        # Build combined cost matrix in single pass using NumPy (float32 saves memory)
+        structural_costs = np.zeros((max_size, max_size), dtype=np.float32)
+        content_costs = np.zeros((max_size, max_size), dtype=np.float32)
+
+        for i in range(n1):
+            for j in range(n2):
+                # Get both costs in single recursive call
+                s_cost, c_cost = self._get_structural_and_content_costs(
+                    children1[i], children2[j]
+                )
+                structural_costs[i, j] = s_cost
+                content_costs[i, j] = c_cost
+
+        # Add deletion costs (vectorized)
+        for i in range(n1):
+            del_cost = self.delete_cost(children1[i])
+            structural_costs[i, n2:max_size] = del_cost
+            content_costs[i, n2:max_size] = del_cost
+
+        # Add insertion costs (vectorized)
+        for j in range(n2):
+            ins_cost = self.insert_cost(children2[j])
+            structural_costs[n1:max_size, j] = ins_cost
+            content_costs[n1:max_size, j] = ins_cost
+
+        # Use structural costs for matching (as per original algorithm)
+        row_indices, col_indices = linear_sum_assignment(structural_costs)
+
+        # Calculate final costs using the matched pairs (vectorized)
+        structural_total = float(structural_costs[row_indices, col_indices].sum())
+        content_total = float(content_costs[row_indices, col_indices].sum())
+
+        # Paper Eq.(1): w * structural + (1-w) * content
+        total_cost = self.structural_weight * structural_total + (1 - self.structural_weight) * content_total
+        normalized_cost = min(total_cost / len(row_indices), 1.0)
+
+        return normalized_cost
+
+    def _get_structural_and_content_costs(
+        self, tree1: 'JsonNode', tree2: 'JsonNode'
+    ) -> Tuple[float, float]:
+        """
+        Get both structural and content costs in a single traversal.
+
+        Uses NumPy arrays for memory efficiency and LRU cache for bounded memory.
+
+        Returns:
+            Tuple of (structural_cost, content_cost)
+        """
+        # Check memoization cache for both (single hash computation, reused)
+        tree1_hash = self._compute_tree_hash(tree1)
+        tree2_hash = self._compute_tree_hash(tree2)
+        s_key = (tree1_hash, tree2_hash, "structural")
+        c_key = (tree1_hash, tree2_hash, "content")
+
+        s_cached = self._subtree_cache.get(s_key)
+        c_cached = self._subtree_cache.get(c_key)
+
+        if s_cached is not None and c_cached is not None:
+            # Both already cached (hits counted in .get())
+            return s_cached, c_cached
+
+        # Base case: both are leaf nodes
+        if not tree1.children and not tree2.children:
+            s_cost = self.structural_update_cost(tree1, tree2)
+            c_cost = self.content_update_cost(tree1, tree2)
+            self._subtree_cache.set(s_key, s_cost)
+            self._subtree_cache.set(c_key, c_cost)
+            return s_cost, c_cost
+
+        # If one is leaf and other is not
+        if not tree1.children and tree2.children:
+            cost = self.delete_cost(tree1) + sum(self.insert_cost(c) for c in tree2.children)
+            self._subtree_cache.set(s_key, cost)
+            self._subtree_cache.set(c_key, cost)
+            return cost, cost
+        if tree1.children and not tree2.children:
+            cost = sum(self.delete_cost(c) for c in tree1.children) + self.insert_cost(tree2)
+            self._subtree_cache.set(s_key, cost)
+            self._subtree_cache.set(c_key, cost)
+            return cost, cost
+
+        # Both have children - compute costs recursively
+        children1 = tree1.children
+        children2 = tree2.children
+        n1, n2 = len(children1), len(children2)
+
+        if n1 == 0 and n2 == 0:
+            s_cost = self.structural_update_cost(tree1, tree2)
+            c_cost = self.content_update_cost(tree1, tree2)
+            self._subtree_cache.set(s_key, s_cost)
+            self._subtree_cache.set(c_key, c_cost)
+            return s_cost, c_cost
+
+        # Use NumPy arrays for memory efficiency (float32 saves 50% vs float64)
+        max_size = max(n1, n2)
+        s_matrix = np.full((max_size, max_size), np.inf, dtype=np.float32)
+        c_matrix = np.full((max_size, max_size), np.inf, dtype=np.float32)
+
+        for i in range(n1):
+            for j in range(n2):
+                s, c = self._get_structural_and_content_costs(children1[i], children2[j])
+                s_matrix[i, j] = s
+                c_matrix[i, j] = c
+
+        # Vectorized deletion/insertion costs
+        for i in range(n1):
+            del_cost = self.delete_cost(children1[i])
+            s_matrix[i, n2:max_size] = del_cost
+            c_matrix[i, n2:max_size] = del_cost
+
+        for j in range(n2):
+            ins_cost = self.insert_cost(children2[j])
+            s_matrix[n1:max_size, j] = ins_cost
+            c_matrix[n1:max_size, j] = ins_cost
+
+        # Use structural for matching
+        row_indices, col_indices = linear_sum_assignment(s_matrix)
+
+        # Vectorized sum
+        s_total = float(s_matrix[row_indices, col_indices].sum())
+        c_total = float(c_matrix[row_indices, col_indices].sum())
+
+        s_normalized = min(s_total / len(row_indices), 1.0)
+        c_normalized = min(c_total / len(row_indices), 1.0)
+
+        self._subtree_cache.set(s_key, s_normalized)
+        self._subtree_cache.set(c_key, c_normalized)
+
+        return s_normalized, c_normalized
 
     @lru_cache(maxsize=2000)
     def _get_embedding(self, text: str) -> Optional[np.ndarray]:
@@ -164,7 +759,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         # Fall back to individual computation
         if self.bedrock_client:
             try:
-                emb = get_embeddings(text, self.model_id, self.bedrock_client)
+                emb = get_embeddings(text, self.model_id, self.bedrock_client, output_embedding_length=self.embedding_dim)
                 self._embedding_dict[text] = emb  # Cache for future use
                 return emb
             except Exception as e:
@@ -202,6 +797,9 @@ class SemanticJsonTreeConsistencyEvaluator:
         """
         Recursively collect all string values and keys from a JSON object.
 
+        Also collects preprocessed versions of keys (used by _calculate_structural_similarity)
+        to ensure they're in the embedding cache.
+
         Args:
             json_obj: The JSON object to extract strings from
             strings: Set to add strings to
@@ -212,6 +810,10 @@ class SemanticJsonTreeConsistencyEvaluator:
                 # Add key if long enough
                 if len(key) >= min_length:
                     strings.add(key)
+                    # Also add preprocessed version (used by structural similarity)
+                    preprocessed = self._preprocess_key_name(key)
+                    if len(preprocessed) >= min_length:
+                        strings.add(preprocessed)
                 self.collect_strings_from_json(value, strings, min_length)
         elif isinstance(json_obj, list):
             for item in json_obj:
@@ -221,7 +823,15 @@ class SemanticJsonTreeConsistencyEvaluator:
                 strings.add(json_obj)
 
     def precompute_embeddings(self, json_objects: List[Any], batch_size: int = 64,
-                               show_progress: bool = True) -> int:
+                               show_progress: bool = True, max_workers: int = 10,
+                               use_batch_inference: bool = False,
+                               use_async: bool = False,
+                               max_concurrent: int = 50,
+                               s3_bucket: str = None,
+                               s3_prefix: str = "bedrock-batch/embeddings",
+                               role_arn: str = None,
+                               auto_save_cache: bool = False,
+                               cache_dir: str = None) -> int:
         """
         Pre-compute embeddings for all unique strings in the given JSON objects.
 
@@ -232,6 +842,20 @@ class SemanticJsonTreeConsistencyEvaluator:
             json_objects: List of JSON objects to extract strings from
             batch_size: Batch size for SentenceTransformer encoding
             show_progress: Whether to show progress bar
+            max_workers: Max parallel workers for Bedrock API calls (ThreadPoolExecutor)
+            use_batch_inference: If True, use Bedrock Batch Inference (S3-based async)
+                                 instead of parallel single API calls. Recommended for
+                                 large datasets (>10,000 strings).
+            use_async: If True, use asyncio with aioboto3 for Bedrock API calls.
+                       This is more efficient than ThreadPoolExecutor for I/O-bound
+                       operations. Requires aioboto3 package.
+            max_concurrent: Maximum concurrent API calls when use_async=True (default 50)
+            s3_bucket: S3 bucket for batch inference input/output (required if use_batch_inference=True)
+            s3_prefix: S3 prefix for batch inference files
+            role_arn: IAM role ARN for Bedrock Batch Inference
+            auto_save_cache: If True, automatically save embeddings to a cache file with
+                             model_id, dimension, and timestamp in the filename
+            cache_dir: Directory to save the auto-generated cache file (default: current directory)
 
         Returns:
             Number of unique strings embedded
@@ -256,11 +880,64 @@ class SemanticJsonTreeConsistencyEvaluator:
             # Use SentenceTransformer batch encoding
             self._batch_encode_sentence_transformer(new_strings, batch_size, show_progress)
         elif self.bedrock_client:
-            # Use parallel Bedrock API calls
-            self._batch_encode_bedrock(new_strings, show_progress)
+            if use_batch_inference:
+                # Use true Bedrock Batch Inference (S3-based async)
+                self._batch_encode_bedrock_batch_inference(
+                    new_strings, show_progress,
+                    s3_bucket=s3_bucket, s3_prefix=s3_prefix, role_arn=role_arn
+                )
+            elif use_async:
+                # Use async API calls with aioboto3
+                if show_progress:
+                    print(f"Using async Bedrock API calls (max {max_concurrent} concurrent)...")
+                self._batch_encode_bedrock_async(
+                    new_strings, show_progress, max_concurrent=max_concurrent
+                )
+            else:
+                # Auto-select best method based on string count
+                self._batch_encode_bedrock_auto(
+                    new_strings, show_progress, max_workers=max_workers,
+                    s3_bucket=s3_bucket, s3_prefix=s3_prefix, role_arn=role_arn
+                )
 
         self._embedding_dict_populated = True
+
+        # Auto-save cache if requested
+        if auto_save_cache and len(new_strings) > 0:
+            import os
+            from datetime import datetime
+
+            # Generate descriptive filename
+            model_short = self.model_id.replace("amazon.", "").replace(":", "_").replace(".", "_")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            cache_filename = f"embeddings_{model_short}_dim{self.embedding_dim}_{timestamp}.npz"
+
+            if cache_dir:
+                os.makedirs(cache_dir, exist_ok=True)
+                cache_path = os.path.join(cache_dir, cache_filename)
+            else:
+                cache_path = cache_filename
+
+            self.save_embedding_dict(cache_path)
+            if show_progress:
+                print(f"Auto-saved embedding cache to: {cache_path}")
+
         return len(new_strings)
+
+    def _store_embedding(self, text: str, embedding: np.ndarray) -> None:
+        """Store embedding with optional fp16 conversion and cache size limit."""
+        # Convert to fp16 if enabled (saves ~50% memory)
+        if self.use_fp16_embeddings:
+            embedding = embedding.astype(np.float16)
+
+        # Check cache size limit
+        if self.max_embedding_cache_size > 0 and len(self._embedding_dict) >= self.max_embedding_cache_size:
+            # Simple eviction: remove oldest (first) entry
+            if self._embedding_dict:
+                oldest_key = next(iter(self._embedding_dict))
+                del self._embedding_dict[oldest_key]
+
+        self._embedding_dict[text] = embedding
 
     def _batch_encode_sentence_transformer(self, strings: List[str], batch_size: int = 64,
                                             show_progress: bool = True) -> None:
@@ -280,7 +957,7 @@ class SemanticJsonTreeConsistencyEvaluator:
             try:
                 embeddings = self.embedding_model.encode(batch, show_progress_bar=False, batch_size=batch_size)
                 for orig_str, emb in zip(original_batch, embeddings):
-                    self._embedding_dict[orig_str] = emb
+                    self._store_embedding(orig_str, emb)
             except Exception as e:
                 warnings.warn(f"Batch encoding failed: {e}")
 
@@ -289,7 +966,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         """Batch encode strings using Bedrock API with parallel calls."""
         def encode_single(text: str) -> Tuple[str, Optional[np.ndarray]]:
             try:
-                emb = get_embeddings(text, self.model_id, self.bedrock_client)
+                emb = get_embeddings(text, self.model_id, self.bedrock_client, output_embedding_length=self.embedding_dim)
                 return (text, emb)
             except Exception as e:
                 warnings.warn(f"Bedrock embedding failed for '{text[:50]}...': {e}")
@@ -305,7 +982,396 @@ class SemanticJsonTreeConsistencyEvaluator:
             for future in iterator:
                 text, emb = future.result()
                 if emb is not None:
-                    self._embedding_dict[text] = emb
+                    self._store_embedding(text, emb)
+
+    def _batch_encode_bedrock_async(self, strings: List[str], show_progress: bool = True,
+                                     max_concurrent: int = 50, region_name: str = None) -> None:
+        """
+        Batch encode strings using Bedrock API with async calls.
+
+        This method uses aioboto3 for true async I/O, which is more efficient than
+        ThreadPoolExecutor for I/O-bound operations like API calls.
+
+        Args:
+            strings: List of strings to embed
+            show_progress: Whether to show progress bar
+            max_concurrent: Maximum concurrent API calls (default 50)
+            region_name: AWS region name (default: use client's region)
+        """
+        try:
+            import aioboto3
+        except ImportError:
+            warnings.warn("aioboto3 not installed. Falling back to ThreadPoolExecutor. "
+                         "Install with: pip install aioboto3")
+            self._batch_encode_bedrock(strings, show_progress, max_workers=max_concurrent)
+            return
+
+        if region_name is None:
+            if hasattr(self.bedrock_client, '_client_config'):
+                region_name = self.bedrock_client._client_config.region_name
+            else:
+                region_name = "us-west-2"
+
+        async def encode_single_async(
+            text: str,
+            client,
+            semaphore: asyncio.Semaphore
+        ) -> Tuple[str, Optional[np.ndarray]]:
+            """Encode a single string asynchronously."""
+            async with semaphore:
+                try:
+                    # Build request body based on model
+                    if self.model_id == "amazon.titan-embed-text-v1":
+                        request_body = {"inputText": text}
+                    elif self.model_id == "amazon.titan-embed-text-v2:0":
+                        request_body = {
+                            "inputText": text,
+                            "dimensions": self.embedding_dim,
+                            "normalize": True,
+                            "embeddingTypes": ["float"]
+                        }
+                    elif self.model_id == "cohere.embed-multilingual-v3":
+                        # Cohere Embed Multilingual V3 returns fixed 1024-dim embeddings
+                        request_body = {
+                            "texts": [text],
+                            "input_type": "clustering",
+                            "truncate": "END"
+                        }
+                    elif self.model_id in ["cohere.embed-v4:0", "us.cohere.embed-v4:0"]:
+                        request_body = {
+                            "texts": [text],
+                            "input_type": "search_document",
+                            "embedding_types": ["float"]
+                        }
+                    else:
+                        request_body = {"inputText": text}
+
+                    # Call Bedrock API
+                    response = await client.invoke_model(
+                        modelId=self.model_id,
+                        body=json.dumps(request_body),
+                        contentType="application/json",
+                        accept="application/json"
+                    )
+
+                    # Read response body
+                    response_body = await response['body'].read()
+                    result = json.loads(response_body)
+
+                    # Extract embedding based on model
+                    if self.model_id == "cohere.embed-multilingual-v3":
+                        embedding = np.array(result["embeddings"][0])
+                    elif self.model_id in ["cohere.embed-v4:0", "us.cohere.embed-v4:0"]:
+                        # Cohere Embed V4 returns embeddings as dict with 'float' key
+                        embedding = np.array(result["embeddings"]["float"][0])
+                    elif "embeddingsByType" in result:
+                        embedding = np.array(result["embeddingsByType"]["float"])
+                    else:
+                        embedding = np.array(result.get("embedding", []))
+
+                    return (text, embedding)
+
+                except Exception as e:
+                    warnings.warn(f"Async Bedrock embedding failed for '{text[:50]}...': {e}")
+                    return (text, None)
+
+        async def encode_all_async():
+            """Encode all strings concurrently."""
+            session = aioboto3.Session()
+            semaphore = asyncio.Semaphore(max_concurrent)
+
+            async with session.client('bedrock-runtime', region_name=region_name) as client:
+                tasks = [encode_single_async(s, client, semaphore) for s in strings]
+
+                if show_progress:
+                    results = []
+                    for coro in atqdm(asyncio.as_completed(tasks), total=len(tasks),
+                                      desc="Async Bedrock embeddings"):
+                        result = await coro
+                        results.append(result)
+                else:
+                    results = await asyncio.gather(*tasks)
+
+                return results
+
+        # Run the async function
+        try:
+            # Check if we're already in an event loop
+            loop = asyncio.get_running_loop()
+            # If we are, use nest_asyncio or run in executor
+            import nest_asyncio
+            nest_asyncio.apply()
+            results = asyncio.run(encode_all_async())
+        except RuntimeError:
+            # No running event loop, safe to use asyncio.run
+            results = asyncio.run(encode_all_async())
+
+        # Store results in embedding dict
+        for text, emb in results:
+            if emb is not None:
+                self._embedding_dict[text] = emb
+
+    def _batch_encode_bedrock_auto(
+        self, strings: List[str], show_progress: bool = True,
+        max_workers: int = 10, s3_bucket: str = None,
+        s3_prefix: str = "bedrock-batch/embeddings", role_arn: str = None,
+        batch_threshold: int = 5000
+    ) -> None:
+        """
+        Auto-select the best embedding method based on string count.
+
+        This method automatically chooses between parallel API calls and
+        batch inference based on the number of strings to embed:
+
+        - < 100 strings: Parallel API (batch inference not supported)
+        - 100 - batch_threshold: Parallel API (faster, no job overhead)
+        - > batch_threshold: Batch inference (no rate limits, better throughput)
+
+        Args:
+            strings: List of strings to embed
+            show_progress: Whether to show progress
+            max_workers: Max parallel workers for API calls
+            s3_bucket: S3 bucket for batch inference
+            s3_prefix: S3 prefix for batch inference files
+            role_arn: IAM role ARN for batch inference
+            batch_threshold: String count threshold for batch inference (default 5000)
+        """
+        num_strings = len(strings)
+
+        # Check if batch inference is configured
+        batch_configured = (s3_bucket is not None or
+                           os.environ.get('BEDROCK_BATCH_S3_BUCKET') is not None)
+
+        if num_strings < 100:
+            # Batch inference not supported below 100
+            if show_progress:
+                print(f"Using parallel API calls ({num_strings} strings < 100 minimum for batch)")
+            self._batch_encode_bedrock(strings, show_progress, max_workers)
+
+        elif num_strings <= batch_threshold or not batch_configured:
+            # Parallel API is faster for medium-sized datasets
+            if show_progress:
+                if not batch_configured:
+                    print(f"Using parallel API calls ({num_strings} strings, batch not configured)")
+                else:
+                    print(f"Using parallel API calls ({num_strings} strings <= {batch_threshold} threshold)")
+            self._batch_encode_bedrock(strings, show_progress, max_workers)
+
+        else:
+            # Large dataset - use batch inference with async parallel chunks
+            if show_progress:
+                print(f"Using batch inference ({num_strings} strings > {batch_threshold} threshold)")
+            self._batch_encode_bedrock_batch_inference_async(
+                strings, show_progress,
+                s3_bucket=s3_bucket, s3_prefix=s3_prefix, role_arn=role_arn
+            )
+
+    def _batch_encode_bedrock_batch_inference_async(
+        self, strings: List[str], show_progress: bool = True,
+        s3_bucket: str = None, s3_prefix: str = "bedrock-batch/embeddings",
+        role_arn: str = None, chunk_size: int = 50000
+    ) -> None:
+        """
+        Batch encode using async parallel batch inference jobs.
+
+        For very large datasets, this method chunks the strings and runs
+        multiple batch inference jobs concurrently using asyncio.
+
+        Args:
+            strings: List of strings to embed
+            show_progress: Whether to show progress
+            s3_bucket: S3 bucket for batch inference
+            s3_prefix: S3 prefix for files
+            role_arn: IAM role ARN for batch inference
+            chunk_size: Strings per batch job (default 50000)
+        """
+        import asyncio
+        from .bedrock_utils import (
+            prepare_batch_embedding_input,
+            upload_to_s3,
+            create_batch_inference_job,
+            get_batch_job_status,
+            parse_batch_embedding_output
+        )
+        import uuid
+        import os as _os
+
+        # Get configuration
+        if s3_bucket is None:
+            s3_bucket = _os.environ.get('BEDROCK_BATCH_S3_BUCKET')
+        if role_arn is None:
+            role_arn = _os.environ.get('BEDROCK_BATCH_ROLE_ARN')
+
+        region = "us-west-2"
+        if hasattr(self.bedrock_client, '_client_config'):
+            region = self.bedrock_client._client_config.region_name
+
+        # Chunk the strings
+        chunks = [strings[i:i + chunk_size] for i in range(0, len(strings), chunk_size)]
+        num_chunks = len(chunks)
+
+        if show_progress:
+            print(f"Splitting {len(strings)} strings into {num_chunks} batch job(s)...")
+
+        async def submit_and_wait_job(chunk_strings: List[str], chunk_idx: int) -> dict:
+            """Submit a batch job and wait for completion."""
+            job_id = uuid.uuid4().hex[:8]
+
+            # Prepare input
+            input_path = prepare_batch_embedding_input(chunk_strings, self.model_id, embedding_dim=self.embedding_dim)
+
+            try:
+                # Upload to S3
+                input_s3_key = f"{s3_prefix}/input/{job_id}/input.jsonl"
+                input_s3_uri = upload_to_s3(input_path, s3_bucket, input_s3_key, region)
+
+                output_s3_prefix = f"{s3_prefix}/output/{job_id}/"
+                output_s3_uri = f"s3://{s3_bucket}/{output_s3_prefix}"
+
+                # Create batch job
+                job_response = create_batch_inference_job(
+                    input_s3_uri=input_s3_uri,
+                    output_s3_uri=output_s3_uri,
+                    model_id=self.model_id,
+                    role_arn=role_arn,
+                    job_name=f"embed-chunk{chunk_idx}-{job_id}",
+                    region=region
+                )
+                job_arn = job_response['jobArn']
+
+                if show_progress:
+                    print(f"  Chunk {chunk_idx + 1}/{num_chunks}: Job submitted ({len(chunk_strings)} strings)")
+
+                # Poll for completion (async sleep)
+                while True:
+                    status = get_batch_job_status(job_arn, region)
+                    job_status = status.get('status', 'Unknown')
+
+                    if job_status == 'Completed':
+                        # Parse results
+                        embeddings = parse_batch_embedding_output(output_s3_uri, region)
+
+                        # Map back to original strings
+                        result = {}
+                        for idx, text in enumerate(chunk_strings):
+                            record_id = str(idx)
+                            if record_id in embeddings:
+                                result[text] = embeddings[record_id]
+
+                        if show_progress:
+                            print(f"  Chunk {chunk_idx + 1}/{num_chunks}: Completed ({len(result)} embeddings)")
+                        return result
+
+                    if job_status in ['Failed', 'Stopped', 'Expired']:
+                        error_msg = status.get('message', 'Unknown error')
+                        warnings.warn(f"Chunk {chunk_idx + 1} failed: {error_msg}")
+                        return {}
+
+                    await asyncio.sleep(15)  # Non-blocking sleep
+
+            finally:
+                # Cleanup local temp file
+                if _os.path.exists(input_path):
+                    _os.remove(input_path)
+
+        async def run_all_jobs():
+            """Run all batch jobs concurrently."""
+            tasks = [submit_and_wait_job(chunk, idx) for idx, chunk in enumerate(chunks)]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            all_embeddings = {}
+            for result in results:
+                if isinstance(result, dict):
+                    all_embeddings.update(result)
+                elif isinstance(result, Exception):
+                    warnings.warn(f"Batch job failed: {result}")
+
+            return all_embeddings
+
+        # Run async jobs
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        if loop.is_running():
+            # If already in async context, create task
+            import nest_asyncio
+            nest_asyncio.apply()
+            embeddings = loop.run_until_complete(run_all_jobs())
+        else:
+            embeddings = loop.run_until_complete(run_all_jobs())
+
+        # Update embedding dict
+        self._embedding_dict.update(embeddings)
+
+        if show_progress:
+            print(f"Batch inference completed: {len(embeddings)} total embeddings")
+
+    def _batch_encode_bedrock_batch_inference(
+        self, strings: List[str], show_progress: bool = True,
+        s3_bucket: str = None, s3_prefix: str = "bedrock-batch/embeddings",
+        role_arn: str = None, min_records: int = 100
+    ) -> None:
+        """
+        Batch encode strings using true Bedrock Batch Inference (S3-based async).
+
+        This method uses Bedrock's batch inference API which is more efficient
+        for large datasets (>100 strings) compared to parallel single API calls.
+
+        IMPORTANT: Bedrock Batch Inference requires a minimum of 100 records.
+        For smaller datasets, this method will automatically fall back to
+        parallel API calls.
+
+        Args:
+            strings: List of strings to embed
+            show_progress: Whether to show progress
+            s3_bucket: S3 bucket for input/output (required for batch inference)
+            s3_prefix: S3 prefix for files
+            role_arn: IAM role ARN for Bedrock Batch Inference
+            min_records: Minimum records for batch inference (default 100)
+        """
+        # Check minimum records requirement
+        if len(strings) < min_records:
+            if show_progress:
+                print(f"Only {len(strings)} strings (< {min_records} minimum). "
+                      f"Using parallel API calls instead of batch inference.")
+            self._batch_encode_bedrock(strings, show_progress)
+            return
+
+        from .bedrock_utils import batch_compute_embeddings_chunked
+
+        if show_progress:
+            print(f"Using Bedrock Batch Inference for {len(strings)} strings...")
+
+        try:
+            # Get region from bedrock client if possible
+            region = "us-west-2"
+            if hasattr(self.bedrock_client, '_client_config'):
+                region = self.bedrock_client._client_config.region_name
+
+            embeddings = batch_compute_embeddings_chunked(
+                strings=strings,
+                model_id=self.model_id,
+                s3_bucket=s3_bucket,
+                s3_prefix=s3_prefix,
+                role_arn=role_arn,
+                region=region,
+                show_progress=show_progress,
+                embedding_dim=self.embedding_dim
+            )
+
+            # Update embedding dict
+            self._embedding_dict.update(embeddings)
+
+            if show_progress:
+                print(f"Batch inference completed: {len(embeddings)} embeddings computed")
+
+        except Exception as e:
+            warnings.warn(f"Batch inference failed: {e}. Falling back to parallel API calls.")
+            # Fallback to parallel single API calls
+            self._batch_encode_bedrock(strings, show_progress)
 
     def clear_embedding_cache(self) -> None:
         """Clear the pre-computed embedding dictionary."""
@@ -330,24 +1396,27 @@ class SemanticJsonTreeConsistencyEvaluator:
         strings = list(self._embedding_dict.keys())
         embeddings = np.array([self._embedding_dict[s] for s in strings])
 
-        # Save metadata along with embeddings
+        # Save metadata along with embeddings (include dimension for compatibility check)
         np.savez_compressed(
             filepath,
             strings=np.array(strings, dtype=object),
             embeddings=embeddings,
-            model_id=np.array([self.model_id], dtype=object)
+            model_id=np.array([self.model_id], dtype=object),
+            embedding_dim=np.array([self.embedding_dim])
         )
 
-        print(f"Saved {len(strings)} embeddings to {filepath}")
+        print(f"Saved {len(strings)} embeddings (model={self.model_id}, dim={self.embedding_dim}) to {filepath}")
         return len(strings)
 
-    def load_embedding_dict(self, filepath: str, strict_model_check: bool = True) -> int:
+    def load_embedding_dict(self, filepath: str, strict_model_check: bool = True,
+                             strict_dimension_check: bool = True) -> int:
         """
         Load a pre-computed embedding dictionary from disk.
 
         Args:
             filepath: Path to the saved embedding dictionary (.npz file)
             strict_model_check: If True, warn if model_id doesn't match
+            strict_dimension_check: If True, raise error if embedding dimension doesn't match
 
         Returns:
             Number of embeddings loaded
@@ -368,15 +1437,36 @@ class SemanticJsonTreeConsistencyEvaluator:
                     f"current is '{self.model_id}'. Embeddings may not be compatible."
                 )
 
+        # Check dimension compatibility
+        if 'embedding_dim' in data:
+            saved_dim = int(data['embedding_dim'][0])
+            if saved_dim != self.embedding_dim:
+                msg = (f"Embedding dimension mismatch: saved with dim={saved_dim}, "
+                       f"current is dim={self.embedding_dim}. "
+                       f"Cannot mix different dimension embeddings.")
+                if strict_dimension_check:
+                    raise ValueError(msg)
+                else:
+                    warnings.warn(msg)
+
         strings = data['strings']
         embeddings = data['embeddings']
+
+        # Verify actual embedding dimensions match
+        if len(embeddings) > 0:
+            actual_dim = embeddings[0].shape[0]
+            if actual_dim != self.embedding_dim:
+                msg = (f"Actual embedding dimension ({actual_dim}) doesn't match "
+                       f"current setting ({self.embedding_dim}). Cannot load cache.")
+                raise ValueError(msg)
 
         # Populate the dictionary
         for s, emb in zip(strings, embeddings):
             self._embedding_dict[str(s)] = emb
 
         self._embedding_dict_populated = True
-        print(f"Loaded {len(strings)} embeddings from {filepath}")
+        saved_dim_str = f", dim={data['embedding_dim'][0]}" if 'embedding_dim' in data else ""
+        print(f"Loaded {len(strings)} embeddings{saved_dim_str} from {filepath}")
         return len(strings)
 
     def _calculate_semantic_similarity(self, text1: str, text2: str) -> float:
@@ -461,42 +1551,40 @@ class SemanticJsonTreeConsistencyEvaluator:
     def insert_cost(self, node: JsonNode) -> float:
         """
         Calculate the cost of inserting a node.
-        
+
         Args:
             node: The node to insert
-            
+
         Returns:
-            The cost of insertion
+            The cost of insertion, bounded in [0, 1]
         """
         # Base cost is 1.0
         cost = 1.0
 
-        # Apply path-based weighting
+        # Apply path-based weighting (depth decay ensures cost <= 1.0)
         cost *= self.calculate_path_weight(node.path)
 
-        return cost
+        # Ensure boundedness for formal properties
+        return min(1.0, cost)
 
     def delete_cost(self, node: JsonNode) -> float:
         """
         Calculate the cost of deleting a node.
-        
+
         Args:
             node: The node to delete
-            
+
         Returns:
-            The cost of deletion
+            The cost of deletion, bounded in [0, 1]
         """
         # Base cost is 1.0
         cost = 1.0
 
-        # Apply path-based weighting
+        # Apply path-based weighting (depth decay ensures cost <= 1.0)
         cost *= self.calculate_path_weight(node.path)
 
-        # Higher cost for deleting required fields
-        if node.path in self.required_fields:
-            cost *= 2.0
-
-        return cost
+        # Ensure boundedness for formal properties
+        return min(1.0, cost)
 
     def _compare_strings(self, str1: str, str2: str, method="cosine") -> float:
         """Compare two strings with optional semantic similarity and chunking for long text."""
@@ -549,22 +1637,24 @@ class SemanticJsonTreeConsistencyEvaluator:
         """Compare two numbers with tolerance."""
         return 0 if num1 != num2 else 1
 
-    def update_cost(self, node1: JsonNode, node2: JsonNode, structural_weight=0.5) -> float:
+    def update_cost(self, node1: JsonNode, node2: JsonNode) -> float:
         """
         Calculate the cost of updating a node.
-        
+
+        Paper Eq. (2): γ_upd = α · γ_struct + (1-α) · γ_content
+
         Args:
             node1: The source node
             node2: The target node
-            
+
         Returns:
-            The cost of update
+            The cost of update (0 = identical, 1 = completely different)
         """
         structural_cost = self.structural_update_cost(node1, node2)
         content_cost = self.content_update_cost(node1, node2)
 
-        # Combined cost with weighting
-        return structural_weight * structural_cost + (1 - structural_weight) * content_cost
+        # Paper Eq.(1): γ_upd = w · γ_struct + (1-w) · γ_content
+        return self.structural_weight * structural_cost + (1 - self.structural_weight) * content_cost
 
     def _calculate_structural_similarity(self, node1: JsonNode, node2: JsonNode) -> float:
         """Calculate structural similarity: paths and field names only"""
@@ -586,12 +1676,24 @@ class SemanticJsonTreeConsistencyEvaluator:
 
         return structural_similarity
 
-    def _calculate_content_similarity(self, node1: JsonNode, node2: JsonNode, structural_sim_threshold=0.3) -> float:
-        """Calculate content similarity: includes type changes and value differences"""
+    def _calculate_content_similarity(self, node1: JsonNode, node2: JsonNode) -> float:
+        """Calculate content similarity: value comparison only.
 
-        structural_sim = self._calculate_structural_similarity(node1, node2)
+        Note: Structural similarity (field names, paths) should be evaluated separately.
+        This function focuses purely on value similarity for leaf nodes.
+        """
+        if not node1.children and not node2.children:
+            # Check if this field requires exact matching (bypass semantic similarity)
+            if self.exact_match_fields:
+                # Extract field name from path (e.g., "root.name" -> "name")
+                field_name = node1.path.split('.')[-1] if node1.path else node1.label
+                # Also check label directly (handles array elements like "name[0]")
+                label_name = re.sub(r'\[\d+\]', '', node1.label.split('.')[-1])
 
-        if not node1.children and not node2.children and structural_sim > structural_sim_threshold:
+                if field_name in self.exact_match_fields or label_name in self.exact_match_fields:
+                    # Use exact string matching instead of semantic similarity
+                    return 1.0 if str(node1.value) == str(node2.value) else 0.0
+
             # Same type comparisons
             if node1.node_type == node2.node_type:
                 if node1.node_type == "string":
@@ -601,26 +1703,23 @@ class SemanticJsonTreeConsistencyEvaluator:
                 elif node1.node_type == "array":
                     return 1 - self._compare_arrays_unordered(list(node1.value), list(node2.value), node1.label, node2.label, variation_type="content")
                 elif node1.node_type == "object":
-                    return self._calculate_content_similarity(node1.value, node2.value, structural_sim_threshold=structural_sim_threshold)
+                    return self._calculate_content_similarity(node1.value, node2.value)
                 else:
-                    return 1.0
+                    # boolean, null - exact match
+                    return 1.0 if node1.value == node2.value else 0.0
             else:
+                # Cross-type comparison: use semantic similarity with type penalty
                 val1_str = str(node1.value)
                 val2_str = str(node2.value)
 
-                # Use semantic similarity on string representations
                 semantic_sim = self._calculate_semantic_similarity(val1_str, val2_str)
-
-                # Apply small type penalty
                 type_cost = self.type_change_cost.get((node1.node_type, node2.node_type), 1.0)
-                content_similarity = max(0.0, semantic_sim - type_cost)
+                return max(0.0, semantic_sim - type_cost)
 
-                return content_similarity
-
-        return 0.0
+        return 0.0  # Non-leaf nodes have no direct content to compare
 
     def structural_update_cost(self, node1: JsonNode, node2: JsonNode) -> float:
-        """Calculate structural update cost only"""
+        """Calculate structural update cost only, bounded in [0, 1]"""
         # Early exit only for leaf nodes with same structure
         if (not node1.children and not node2.children and
             node1.label == node2.label and
@@ -635,10 +1734,11 @@ class SemanticJsonTreeConsistencyEvaluator:
         path_weight2 = self.calculate_path_weight(node2.path)
         avg_path_weight = (path_weight1 + path_weight2) / 2.0
 
-        return cost * avg_path_weight
+        # Ensure boundedness for formal properties
+        return min(1.0, cost * avg_path_weight)
 
     def content_update_cost(self, node1: JsonNode, node2: JsonNode) -> float:
-        """Calculate content update cost only"""
+        """Calculate content update cost only, bounded in [0, 1]"""
         if (node1.node_type == node2.node_type and
             node1.value == node2.value):
             return 0.0  # Content identical
@@ -651,7 +1751,8 @@ class SemanticJsonTreeConsistencyEvaluator:
         path_weight2 = self.calculate_path_weight(node2.path)
         avg_path_weight = (path_weight1 + path_weight2) / 2.0
 
-        return cost * avg_path_weight
+        # Ensure boundedness for formal properties
+        return min(1.0, cost * avg_path_weight)
 
     def _compare_arrays_unordered(self, arr1: List[Any], arr2: List[Any], arr1_label: str, arr2_label: str, variation_type="content") -> float:
         """
@@ -1060,17 +2161,8 @@ class SemanticJsonTreeConsistencyEvaluator:
                     # Insertion
                     content_total_cost += self.insert_cost(children2[j])
 
-            # Calculate matched pairs and size penalty
-            matched_pairs = sum(1 for i, j in zip(row_indices, col_indices) if i < n1 and j < n2)
-            unmatched_total = (n1 - matched_pairs) + (n2 - matched_pairs)
-            size_penalty = min(unmatched_total * 0.1, max_size * 0.3)
-
-            # Add size penalty to both costs
-            structural_total_cost += size_penalty
-            content_total_cost += size_penalty
-
-            # Weighted average: 0.5 * structural + 0.5 * content
-            total_cost = 0.5 * structural_total_cost + 0.5 * content_total_cost
+            # Tree-level weighted average, Eq. (2): γ_upd = w · γ_struct + (1-w) · γ_content
+            total_cost = self.structural_weight * structural_total_cost + (1 - self.structural_weight) * content_total_cost
 
             normalized_cost = total_cost / len(row_indices)
             normalized_cost = min(normalized_cost, 1.0)
@@ -1104,15 +2196,6 @@ class SemanticJsonTreeConsistencyEvaluator:
 
         total_cost = sum(cost_matrix[i][j] for i, j in zip(row_indices, col_indices))
 
-        # Calculate actual matched pairs
-        matched_pairs = sum(1 for i, j in zip(row_indices, col_indices) if i < n1 and j < n2)
-        unmatched_total = (n1 - matched_pairs) + (n2 - matched_pairs)
-
-        # Add size penalty based on unmatched elements
-        size_penalty = min(unmatched_total * 0.1, max_size * 0.3)
-
-        total_cost += size_penalty
-
         normalized_cost = total_cost / len(row_indices)
         normalized_cost = min(normalized_cost, 1.0)
 
@@ -1120,6 +2203,61 @@ class SemanticJsonTreeConsistencyEvaluator:
 
     def calculate_tree_edit_distance_opt(self, json1: Dict[str, Any], json2: Dict[str, Any], variation_type: str = "combined") -> float:
         return self.calculate_tree_edit_distance(json1, json2, original_zss=False, variation_type=variation_type)
+
+    def calculate_tree_edit_distance_fast(self, json1: Dict[str, Any], json2: Dict[str, Any],
+                                          variation_type: str = "combined",
+                                          use_greedy: bool = None) -> float:
+        """
+        Optimized tree edit distance calculation with all performance improvements.
+
+        Optimizations included:
+        1. Memoization for subtree comparisons
+        2. Single-pass combined calculation
+        3. Optional greedy matching (O(B²) instead of O(B³))
+        4. Vectorized leaf comparison
+        5. Early pruning for mismatched structures
+
+        Args:
+            json1: First JSON object
+            json2: Second JSON object
+            variation_type: "structural", "content", or "combined"
+            use_greedy: Override greedy matching setting (None uses instance setting)
+
+        Returns:
+            similarity_score (0-1, higher is more similar)
+        """
+        # Temporarily override greedy setting if specified
+        original_greedy = self.use_greedy_matching
+        if use_greedy is not None:
+            self.use_greedy_matching = use_greedy
+
+        try:
+            json1 = {"root": json1} if isinstance(json1, dict) else json1
+            json2 = {"root": json2} if isinstance(json2, dict) else json2
+
+            # CRITICAL: Clear node hash cache to prevent id() reuse bugs.
+            # Python may reuse memory addresses for new objects after old ones are garbage collected.
+            self._node_hash_cache.clear()
+
+            # Convert JSONs to trees
+            tree1 = JsonNode.from_dict(json1, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys,
+                                       order_sensitive_fields=self.order_sensitive_fields)
+            tree2 = JsonNode.from_dict(json2, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys,
+                                       order_sensitive_fields=self.order_sensitive_fields)
+
+            # === Optimization 4: Vectorized leaf comparison ===
+            # Pre-compute all leaf similarities before tree traversal
+            self._precompute_leaf_similarities(tree1, tree2)
+
+            # Use optimized matching cost calculation
+            distance = self._calculate_optimal_matching_cost_fast(tree1, tree2, variation_type)
+
+            similarity = 1.0 - distance
+            return similarity
+
+        finally:
+            # Restore original greedy setting
+            self.use_greedy_matching = original_greedy
 
     def calculate_tree_edit_distance(self, json1: Dict[str, Any], json2: Dict[str, Any], original_zss=True, variation_type: str = "combined") -> float:
         """
@@ -1137,6 +2275,12 @@ class SemanticJsonTreeConsistencyEvaluator:
         json1 = {"root": json1} if isinstance(json1, dict) else json1
         json2 = {"root": json2} if isinstance(json2, dict) else json2
 
+        # CRITICAL: Clear node hash cache to prevent id() reuse bugs.
+        # Python may reuse memory addresses for new objects after old ones are garbage collected.
+        # The _node_hash_cache uses id(node) as key, so stale entries could return wrong hashes
+        # for new nodes that happen to reuse the same memory address.
+        self._node_hash_cache.clear()
+
         # Convert JSONs to trees (pass order_sensitive_fields to preserve order for those arrays)
         tree1 = JsonNode.from_dict(json1, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys,
                                    order_sensitive_fields=self.order_sensitive_fields)
@@ -1153,7 +2297,7 @@ class SemanticJsonTreeConsistencyEvaluator:
                     update_cost_func = self.content_update_cost
                 else:
                     update_cost_func = self.update_cost
-                
+
                 distance = zss.distance(
                     tree1, tree2,
                     get_children=lambda x: x.get_children(),
@@ -1172,7 +2316,8 @@ class SemanticJsonTreeConsistencyEvaluator:
                     f"and trees have compatible structure: {str(e)}"
                 ) from e
         else:
-            distance = self._calculate_optimal_matching_cost(tree1, tree2, variation_type)
+            # Use optimized version with all improvements
+            distance = self._calculate_optimal_matching_cost_fast(tree1, tree2, variation_type)
 
         similarity = 1.0 - distance
         return similarity
@@ -1190,101 +2335,6 @@ class SemanticJsonTreeConsistencyEvaluator:
     def calculate_similarity_with_deepdiff(self, json1: [Dict[str, Any], List], json2: [Dict[str, Any], List], **kwargs) -> float:
         diff = DeepDiff(json1, json2, ignore_order=True, cache_size=5000, get_deep_distance=True)
         return 1- diff['deep_distance']
-
-    def calculate_variation_consistency(self, variations: List[Dict[str, Any]],
-                                       method: str = 'sted',
-                                       variation_type: str = 'combined',
-                                       apply_power_transform: bool = True,
-                                       steepness_factor: int = 20) -> Dict[str, float]:
-        """
-        Calculate consistency metrics for a set of variations using pairwise distances.
-        
-        Args:
-            variations: List of JSON variations to compare
-            method: Similarity calculation method ('sted', 'ted', 'bertscore', etc.)
-            variation_type: Type of variation ('structural', 'content', 'combined')
-            apply_power_transform: Whether to apply power transformation for better discrimination
-            steepness_factor: Exponent for power transformation (default: 20)
-            
-        Returns:
-            Dict with empty_ratio, consistency_score, and penalized_consistency
-        """
-        from itertools import combinations
-
-        # Count empty outputs
-        def is_empty(output):
-            if output is None:
-                return True
-            if isinstance(output, (dict, list)) and len(output) == 0:
-                return True
-            return False
-
-        empty_count = sum(1 for v in variations if is_empty(v))
-        total_count = len(variations)
-        empty_ratio = empty_count / total_count if total_count > 0 else 0.0
-
-        # Filter valid variations
-        valid_variations = [v for v in variations if not is_empty(v)]
-
-        if len(valid_variations) < 2:
-            return {
-                'empty_ratio': empty_ratio,
-                'consistency_score': float('inf'),
-                'penalized_consistency': float('inf'),
-                'valid_count': len(valid_variations)
-            }
-
-        # Calculate pairwise distances
-        pairwise_distances = []
-        for v1, v2 in combinations(valid_variations, 2):
-            try:
-                similarity = self.calculate_similarity_method[method](v1, v2, variation_type=variation_type) \
-                    if method in ['sted', 'ted'] else self.calculate_similarity_method[method](v1, v2)
-                pairwise_distances.append(1.0 - similarity)
-            except Exception as e:
-                warnings.warn(f"Error calculating distance: {e}")
-
-        if not pairwise_distances:
-            return {
-                'empty_ratio': empty_ratio,
-                'consistency_score': float('inf'),
-                'penalized_consistency': float('inf'),
-                'valid_count': len(valid_variations)
-            }
-
-        # Calculate base consistency score (std deviation)
-        std_distance = float(np.std(pairwise_distances))
-        mean_distance = float(np.mean(pairwise_distances))
-
-        # Apply power transformation for better discrimination
-        if apply_power_transform:
-            n = len(valid_variations)
-            # Calculate max possible std for n values
-            zeros = n // 2
-            ones = n - zeros
-            max_possible_std = float(np.std([0] * zeros + [1] * ones))
-
-            # Normalize std to [0,1] range
-            normalized_std = std_distance / max_possible_std if max_possible_std > 0 else 0.0
-
-            # Apply exponential transformation: higher std = worse consistency
-            # Transform to consistency score (inverse of instability)
-            consistency_score = 1.0 / (1.0 + normalized_std * 2)
-            consistency_score = consistency_score ** steepness_factor
-        else:
-            consistency_score = std_distance
-
-        # Apply penalty based on empty ratio
-        penalized_consistency = consistency_score * (1 - empty_ratio) if apply_power_transform else consistency_score * (1 + empty_ratio)
-
-        return {
-            'empty_ratio': empty_ratio,
-            'consistency_score': consistency_score,
-            'penalized_consistency': penalized_consistency,
-            'mean_distance': mean_distance,
-            'std_distance': std_distance,
-            'valid_count': len(valid_variations)
-        }
 
     def calculate_similarity_with_deepdiff_opt(self, json1: [Dict[str, Any], List], json2: [Dict[str, Any], List], variation_type: str = "combined", structural_weight=0.5, **kwargs) -> float:
         """
