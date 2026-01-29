@@ -1138,6 +1138,177 @@ cadj_pivot.to_csv(os.path.join(args.output_dir, 'cadj_by_temperature.csv'))
 ranking_pivot.to_csv(os.path.join(args.output_dir, 'ranking_score_by_temperature.csv'))
 
 # ============================================================================
+# NEW: C_mean and Scalability Score by Model and Temperature
+# ============================================================================
+print("\n" + "="*80)
+print("C_MEAN AND SCALABILITY SCORE BY MODEL AND TEMPERATURE")
+print("="*80)
+
+# Create C_mean pivot table for each model at each temperature
+cmean_pivot = overall_metrics.pivot_table(
+    values='c_mean',
+    index='model',
+    columns='temperature',
+    aggfunc='mean'
+).round(4)
+
+# Sort by mean C_mean
+cmean_pivot = cmean_pivot.loc[cmean_pivot.mean(axis=1).sort_values(ascending=False).index]
+
+# Create stability score pivot table
+stability_pivot = overall_metrics.pivot_table(
+    values='stability_score',
+    index='model',
+    columns='temperature',
+    aggfunc='mean'
+).round(4)
+stability_pivot = stability_pivot.loc[cmean_pivot.index]  # Same order
+
+# Calculate Scalability Score: ratio of high-temp to low-temp consistency
+# Higher scalability = better at maintaining consistency across temperatures
+# Formula: S_scalability = C_mean(T=0.9) / C_mean(T=0.1) * (1 - decay_penalty)
+# Or simply: S_scalability = mean(C_mean across all temps) / C_mean(T=0.1)
+
+scalability_results = []
+for model in cmean_pivot.index:
+    model_data = overall_metrics[overall_metrics['model'] == model]
+
+    # Get C_mean at different temperatures
+    cmean_t01 = model_data[model_data['temperature'] == 0.1]['c_mean'].mean() if 0.1 in model_data['temperature'].values else np.nan
+    cmean_t05 = model_data[model_data['temperature'] == 0.5]['c_mean'].mean() if 0.5 in model_data['temperature'].values else np.nan
+    cmean_t09 = model_data[model_data['temperature'] == 0.9]['c_mean'].mean() if 0.9 in model_data['temperature'].values else np.nan
+    cmean_t10 = model_data[model_data['temperature'] == 1.0]['c_mean'].mean() if 1.0 in model_data['temperature'].values else np.nan
+    cmean_mean = model_data['c_mean'].mean()
+
+    # Get stability scores at different temperatures
+    stability_t01 = model_data[model_data['temperature'] == 0.1]['stability_score'].mean() if 0.1 in model_data['temperature'].values else np.nan
+    stability_t05 = model_data[model_data['temperature'] == 0.5]['stability_score'].mean() if 0.5 in model_data['temperature'].values else np.nan
+    stability_t09 = model_data[model_data['temperature'] == 0.9]['stability_score'].mean() if 0.9 in model_data['temperature'].values else np.nan
+    stability_t10 = model_data[model_data['temperature'] == 1.0]['stability_score'].mean() if 1.0 in model_data['temperature'].values else np.nan
+    stability_mean = model_data['stability_score'].mean()
+
+    # Calculate scalability metrics
+    # 1. Retention ratio: how much consistency is retained at high temp vs low temp
+    retention_09_01 = cmean_t09 / cmean_t01 if cmean_t01 > 0 else np.nan
+    retention_10_01 = cmean_t10 / cmean_t01 if cmean_t01 > 0 else np.nan
+
+    # 2. Decay rate: normalized decay from T=0.1 to T=0.9
+    decay_rate = (cmean_t01 - cmean_t09) / cmean_t01 if cmean_t01 > 0 else np.nan
+
+    # 3. Scalability score: combines mean consistency with retention
+    # Higher = more consistent AND maintains that consistency at high temps
+    scalability_score = cmean_mean * retention_09_01 if not np.isnan(retention_09_01) else np.nan
+
+    # 4. Temperature robustness: 1 - coefficient of variation across temperatures
+    temp_cv = model_data.groupby('temperature')['c_mean'].mean().std() / cmean_mean if cmean_mean > 0 else np.nan
+    temp_robustness = 1 - temp_cv if not np.isnan(temp_cv) else np.nan
+
+    scalability_results.append({
+        'model': model,
+        'c_mean_T0.1': cmean_t01,
+        'c_mean_T0.5': cmean_t05,
+        'c_mean_T0.9': cmean_t09,
+        'c_mean_T1.0': cmean_t10,
+        'c_mean_avg': cmean_mean,
+        'stability_T0.1': stability_t01,
+        'stability_T0.5': stability_t05,
+        'stability_T0.9': stability_t09,
+        'stability_T1.0': stability_t10,
+        'stability_avg': stability_mean,
+        'retention_ratio_0.9/0.1': retention_09_01,
+        'retention_ratio_1.0/0.1': retention_10_01,
+        'decay_rate': decay_rate,
+        'scalability_score': scalability_score,
+        'temp_robustness': temp_robustness
+    })
+
+scalability_df = pd.DataFrame(scalability_results)
+scalability_df = scalability_df.sort_values('scalability_score', ascending=False)
+
+# Print summary table
+print("\n=== C_mean by Temperature ===")
+print(cmean_pivot.to_string())
+
+print("\n=== Stability Score by Temperature ===")
+print(stability_pivot.to_string())
+
+print("\n=== Scalability Metrics Summary ===")
+print(f"{'Model':<25} {'C_mean(T=0.1)':<14} {'C_mean(T=0.9)':<14} {'Retention':<12} {'Scalability':<12} {'Robustness':<12}")
+print("-" * 95)
+for _, row in scalability_df.iterrows():
+    print(f"{row['model']:<25} {row['c_mean_T0.1']:.4f}        {row['c_mean_T0.9']:.4f}        {row['retention_ratio_0.9/0.1']:.4f}       {row['scalability_score']:.4f}       {row['temp_robustness']:.4f}")
+
+# Save to CSV
+cmean_pivot.to_csv(os.path.join(args.output_dir, 'cmean_by_temperature.csv'))
+stability_pivot.to_csv(os.path.join(args.output_dir, 'stability_by_temperature.csv'))
+scalability_df.to_csv(os.path.join(args.output_dir, 'scalability_metrics.csv'), index=False)
+
+print(f"\nSaved: cmean_by_temperature.csv")
+print(f"Saved: stability_by_temperature.csv")
+print(f"Saved: scalability_metrics.csv")
+
+# Create visualization: C_mean heatmap
+print("\nCreating C_mean heatmap...")
+n_models_cmean = len(cmean_pivot)
+fig_height_cmean = max(6, min(12, n_models_cmean * 0.5 + 2))
+fig, ax = plt.subplots(figsize=(14, fig_height_cmean))
+im = ax.imshow(cmean_pivot.values, cmap='RdYlGn', aspect='auto', vmin=0, vmax=1)
+
+ax.set_xticks(np.arange(len(cmean_pivot.columns)))
+ax.set_yticks(np.arange(len(cmean_pivot.index)))
+ax.set_xticklabels([f'{t:.1f}' for t in cmean_pivot.columns])
+ax.set_yticklabels(cmean_pivot.index)
+
+cbar = ax.figure.colorbar(im, ax=ax)
+cbar.ax.set_ylabel('$C_{mean}$ (Mean Pairwise Consistency)', rotation=-90, va="bottom")
+
+for i in range(len(cmean_pivot.index)):
+    for j in range(len(cmean_pivot.columns)):
+        val = cmean_pivot.iloc[i, j]
+        if not np.isnan(val):
+            text_color = 'white' if val < 0.5 else 'black'
+            ax.text(j, i, f'{val:.3f}', ha='center', va='center', color=text_color, fontsize=7)
+
+ax.set_xlabel('Temperature', fontsize=12)
+ax.set_ylabel('Model', fontsize=12)
+ax.set_title('$C_{mean}$ (Mean Pairwise Consistency) by Model and Temperature', fontsize=14, fontweight='bold')
+
+plt.tight_layout()
+cmean_heatmap_path = os.path.join(args.output_dir, 'cmean_heatmap.png')
+save_figure(fig, cmean_heatmap_path)
+plt.show()
+
+# Create visualization: Scalability comparison bar chart
+print("Creating scalability comparison chart...")
+fig, ax = plt.subplots(figsize=(14, 8))
+
+# Sort by scalability score
+scalability_sorted = scalability_df.sort_values('scalability_score', ascending=True)
+
+colors = plt.cm.RdYlGn(scalability_sorted['scalability_score'].values / scalability_sorted['scalability_score'].max())
+bars = ax.barh(scalability_sorted['model'], scalability_sorted['scalability_score'],
+               color=colors, edgecolor='black', linewidth=0.5)
+
+ax.set_xlabel('Scalability Score ($C_{mean}^{avg} \\times$ Retention Ratio)', fontsize=12)
+ax.set_ylabel('Model', fontsize=12)
+ax.set_title('Model Scalability: Consistency Retention Across Temperatures', fontsize=14, fontweight='bold')
+ax.grid(True, alpha=0.3, axis='x')
+
+# Add value labels
+for bar, val in zip(bars, scalability_sorted['scalability_score']):
+    if not np.isnan(val):
+        ax.text(val + 0.01, bar.get_y() + bar.get_height()/2, f'{val:.3f}',
+               va='center', fontsize=8)
+
+plt.tight_layout()
+scalability_bar_path = os.path.join(args.output_dir, 'scalability_comparison.png')
+save_figure(fig, scalability_bar_path)
+plt.show()
+
+print(f"Saved: cmean_heatmap.png")
+print(f"Saved: scalability_comparison.png")
+
+# ============================================================================
 # 8. Appendix Figure: Stability Distribution + Key Models Temperature Curves
 # ============================================================================
 print("\n8. Creating appendix stability distribution figure...")
@@ -1256,6 +1427,11 @@ print("- cadj_heatmap.png (Validity-Adjusted Consistency)")
 print("- structural_vs_semantic_bars.png (Component Comparison)")
 print("- pareto_frontier.png (Optimal Model Selection)")
 print("- ranking_score_heatmap.png (Combined Ranking Score)")
+print("- cmean_heatmap.png (C_mean by Model and Temperature)")
+print("- scalability_comparison.png (Scalability Score Comparison)")
 print("- appendix_stability_distribution.png (Stability Distribution + Key Models)")
 print("- cadj_by_temperature.csv")
 print("- ranking_score_by_temperature.csv")
+print("- cmean_by_temperature.csv (C_mean by Model and Temperature)")
+print("- stability_by_temperature.csv (Stability Score by Model and Temperature)")
+print("- scalability_metrics.csv (Scalability Score and Related Metrics)")
