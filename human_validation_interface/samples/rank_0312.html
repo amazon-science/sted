@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sample 306 / 343</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            line-height: 1.5;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header h2 { margin: 0 0 10px 0; color: #333; }
+        .progress { color: #666; }
+        .nav-buttons { margin-top: 15px; }
+        .nav-buttons a {
+            display: inline-block;
+            padding: 8px 16px;
+            margin-right: 10px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .nav-buttons a:hover { background: #0056b3; }
+        .nav-buttons a.disabled {
+            background: #ccc;
+            pointer-events: none;
+        }
+
+        .task-description {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2196f3;
+        }
+        .task-description h3 { margin: 0 0 10px 0; color: #1565c0; }
+
+        .ground-truth {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #4caf50;
+        }
+        .ground-truth h3 { margin: 0 0 15px 0; color: #2e7d32; }
+
+        .candidates-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .candidates-section h3 { margin: 0 0 15px 0; color: #333; }
+
+        .candidate {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .candidate:hover { background: #f0f0f0; border-color: #ddd; }
+        .candidate.selected {
+            background: #e8f5e9;
+            border-color: #4caf50;
+        }
+        .candidate-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .candidate-label {
+            font-size: 18px;
+            font-weight: bold;
+            margin-left: 10px;
+            color: #333;
+        }
+        .model-name {
+            margin-left: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 13px;
+            margin: 0;
+        }
+        .ground-truth pre {
+            background: #1b5e20;
+            color: #c5e1a5;
+        }
+        .response-json { background: #37474f; }
+
+        .confidence-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff3e0;
+            border-radius: 8px;
+        }
+        .confidence-section h4 { margin: 0 0 10px 0; }
+        .confidence-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .confidence-btn {
+            padding: 8px 16px;
+            border: 1px solid #ccc;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .confidence-btn:hover { background: #f5f5f5; }
+        .confidence-btn.selected {
+            background: #ff9800;
+            color: white;
+            border-color: #ff9800;
+        }
+
+        .notes-section {
+            margin-top: 15px;
+        }
+        .notes-section textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            min-height: 60px;
+            font-family: inherit;
+        }
+
+        .save-status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .save-status.saved { background: #e8f5e9; color: #2e7d32; }
+        .save-status.unsaved { background: #ffebee; color: #c62828; }
+
+        .confirm-section {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .confirm-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .confirm-btn:hover { background: #388e3c; transform: scale(1.02); }
+        .confirm-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .confirm-btn.confirmed {
+            background: #2196f3;
+        }
+        .skip-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #9e9e9e;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 20px;
+        }
+        .skip-btn:hover { background: #757575; }
+        .skip-btn.skipped {
+            background: #ff9800;
+        }
+        .skip-reason {
+            margin-top: 15px;
+            display: none;
+        }
+        .skip-reason.visible {
+            display: block;
+        }
+        .skip-reason select {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 100%;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Sample 306 of 343</h2>
+            <div class="progress">ID: 57956a88-6984-5b00-aebd-6e093987fc67</div>
+            <div class="nav-buttons">
+                <a href='rank_0304.html'>Previous</a>
+                <a href="../index.html">Back to List</a>
+                <a href='rank_0306.html' onclick='confirmBeforeNav(event)'>Next</a>
+            </div>
+        </div>
+
+        <div class="task-description">
+            <h3>Task: Select the Most Similar Response</h3>
+            <p>Compare the responses below to the Ground Truth and select the one that is <strong>MOST SIMILAR</strong>.</p>
+            <p>Consider: same tool names, same parameters, same structure, functional equivalence.</p>
+        </div>
+
+        <div class="ground-truth">
+            <h3>Ground Truth (Reference)</h3>
+            <pre>{
+  "tool_calls": [
+    {
+      "name": "sequential-thinking-tools-sequentialthinking_tools",
+      "arguments": {
+        "thought": "What is the real nature of this ask? They want a roadmap, not a project plan. A roadmap is:\n1. A sequenced set of bet-forwards (experiments \u2192 baselines \u2192 finalized capabilities). Each phase has an entry gate (data/metrics gathered) and an exit gate (ROI/compliance demonstrated).\n2. Allows re-ordering once new evidence or constraints surface (missing regulation shows up, vendor shifts integration date, early pilot has spectacular or terrible ROI, etc.).\n3. Documents which decisions are REVERSIBLE vs IRREVERSIBLE; we lock irreversible ones early to preserve time/budget slippage budget.\n\nSo first I need to:\na) Confirm the immutable pillars: Holiday uptime, ERP integration date, compliance, sustainability, ROI threshold.\nb) Extract the levers we can still trade off: which features/tech, which staff can be augmented via partners, which phases can run in parallel, and where sweat-equity can substitute for cash.\nc) Structure the roadmap into horizon-style swim-lanes: \n  \u2022 Horizon 0 \u2013 minimum compliance and fail-safe holiday uptime (must never break)\n  \u2022 Horizon 1 \u2013 pilots whose results decide bigger investments\n  \u2022 Horizon 2 \u2013 rinse-and-repeat scaling after holiday & ERP integration locked\n  \u2022 Horizon 3 \u2013 innovation beyond core ROI and sustainability targets\nThis stage-based thinking maps to the \u201crevisit decisions\u201d requirement.",
+        "next_thought_needed": true,
+        "thought_number": 1,
+        "total_thoughts": 7,
+        "current_step": {
+          "step_description": "Enumerate and prioritize immutable constraints & reversible levers",
+          "recommended_tools": [
+            {
+              "tool_name": "sequential-thinking-tools-sequentialthinking_tools",
+              "confidence": 1.0,
+              "rationale": "Each next thought will refine the roadmap slice",
+              "priority": 1
+            }
+          ],
+          "expected_outcome": "A clear distinction between must-keep-invariants (compliance, uptime, integration window) and may-change decisions (feature order, staff augmentation models, tech choices).",
+          "next_step_conditions": [
+            "compliance rules known or researchable without blocking decisions",
+            "vendor provides at least coarse integration calendar",
+            "board signs ROI hurdle %"
+          ]
+        }
+      }
+    }
+  ]
+}</pre>
+        </div>
+
+        <div class="candidates-section">
+            <h3>Candidate Responses - Select the Most Similar:</h3>
+            
+        <div class="candidate" onclick="selectCandidate('A')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_A" value="A" onchange="saveChoice('A')">
+                <label for="choice_A" class="candidate-label">[A]</label>
+                <span class="model-name">(qwen3-32b)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "sequential-thinking-tools-sequentialthinking_tools",
+      "arguments": {
+        "next_thought_needed": true,
+        "thought": "To create a comprehensive digital-transformation roadmap for your small business, we need to break down the problem into manageable steps. First, we should identify the key areas of your business that need transformation, such as operations, customer service, and internal processes. We also need to consider the constraints you've mentioned, including compliance, uptime, integration windows, ROI, sustainability, and change management. Given the limited IT team and budget, we should prioritize technologies and initiatives that offer the highest impact with the lowest cost and complexity. We can start by assessing your current digital maturity and identifying quick wins that can be implemented with minimal resources. This will help build momentum and demonstrate value early on. Next, we can evaluate the technologies that align with your long-term goals and the ERP vendor's integration window. We should also consider the compliance requirements and ensure that any new technology or process change adheres to these standards. For the holiday season, we need to plan for increased demand and ensure that the systems can handle the load without downtime. We can explore cloud-based solutions or scalable infrastructure that can be adjusted as needed. Regarding ROI, we should define clear metrics and KPIs to measure the success of each initiative. This will help us make data-driven decisions and adjust the roadmap as necessary. Sustainability can be addressed by choosing energy-efficient technologies and implementing processes that reduce waste. Change management is crucial to ensure that employees are on board with the new systems and processes. We can develop a communication plan and provide training to support the transition. Given the limited resources, we may need to outsource certain tasks or use low-code/no-code platforms to reduce the burden on your internal team. We should also consider phased implementation, where we roll out changes in stages to manage risk and allow for adjustments based on feedback. Finally, we need to establish a governance structure to oversee the transformation and ensure that it stays on track. This will involve regular reviews and updates to the roadmap based on new information and changing circumstances. By following this structured approach, we can create a digital-transformation roadmap that is both comprehensive and adaptable to the evolving needs of your business.",
+        "is_revision": false,
+        "previous_steps": [],
+        "needs_more_thoughts": true,
+        "total_thoughts": 5,
+        "remaining_steps": [
+          "Identify key areas for transformation",
+          "Assess current digital maturity",
+          "Prioritize technologies and initiatives",
+          "Evaluate compliance requirements",
+          "Plan for holiday season uptime",
+          "Align with ERP vendor's integration window",
+          "Define ROI metrics",
+          "Address sustainability goals",
+          "Develop change management plan",
+          "Consider phased implementation",
+          "Establish governance structure"
+        ],
+        "thought_number": 1,
+        "current_step": {
+          "step_description": "Identify key areas for transformation",
+          "recommended_tools": [
+            "Digital Maturity Assessment Tool",
+            "SWOT Analysis Tool"
+          ],
+          "expected_outcome": "A clear understanding of the areas in your business that need digital transformation.",
+          "next_step_conditions": "Once the key areas are identified, the next step will be to assess your current digital maturity."
+        }
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('B')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_B" value="B" onchange="saveChoice('B')">
+                <label for="choice_B" class="candidate-label">[B]</label>
+                <span class="model-name">(gemini-2.5-flash-lite)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "sequential-thinking-tools-sequentialthinking_tools",
+      "arguments": {
+        "next_thought_needed": true,
+        "thought_number": 1,
+        "thought": "The user requires a comprehensive digital transformation roadmap for their small business, considering numerous constraints: limited IT team and budget, compliance, holiday uptime, ERP integration window, ROI, sustainability, and change management. This is a complex, multi-faceted problem that benefits from a structured, iterative approach. I will use the sequential thinking tool to break this down into manageable steps, allowing for revisions as new information emerges. The first step is to establish a clear understanding of the current state and define the core objectives.",
+        "total_thoughts": 7,
+        "remaining_steps": [
+          "Technology Evaluation & Prioritization",
+          "Phased Implementation Planning",
+          "Execution & Monitoring",
+          "Review & Optimization"
+        ],
+        "current_step": {
+          "recommended_tools": [],
+          "expected_outcome": "A clear understanding of the current state, documented pain points, and a set of prioritized business objectives for the digital transformation.",
+          "next_step_conditions": "Availability of key stakeholders for input, access to relevant business data.",
+          "step_description": "Conduct a thorough assessment of the current business processes, IT infrastructure, and identify key pain points and opportunities for digital transformation. Define specific, measurable, achievable, relevant, and time-bound (SMART) objectives for the transformation, aligning them with business goals, ROI expectations, compliance, sustainability, and change management needs."
+        },
+        "previous_steps": [],
+        "needs_more_thoughts": false,
+        "is_revision": false,
+        "branch_id": null,
+        "branch_from_thought": 0
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('C')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_C" value="C" onchange="saveChoice('C')">
+                <label for="choice_C" class="candidate-label">[C]</label>
+                <span class="model-name">(mimo-v2-flash)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "sequential-thinking-tools-sequentialthinking_tools",
+      "arguments": {
+        "thought": "Let me start by understanding the full scope of constraints and requirements:\n\n1. **Compliance requirements** - Need to identify what regulations apply (likely data protection, industry-specific)\n2. **Holiday-season uptime requirement** - Critical system availability during peak business period\n3. **ERP vendor's fixed integration window** - Specific timeframe for ERP integration work\n4. **ROI delivery to board** - Must show measurable financial returns\n5. **Sustainability goals** - Environmental/energy considerations\n6. **Change-management goals** - User adoption and training\n7. **Limited internal IT team** - Resource constraints\n8. **Constrained budget** - Financial limitations\n\nThe key challenge is sequencing work to meet all these constraints simultaneously while being able to revisit decisions as new information emerges.\n\nI need to create a roadmap that is:\n- Flexible enough to adapt\n- Structured enough to track progress\n- Realistic about resource constraints\n- Strategic about timing",
+        "next_thought_needed": true,
+        "thought_number": 1,
+        "total_thoughts": 8,
+        "is_revision": false,
+        "revises_thought": 0,
+        "branch_from_thought": 0,
+        "branch_id": "",
+        "needs_more_thoughts": false,
+        "current_step": {
+          "step_description": "Define the constraint framework and decision criteria",
+          "recommended_tools": [
+            "sequential-thinking-tools-sequentialthinking_tools"
+          ],
+          "expected_outcome": "Clear understanding of all constraints and their relative priorities",
+          "next_step_conditions": [
+            "All constraints documented",
+            "Priority ranking established",
+            "Decision criteria defined"
+          ]
+        },
+        "previous_steps": [],
+        "remaining_steps": [
+          "Technology evaluation and selection",
+          "Phased implementation planning",
+          "ROI modeling and tracking",
+          "Compliance integration",
+          "Change management strategy",
+          "Risk mitigation planning"
+        ]
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+
+            <div class="confidence-section">
+                <h4>How confident are you in your choice?</h4>
+                <div class="confidence-buttons">
+                    <button class="confidence-btn" onclick="saveConfidence(1)">1 - Very Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(2)">2 - Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(3)">3 - Neutral</button>
+                    <button class="confidence-btn" onclick="saveConfidence(4)">4 - Confident</button>
+                    <button class="confidence-btn" onclick="saveConfidence(5)">5 - Very Confident</button>
+                </div>
+            </div>
+
+            <div class="notes-section">
+                <h4>Notes (optional)</h4>
+                <textarea id="notes" placeholder="Any additional comments..." onchange="saveNotes()"></textarea>
+            </div>
+
+            <div id="save-status" class="save-status unsaved">Not saved yet</div>
+
+            <div class="skip-reason" id="skip-reason-section">
+                <h4>Reason for skipping:</h4>
+                <select id="skip-reason" onchange="saveSkipReason()">
+                    <option value="">-- Select a reason --</option>
+                    <option value="all_equally_wrong">All options are equally wrong/incorrect</option>
+                    <option value="all_equally_similar">All options are equally similar (can't decide)</option>
+                    <option value="ground_truth_unclear">Ground truth is unclear or ambiguous</option>
+                    <option value="too_complex">Too complex to evaluate</option>
+                    <option value="other">Other (add note below)</option>
+                </select>
+            </div>
+
+            <div class="confirm-section">
+                <button class="confirm-btn" id="confirm-btn" onclick="confirmAndNext()">Confirm & Next</button>
+                <button class="skip-btn" id="skip-btn" onclick="toggleSkip()">Skip</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const sampleId = "57956a88-6984-5b00-aebd-6e093987fc67";
+        const itemId = "rank_0305";
+
+        function getAnnotations() {
+            const saved = localStorage.getItem('best_match_annotations');
+            return saved ? JSON.parse(saved) : {};
+        }
+
+        function saveAnnotations(annotations) {
+            localStorage.setItem('best_match_annotations', JSON.stringify(annotations));
+        }
+
+        function selectCandidate(label) {
+            document.getElementById('choice_' + label).checked = true;
+            saveChoice(label);
+        }
+
+        function saveChoice(label) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].choice = label;
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveConfidence(level) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].confidence = level;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveNotes() {
+            const notes = document.getElementById('notes').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].notes = notes;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function toggleSkip() {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+
+            if (annotations[itemId].skipped) {
+                // Un-skip
+                annotations[itemId].skipped = false;
+                annotations[itemId].skipReason = null;
+            } else {
+                // Skip - clear any choice
+                annotations[itemId].skipped = true;
+                annotations[itemId].choice = null;
+                annotations[itemId].confirmed = false;
+            }
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveSkipReason() {
+            const reason = document.getElementById('skip-reason').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].skipReason = reason;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function skipAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.skipReason) {
+                alert('Please select a reason for skipping.');
+                return;
+            }
+
+            // Mark as confirmed skip
+            ann.skipped = true;
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Navigate to next
+            setTimeout(() => {
+                window.location.href = 'rank_0306.html';
+            }, 300);
+        }
+
+        function updateUI() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // Update skip state
+            const skipBtn = document.getElementById('skip-btn');
+            const skipReasonSection = document.getElementById('skip-reason-section');
+            const confirmBtn = document.getElementById('confirm-btn');
+
+            if (ann.skipped) {
+                skipBtn.textContent = 'Undo Skip';
+                skipBtn.classList.add('skipped');
+                skipReasonSection.classList.add('visible');
+                confirmBtn.textContent = 'Confirm Skip & Next';
+                confirmBtn.onclick = skipAndNext;
+
+                // Disable candidate selection when skipped
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '0.5';
+                    el.style.pointerEvents = 'none';
+                });
+            } else {
+                skipBtn.textContent = 'Skip';
+                skipBtn.classList.remove('skipped');
+                skipReasonSection.classList.remove('visible');
+                confirmBtn.textContent = 'Confirm & Next';
+                confirmBtn.onclick = confirmAndNext;
+
+                // Enable candidate selection
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '1';
+                    el.style.pointerEvents = 'auto';
+                });
+            }
+
+            // Update skip reason dropdown
+            if (ann.skipReason) {
+                document.getElementById('skip-reason').value = ann.skipReason;
+            }
+
+            // Update candidate selection
+            document.querySelectorAll('.candidate').forEach(el => el.classList.remove('selected'));
+            if (ann.choice) {
+                const radio = document.getElementById('choice_' + ann.choice);
+                if (radio) {
+                    radio.checked = true;
+                    radio.closest('.candidate').classList.add('selected');
+                }
+            }
+
+            // Update confidence buttons
+            document.querySelectorAll('.confidence-btn').forEach((btn, idx) => {
+                btn.classList.toggle('selected', ann.confidence === idx + 1);
+            });
+
+            // Update notes
+            if (ann.notes) {
+                document.getElementById('notes').value = ann.notes;
+            }
+
+            // Update save status
+            const status = document.getElementById('save-status');
+            if (ann.skipped) {
+                status.textContent = 'Marked as SKIP' + (ann.skipReason ? ' - ' + ann.skipReason : '');
+                status.className = 'save-status saved';
+            } else if (ann.choice) {
+                status.textContent = 'Saved: Choice ' + ann.choice + (ann.confidence ? ', Confidence ' + ann.confidence : '');
+                status.className = 'save-status saved';
+            } else {
+                status.textContent = 'Not saved yet - please select a response or skip';
+                status.className = 'save-status unsaved';
+            }
+        }
+
+        function confirmBeforeNav(event) {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // If a choice is made, confirm it before navigating
+            if (ann.choice && !ann.confirmed) {
+                ann.confirmed = true;
+                ann.confirmedAt = new Date().toISOString();
+                annotations[itemId] = ann;
+                saveAnnotations(annotations);
+            }
+            // Allow navigation to proceed
+        }
+
+        function confirmAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.choice) {
+                alert('Please select a response before confirming.');
+                return;
+            }
+
+            // Mark as confirmed
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Update button state
+            const btn = document.getElementById('confirm-btn');
+            btn.textContent = 'Confirmed!';
+            btn.classList.add('confirmed');
+
+            // Navigate to next after brief delay
+            setTimeout(() => {
+                window.location.href = 'rank_0306.html';
+            }, 500);
+        }
+
+        // Load saved state on page load
+        window.onload = function() {
+            updateUI();
+            // Update confirm button if already confirmed
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+            if (ann.confirmed) {
+                const btn = document.getElementById('confirm-btn');
+                btn.textContent = 'Confirmed';
+                btn.classList.add('confirmed');
+            }
+        };
+    </script>
+</body>
+</html>

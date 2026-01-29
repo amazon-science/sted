@@ -30,11 +30,12 @@ from botocore.config import Config
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-# Load environment variables (skip AWS vars - use default credential chain)
+# Load environment variables (for OPENAI_API_KEY, etc.)
 load_dotenv()
-# Remove any placeholder AWS credentials from .env to use CLI credentials
+# Always remove AWS credentials from .env - use CLI/IAM credentials instead
+# This prevents URL signing issues with model IDs containing special characters like ':'
 for key in ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN']:
-    if os.environ.get(key, '').startswith('your-'):
+    if key in os.environ:
         del os.environ[key]
 
 # Add project root to path
@@ -494,7 +495,7 @@ def generate_tool_calls_bedrock(
     tools: List[Dict],
     num_runs: int = 5,
     temperature: float = 0.7,
-    max_tokens: int = 1024,
+    max_tokens: int = 8000,
     max_workers: int = None,
 ) -> List[List[Dict]]:
     """Generate tool calls using Bedrock Converse API with parallel execution."""
@@ -535,7 +536,7 @@ def generate_tool_calls_bedrock_multiturn(
     conversation_turns: List[Dict],
     num_runs: int = 5,
     temperature: float = 0.7,
-    max_tokens: int = 1024,
+    max_tokens: int = 8000,
     max_turns: int = 10,
 ) -> List[List[Dict]]:
     """
@@ -694,7 +695,7 @@ def generate_tool_calls_openai(
     tools: List[Dict],
     num_runs: int = 5,
     temperature: float = 0.7,
-    max_tokens: int = 1024,
+    max_tokens: int = 8000,
     max_workers: int = None,
 ) -> List[List[Dict]]:
     """Generate tool calls using OpenAI-compatible API with parallel execution."""

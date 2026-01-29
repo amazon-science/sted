@@ -67,7 +67,7 @@ def run_tool_calling_generation(
     run_num: int,
     model_id: str,
     sample_limit: int = 100,
-    max_tokens: int = 1024,
+    max_tokens: int = 8000,
     start_idx: int = 0,
     max_workers: int = 10
 ) -> str:
@@ -140,10 +140,10 @@ def run_tool_calling_generation(
     return str(results_file)
 
 
-def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: int, include_schema: bool, model_id: str, sample_limit: int = 40, max_tokens: int = 3000) -> str:
+def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: int, include_schema: bool, model_id: str, sample_limit: int = 40, max_tokens: int = 3000, max_workers: int = None) -> str:
     """
     Run LLM generation with specified parameters.
-    
+
     Args:
         data_dir: Directory containing the data files
         output_dir: Directory to save generation results
@@ -153,7 +153,8 @@ def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: 
         model_id: Model ID to use for generation
         sample_limit: Maximum number of samples to process
         max_tokens: Maximum tokens for LLM generation
-        
+        max_workers: Maximum parallel workers for inference
+
     Returns:
         Path to the generated results file
     """
@@ -167,7 +168,10 @@ def run_generation(data_dir: str, output_dir: str, temperature: float, run_num: 
         "--model-id", model_id,
         "--max-tokens", str(max_tokens)
     ]
-    
+
+    if max_workers is not None:
+        cmd.extend(["--max-workers", str(max_workers)])
+
     if include_schema:
         cmd.append("--include-schema")
     
@@ -282,7 +286,8 @@ def run_experiment(args):
                     include_schema=args.include_schema,
                     model_id=args.model_id,
                     sample_limit=args.sample_limit,
-                    max_tokens=args.max_tokens
+                    max_tokens=args.max_tokens,
+                    max_workers=args.max_workers
                 )
 
     print("\n" + "=" * 70)
@@ -326,7 +331,7 @@ Examples:
                         help="Model ID to use.")
     parser.add_argument("--sample-limit", type=int, default=-1,
                         help="Maximum number of samples to process (-1 for all samples).")
-    parser.add_argument("--max-tokens", type=int, default=1024,
+    parser.add_argument("--max-tokens", type=int, default=8000,
                         help="Maximum tokens for LLM generation.")
 
     # Structured output mode arguments

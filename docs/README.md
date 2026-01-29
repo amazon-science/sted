@@ -1,32 +1,16 @@
-# Documentation Index
+# Documentation
 
-## Core Documentation
+## API Reference
 
-### [STED Complexity Analysis](./sted_complexity_analysis.md)
-Algorithm complexity analysis and performance characteristics.
+- [STED Complexity Analysis](./api/sted_complexity_analysis.md) - Algorithm complexity and performance characteristics
+- [STED Optimizations](./STED_OPTIMIZATIONS.md) - Time and space complexity optimizations with benchmark results
 
-### [Mathematical Foundations](./MATHEMATICAL_FOUNDATIONS.md)
-Mathematical theory behind STED and consistency metrics.
+## Results
 
-### [LLM Benchmarking Results](./LLM_BENCHMARKING_RESULTS.md)
-Comprehensive benchmarking results for 10 LLM models across 127 temperature settings.
-
-## Advanced Topics
-
-### [Probabilistic Consistency](./PROBABILISTIC_CONSISTENCY.md)
-Probabilistic consistency methods, sigma parameter tuning, and power transformation theory.
-
-### [Research Notes](./RESEARCH_NOTES.md)
-Research approach, review feedback, and submission notes.
+- [LLM Benchmarking Results](./LLM_BENCHMARKING_RESULTS.md) - Benchmarking results for 10 LLMs across temperature settings
 
 ## Project Documentation
 
-See root directory:
-- [README.md](../README.md) - Main project documentation
-- [LIBRARY_USAGE.md](../LIBRARY_USAGE.md) - API reference and usage guide
-- [PROJECT_STATUS.md](../PROJECT_STATUS.md) - Current project status and changes
-
-## Development
-
-### [Project History](./PROJECT_HISTORY.md)
-Development log of project organization, improvements, and changes made.
+- [README](../README.md) - Main project documentation
+- [Library Usage Guide](../LIBRARY_USAGE.md) - API reference and usage examples
+- [Scripts Reference](../SCRIPTS_REFERENCE.md) - Documentation for all scripts

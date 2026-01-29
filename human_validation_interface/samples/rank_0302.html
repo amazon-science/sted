@@ -1,0 +1,2026 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sample 296 / 343</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            line-height: 1.5;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header h2 { margin: 0 0 10px 0; color: #333; }
+        .progress { color: #666; }
+        .nav-buttons { margin-top: 15px; }
+        .nav-buttons a {
+            display: inline-block;
+            padding: 8px 16px;
+            margin-right: 10px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .nav-buttons a:hover { background: #0056b3; }
+        .nav-buttons a.disabled {
+            background: #ccc;
+            pointer-events: none;
+        }
+
+        .task-description {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2196f3;
+        }
+        .task-description h3 { margin: 0 0 10px 0; color: #1565c0; }
+
+        .ground-truth {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #4caf50;
+        }
+        .ground-truth h3 { margin: 0 0 15px 0; color: #2e7d32; }
+
+        .candidates-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .candidates-section h3 { margin: 0 0 15px 0; color: #333; }
+
+        .candidate {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .candidate:hover { background: #f0f0f0; border-color: #ddd; }
+        .candidate.selected {
+            background: #e8f5e9;
+            border-color: #4caf50;
+        }
+        .candidate-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .candidate-label {
+            font-size: 18px;
+            font-weight: bold;
+            margin-left: 10px;
+            color: #333;
+        }
+        .model-name {
+            margin-left: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 13px;
+            margin: 0;
+        }
+        .ground-truth pre {
+            background: #1b5e20;
+            color: #c5e1a5;
+        }
+        .response-json { background: #37474f; }
+
+        .confidence-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff3e0;
+            border-radius: 8px;
+        }
+        .confidence-section h4 { margin: 0 0 10px 0; }
+        .confidence-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .confidence-btn {
+            padding: 8px 16px;
+            border: 1px solid #ccc;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .confidence-btn:hover { background: #f5f5f5; }
+        .confidence-btn.selected {
+            background: #ff9800;
+            color: white;
+            border-color: #ff9800;
+        }
+
+        .notes-section {
+            margin-top: 15px;
+        }
+        .notes-section textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            min-height: 60px;
+            font-family: inherit;
+        }
+
+        .save-status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .save-status.saved { background: #e8f5e9; color: #2e7d32; }
+        .save-status.unsaved { background: #ffebee; color: #c62828; }
+
+        .confirm-section {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .confirm-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .confirm-btn:hover { background: #388e3c; transform: scale(1.02); }
+        .confirm-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .confirm-btn.confirmed {
+            background: #2196f3;
+        }
+        .skip-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #9e9e9e;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 20px;
+        }
+        .skip-btn:hover { background: #757575; }
+        .skip-btn.skipped {
+            background: #ff9800;
+        }
+        .skip-reason {
+            margin-top: 15px;
+            display: none;
+        }
+        .skip-reason.visible {
+            display: block;
+        }
+        .skip-reason select {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 100%;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Sample 296 of 343</h2>
+            <div class="progress">ID: c0920df5-d6c9-5cb3-9672-7baa7a6eee91</div>
+            <div class="nav-buttons">
+                <a href='rank_0294.html'>Previous</a>
+                <a href="../index.html">Back to List</a>
+                <a href='rank_0296.html' onclick='confirmBeforeNav(event)'>Next</a>
+            </div>
+        </div>
+
+        <div class="task-description">
+            <h3>Task: Select the Most Similar Response</h3>
+            <p>Compare the responses below to the Ground Truth and select the one that is <strong>MOST SIMILAR</strong>.</p>
+            <p>Consider: same tool names, same parameters, same structure, functional equivalence.</p>
+        </div>
+
+        <div class="ground-truth">
+            <h3>Ground Truth (Reference)</h3>
+            <pre>{
+  "tool_calls": [
+    {
+      "name": "decision-framework-server-decisionFramework",
+      "arguments": {
+        "decisionStatement": "Choose between three job offers (high-risk startup with equity, established tech corporation, or stable government position) while managing H-1B visa constraints, spouse's biotech offer timing, 20% financial loss risk tolerance, $2,500 professional services budget, and 10-day decision deadline for 12-slide advisory council presentation",
+        "options": [
+          {
+            "id": "startup",
+            "name": "High-risk startup with 15% equity",
+            "description": "15% equity stake with 30% lower base salary, 60% chance of company failure, qualifies for H-1B visa timing"
+          },
+          {
+            "id": "techcorp",
+            "name": "Large tech corporation with options",
+            "description": "Market-rate salary plus stock options, 70% probability of burnout within 2 years, qualifies for H-1B visa timing"
+          },
+          {
+            "id": "government",
+            "name": "Stable government position with pension",
+            "description": "Pension with 5-year vesting schedule, limited career growth, no H-1B visa sponsorship, different tax implications"
+          }
+        ],
+        "criteria": [
+          {
+            "id": "financial_security",
+            "name": "Financial Security",
+            "description": "Net financial position after 3 years considering salary, equity, pension, taxes, and probability of financial loss",
+            "weight": 0.35,
+            "evaluationMethod": "quantitative"
+          },
+          {
+            "id": "visa_timeline",
+            "name": "H-1B Visa Timeline Compliance",
+            "description": "Ability to file H-1B within imminent window and maintain legal status",
+            "weight": 0.25,
+            "evaluationMethod": "boolean"
+          },
+          {
+            "id": "work_life_balance",
+            "name": "Work-Life Balance",
+            "description": "Sustainable work demands and quality of life, considering spouse's career needs",
+            "weight": 0.2,
+            "evaluationMethod": "qualitative"
+          },
+          {
+            "id": "career_growth",
+            "name": "Career Advancement",
+            "description": "Professional development opportunities, network building, and future career trajectory",
+            "weight": 0.15,
+            "evaluationMethod": "qualitative"
+          },
+          {
+            "id": "spouse_coordination",
+            "name": "Spouse Career Coordination",
+            "description": "Alignment with spouse's biotech offer timeline and location requirements",
+            "weight": 0.05,
+            "evaluationMethod": "qualitative"
+          }
+        ],
+        "criteriaEvaluations": [
+          {
+            "criterionId": "financial_security",
+            "optionId": "startup",
+            "score": 0.45,
+            "justification": "High potential upside from 15% equity but significant downside risk. 60% failure probability creates 36% chance of substantial loss. Base salary reduction compounds risk. Risk of financial loss exceeds 20% threshold."
+          },
+          {
+            "criterionId": "financial_security",
+            "optionId": "techcorp",
+            "score": 0.75,
+            "justification": "Market-rate salary provides baseline security. Stock options offer upside. 70% burnout risk affects long-term earning potential but 3-year financial loss probability appears within 20% tolerance."
+          },
+          {
+            "criterionId": "financial_security",
+            "optionId": "government",
+            "score": 0.85,
+            "justification": "Stable income stream with pension provides highest financial predictability. Limited upside but very low probability of financial loss over 3 years."
+          },
+          {
+            "criterionId": "visa_timeline",
+            "optionId": "startup",
+            "score": 1.0,
+            "justification": "Qualifies for H-1B filing within current window. Startup willing to file immediately."
+          },
+          {
+            "criterionId": "visa_timeline",
+            "optionId": "techcorp",
+            "score": 1.0,
+            "justification": "Qualifies for H-1B filing within current window. Established employer with strong immigration track record."
+          },
+          {
+            "criterionId": "visa_timeline",
+            "optionId": "government",
+            "score": 0.0,
+            "justification": "Does not provide H-1B sponsorship. Requires alternative visa status or green card timing constraints."
+          },
+          {
+            "criterionId": "work_life_balance",
+            "optionId": "startup",
+            "score": 0.3,
+            "justification": "High-intensity environment, long hours expected. Failure stress compounds work-life challenges. Spouse's career flexibility may be limited."
+          },
+          {
+            "criterionId": "work_life_balance",
+            "optionId": "techcorp",
+            "score": 0.4,
+            "justification": "70% burnout risk indicates poor work-life balance. Large corporation may offer more structured hours but high demands."
+          },
+          {
+            "criterionId": "work_life_balance",
+            "optionId": "government",
+            "score": 0.9,
+            "justification": "Government positions typically offer best work-life balance. Predictable hours support spouse career coordination."
+          },
+          {
+            "criterionId": "career_growth",
+            "optionId": "startup",
+            "score": 0.95,
+            "justification": "Equity stake provides entrepreneurial experience. High learning curve and network building if successful."
+          },
+          {
+            "criterionId": "career_growth",
+            "optionId": "techcorp",
+            "score": 0.8,
+            "justification": "Large corporation offers strong professional development, mentorship, and resume value. Industry networking opportunities."
+          },
+          {
+            "criterionId": "career_growth",
+            "optionId": "government",
+            "score": 0.3,
+            "justification": "Limited career advancement opportunities. Pension encourages staying but may limit career mobility."
+          },
+          {
+            "criterionId": "spouse_coordination",
+            "optionId": "startup",
+            "score": 0.6,
+            "justification": "Startup location flexibility may help, but timing uncertainties create coordination challenges for spouse's biotech offer."
+          },
+          {
+            "criterionId": "spouse_coordination",
+            "optionId": "techcorp",
+            "score": 0.7,
+            "justification": "Established employer provides location stability and predictable timeline, aiding spouse's biotech offer coordination."
+          },
+          {
+            "criterionId": "spouse_coordination",
+            "optionId": "government",
+            "score": 0.8,
+            "justification": "Stable location and timeline predictability best support spouse's conditional biotech opportunity."
+          }
+        ],
+        "possibleOutcomes": [
+          {
+            "id": "startup_success",
+            "description": "Startup succeeds, equity becomes valuable, financial upside achieved",
+            "probability": 0.4,
+            "optionId": "startup",
+            "value": 200000,
+            "confidenceInEstimate": 0.7
+          },
+          {
+            "id": "startup_failure",
+            "description": "Startup fails, equity worthless, opportunity cost from lower salary",
+            "probability": 0.6,
+            "optionId": "startup",
+            "value": -75000,
+            "confidenceInEstimate": 0.8
+          },
+          {
+            "id": "techcorp_burnout",
+            "description": "Burnout occurs within 2 years, career/salary impact",
+            "probability": 0.7,
+            "optionId": "techcorp",
+            "value": -50000,
+            "confidenceInEstimate": 0.75
+          },
+          {
+            "id": "techcorp_success",
+            "description": "Sustained career success with stock option appreciation",
+            "probability": 0.3,
+            "optionId": "techcorp",
+            "value": 150000,
+            "confidenceInEstimate": 0.65
+          },
+          {
+            "id": "government_stability",
+            "description": "Stable career progression with pension growth",
+            "probability": 0.95,
+            "optionId": "government",
+            "value": 80000,
+            "confidenceInEstimate": 0.9
+          },
+          {
+            "id": "government_poor_growth",
+            "description": "Limited career advancement affects long-term earning potential",
+            "probability": 0.05,
+            "optionId": "government",
+            "value": 20000,
+            "confidenceInEstimate": 0.8
+          }
+        ],
+        "stakeholders": [
+          "Yourself",
+          "Spouse",
+          "Advisory Council",
+          "Immigration Attorney",
+          "Tax Accountant",
+          "Future Children/Family Planning"
+        ],
+        "constraints": [
+          "H-1B visa filing window deadline",
+          "$2,500 budget for tax and immigration advice",
+          "20% maximum probability of 3-year net financial loss",
+          "10 business days for 12-slide recommendation deck",
+          "Spouse's biotech offer location/timing requirements",
+          "Public data only for presentation",
+          "Cross-state tax complexity"
+        ],
+        "timeHorizon": "3 years with immediate H-1B filing window in next 10 business days",
+        "riskTolerance": "risk-averse",
+        "analysisType": "multi-criteria",
+        "stage": "evaluation",
+        "decisionId": "job_choice_2024",
+        "iteration": 2,
+        "nextStageNeeded": true,
+        "informationGaps": [
+          {
+            "description": "Exact equity dilution terms and preferred return structure for startup",
+            "impact": 0.8,
+            "researchMethod": "Legal review of offer letter and option agreement within budget"
+          },
+          {
+            "description": "Tax implications of equity versus pension across two states with specific residency requirements",
+            "impact": 0.7,
+            "researchMethod": "Tax professional consultation within $2,500 budget"
+          },
+          {
+            "description": "H-1B lottery odds and premium processing timelines for each private-sector employer",
+            "impact": 0.9,
+            "researchMethod": "Immigration attorney consultation within $2,500 budget"
+          },
+          {
+            "description": "Spouse's biotech offer location flexibility and hard deadline specifics",
+            "impact": 0.8,
+            "researchMethod": "Direct communication with spouse's hiring manager or HR"
+          },
+          {
+            "description": "Actual burnout rates and recovery timeline data for specific tech corporation",
+            "impact": 0.6,
+            "researchMethod": "LinkedIn connections, Glassdoor analysis, and informational interviews"
+          }
+        ],
+        "expectedValues": {
+          "startup": 35000,
+          "techcorp": 42500,
+          "government": 72000
+        },
+        "multiCriteriaScores": {
+          "startup": 0.5425,
+          "techcorp": 0.6475,
+          "government": 0.75
+        },
+        "sensitivityInsights": [
+          "The 60% startup failure rate is the dominant risk factor pushing financial security risk above 20% threshold",
+          "Government option's multi-criteria score drops significantly (by ~30%) when visa timeline constraint is factored out",
+          "Spouse coordination weighting could swing decision if their opportunity has hard location constraints",
+          "Tech corporation expected value is highly sensitive to burnout probability estimate - reducing burnout chance from 70% to 50% would make it competitive with government option"
+        ],
+        "suggestedNextStage": "recommendation"
+      }
+    }
+  ]
+}</pre>
+        </div>
+
+        <div class="candidates-section">
+            <h3>Candidate Responses - Select the Most Similar:</h3>
+            
+        <div class="candidate" onclick="selectCandidate('A')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_A" value="A" onchange="saveChoice('A')">
+                <label for="choice_A" class="candidate-label">[A]</label>
+                <span class="model-name">(claude-haiku-4.5)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "decision-framework-server-decisionFramework",
+      "arguments": {
+        "decisionId": "JOB_DECISION_2024_MULTISTAKEHOLDER",
+        "decisionStatement": "Select optimal job opportunity among startup, tech corporation, and government position while satisfying visa filing deadlines, budget constraints, spouse's relocation dependency, tax implications, personal risk tolerance (\u226420% probability of net financial loss over 3 years), and stakeholder requirements.",
+        "options": [
+          "Startup: 15% equity, 30% lower base salary, 60% failure probability",
+          "Tech Corporation: Market-rate salary + stock options, 70% burnout probability within 2 years",
+          "Government Position: Stable salary + pension (5-year vesting), limited growth"
+        ],
+        "criteria": [
+          "Expected 3-year financial outcome (net present value)",
+          "Probability of net financial loss over 3 years",
+          "Work-life balance sustainability",
+          "Career advancement potential",
+          "Visa filing feasibility and timeline",
+          "Spouse relocation accommodation",
+          "Tax efficiency (equity vs. pension)",
+          "Risk-adjusted return on equity",
+          "Pension security and long-term wealth",
+          "Burnout/sustainability risk"
+        ],
+        "criteriaEvaluations": [
+          {
+            "option": "Startup",
+            "evaluations": {
+              "Expected 3-year financial outcome": "High variance: 40% success scenario yields $180K-$400K equity upside + $210K salary = $390K-$610K; 60% failure yields $0 equity + $210K salary = $210K. Expected value: 0.4\u00d7$500K + 0.6\u00d7$210K = $326K",
+              "Probability of net financial loss": "Approximately 8-12% (only if startup fails AND personal expenses exceed $210K salary over 3 years, unlikely given typical expenses)",
+              "Work-life balance": "Poor (typical startup: 60-70 hour weeks, high stress)",
+              "Career advancement": "Excellent if successful (founder/early employee equity upside); poor if fails",
+              "Visa filing feasibility": "Excellent (private sector, H-1B eligible, filing window open)",
+              "Spouse relocation": "Flexible (startup typically in tech hub, spouse biotech offer likely compatible)",
+              "Tax efficiency": "Complex (equity subject to AMT, ISO vs NSO treatment, state tax implications)",
+              "Risk-adjusted return": "High volatility; Sharpe ratio negative due to 60% failure rate",
+              "Pension security": "None (no pension component)",
+              "Burnout risk": "Very high (70%+ probability within 3 years)"
+            }
+          },
+          {
+            "option": "Tech Corporation",
+            "evaluations": {
+              "Expected 3-year financial outcome": "Stable: $300K salary + stock options (assume 30% vest over 3 years, $60K value) = $360K base + $60K options = $420K. If burnout occurs (70% probability), assume 20% reduction in year 2-3 earnings = 0.3\u00d7$420K + 0.7\u00d7($300K + $30K) = $336K",
+              "Probability of net financial loss": "Very low (~2-3%), only if terminated for cause or market collapse",
+              "Work-life balance": "Poor (70% burnout probability within 2 years indicates unsustainable pace)",
+              "Career advancement": "Moderate (large corp: slower advancement, but strong resume credential)",
+              "Visa filing feasibility": "Excellent (private sector, H-1B eligible, corporate sponsorship standard)",
+              "Spouse relocation": "Good (major tech hub, spouse biotech offer likely available)",
+              "Tax efficiency": "Moderate (stock options subject to AMT, but more predictable than startup equity)",
+              "Risk-adjusted return": "Moderate (lower volatility than startup, but burnout risk reduces effective returns)",
+              "Pension security": "Minimal (401k match typical, no pension)",
+              "Burnout risk": "Very high (70% within 2 years per scenario)"
+            }
+          },
+          {
+            "option": "Government Position",
+            "evaluations": {
+              "Expected 3-year financial outcome": "Stable: $280K salary (assuming market-rate adjusted for government) + pension accrual (5-year vesting, 3 years = 60% vesting credit) = $280K + $40K pension value = $320K",
+              "Probability of net financial loss": "Negligible (<1%, only if terminated for cause)",
+              "Work-life balance": "Excellent (typical government: 40-45 hour weeks, predictable schedule)",
+              "Career advancement": "Poor (limited growth, bureaucratic advancement)",
+              "Visa filing feasibility": "Poor (government positions typically not H-1B eligible; visa filing window closes)",
+              "Spouse relocation": "Uncertain (government position location fixed; spouse biotech offer may not align)",
+              "Tax efficiency": "Good (pension contributions pre-tax, predictable tax treatment)",
+              "Risk-adjusted return": "Low but stable (minimal volatility, but limited upside)",
+              "Pension security": "Excellent (defined benefit, government-backed)",
+              "Burnout risk": "Very low (sustainable pace, low stress)"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('B')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_B" value="B" onchange="saveChoice('B')">
+                <label for="choice_B" class="candidate-label">[B]</label>
+                <span class="model-name">(claude-opus-4.5)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "decision-framework-server-decisionFramework",
+      "arguments": {
+        "decisionId": "job-decision-2024-001",
+        "decisionStatement": "Select optimal job opportunity among startup (high equity/high risk), large tech corp (market rate/burnout risk), or government position (stability/limited growth) while satisfying visa, budget, spousal, tax, and risk tolerance constraints",
+        "analysisType": "multi-criteria-expected-utility",
+        "stage": "problem-structuring",
+        "iteration": 1,
+        "options": [
+          {
+            "id": "startup",
+            "name": "High-Risk Startup",
+            "description": "15% equity, 30% lower base salary, 60% failure probability",
+            "attributes": {
+              "baseSalary": "70% of market rate",
+              "equity": "15%",
+              "failureProbability": 0.6,
+              "visaEligible": true,
+              "relocationFlexibility": "high"
+            }
+          },
+          {
+            "id": "tech-corp",
+            "name": "Large Tech Corporation",
+            "description": "Market-rate salary, stock options, 70% burnout probability within 2 years",
+            "attributes": {
+              "baseSalary": "100% market rate",
+              "equity": "stock options (standard)",
+              "burnoutProbability": 0.7,
+              "visaEligible": true,
+              "relocationFlexibility": "medium"
+            }
+          },
+          {
+            "id": "government",
+            "name": "Government Position",
+            "description": "Pension with 5-year vesting, limited career growth, high stability",
+            "attributes": {
+              "baseSalary": "85-95% market rate typical",
+              "pension": "5-year vesting",
+              "stabilityProbability": 0.95,
+              "visaEligible": false,
+              "relocationFlexibility": "low",
+              "careerGrowth": "limited"
+            }
+          }
+        ],
+        "criteria": [
+          {
+            "id": "financial-security",
+            "name": "Financial Security",
+            "weight": 0.3,
+            "type": "benefit",
+            "owner": "self"
+          },
+          {
+            "id": "work-life-balance",
+            "name": "Work-Life Balance",
+            "weight": 0.25,
+            "type": "benefit",
+            "owner": "self"
+          },
+          {
+            "id": "career-advancement",
+            "name": "Career Advancement",
+            "weight": 0.2,
+            "type": "benefit",
+            "owner": "self"
+          },
+          {
+            "id": "visa-compliance",
+            "name": "H-1B Visa Compliance",
+            "weight": 0.15,
+            "type": "constraint",
+            "owner": "regulatory"
+          },
+          {
+            "id": "spouse-alignment",
+            "name": "Spouse Career Alignment",
+            "weight": 0.1,
+            "type": "benefit",
+            "owner": "spouse"
+          }
+        ],
+        "criteriaEvaluations": [
+          {
+            "option": "startup",
+            "criterion": "financial-security",
+            "score": 3,
+            "rationale": "High upside but 60% failure risk creates significant downside exposure"
+          },
+          {
+            "option": "startup",
+            "criterion": "work-life-balance",
+            "score": 2,
+            "rationale": "Startups typically demand 50-70 hour weeks"
+          },
+          {
+            "option": "startup",
+            "criterion": "career-advancement",
+            "score": 8,
+            "rationale": "Equity + founding team experience highly valued"
+          },
+          {
+            "option": "startup",
+            "criterion": "visa-compliance",
+            "score": 7,
+            "rationale": "Eligible but startup visa sponsorship can be precarious"
+          },
+          {
+            "option": "startup",
+            "criterion": "spouse-alignment",
+            "score": 6,
+            "rationale": "High relocation flexibility may help spouse timeline"
+          },
+          {
+            "option": "tech-corp",
+            "criterion": "financial-security",
+            "score": 7,
+            "rationale": "Market salary provides stability; stock options add upside"
+          },
+          {
+            "option": "tech-corp",
+            "criterion": "work-life-balance",
+            "score": 3,
+            "rationale": "70% burnout probability indicates poor balance"
+          },
+          {
+            "option": "tech-corp",
+            "criterion": "career-advancement",
+            "score": 7,
+            "rationale": "Brand recognition, but advancement can be slow in large orgs"
+          },
+          {
+            "option": "tech-corp",
+            "criterion": "visa-compliance",
+            "score": 9,
+            "rationale": "Large corps have established immigration legal teams"
+          },
+          {
+            "option": "tech-corp",
+            "criterion": "spouse-alignment",
+            "score": 5,
+            "rationale": "Medium flexibility; corporate timelines more rigid"
+          },
+          {
+            "option": "government",
+            "criterion": "financial-security",
+            "score": 8,
+            "rationale": "Pension + job security; lower salary but predictable"
+          },
+          {
+            "option": "government",
+            "criterion": "work-life-balance",
+            "score": 9,
+            "rationale": "Typically 40-hour weeks, strong leave policies"
+          },
+          {
+            "option": "government",
+            "criterion": "career-advancement",
+            "score": 4,
+            "rationale": "Limited growth, seniority-based progression"
+          },
+          {
+            "option": "government",
+            "criterion": "visa-compliance",
+            "score": 1,
+            "rationale": "NOT ELIGIBLE - H-1B does not apply to government"
+          },
+          {
+            "option": "government",
+            "criterion": "spouse-alignment",
+            "score": 3,
+            "rationale": "Low relocation flexibility may conflict with spouse biotech offer"
+          }
+        ],
+        "possibleOutcomes": [
+          {
+            "option": "startup",
+            "outcome": "success-exit",
+            "probability": 0.15,
+            "financialValue": 2500000,
+            "description": "Startup succeeds, equity realizes significant value"
+          },
+          {
+            "option": "startup",
+            "outcome": "moderate-success",
+            "probability": 0.25,
+            "financialValue": 300000,
+            "description": "Startup survives, modest equity value"
+          },
+          {
+            "option": "startup",
+            "outcome": "failure",
+            "probability": 0.6,
+            "financialValue": -45000,
+            "description": "Startup fails within 3 years, lost salary differential + job search costs"
+          },
+          {
+            "option": "tech-corp",
+            "outcome": "thrives",
+            "probability": 0.3,
+            "financialValue": 450000,
+            "description": "Avoids burnout, promoted, stock vests well"
+          },
+          {
+            "option": "tech-corp",
+            "outcome": "burnout-exit",
+            "probability": 0.5,
+            "financialValue": 180000,
+            "description": "Burns out at 18-24 months, leaves with partial vesting"
+          },
+          {
+            "option": "tech-corp",
+            "outcome": "early-layoff",
+            "probability": 0.2,
+            "financialValue": 75000,
+            "description": "Laid off in tech downturn within 18 months"
+          },
+          {
+            "option": "government",
+            "outcome": "full-career",
+            "probability": 0.8,
+            "financialValue": 350000,
+            "description": "Stays 5+ years, pension vests, stable trajectory"
+          },
+          {
+            "option": "government",
+            "outcome": "early-departure",
+            "probability": 0.15,
+            "financialValue": 120000,
+            "description": "Leaves before vesting, loses pension value"
+          },
+          {
+            "option": "government",
+            "outcome": "position-eliminated",
+            "probability": 0.05,
+            "financialValue": 80000,
+            "description": "Budget cuts eliminate position"
+          }
+        ],
+        "informationGaps": [
+          {
+            "id": "gap-1",
+            "description": "Exact startup valuation and liquidation preferences affecting true equity value",
+            "impact": "high",
+            "resolvable": true,
+            "cost": 500
+          },
+          {
+            "id": "gap-2",
+            "description": "Specific H-1B filing timeline and premium processing availability",
+            "impact": "critical",
+            "resolvable": true,
+            "cost": 800
+          },
+          {
+            "id": "gap-3",
+            "description": "Cross-state tax implications of equity vs pension (CA/NY/TX scenarios)",
+            "impact": "high",
+            "resolvable": true,
+            "cost": 1200
+          },
+          {
+            "id": "gap-4",
+            "description": "Spouse's biotech offer conditional terms and relocation deadline",
+            "impact": "high",
+            "resolvable": true,
+            "cost": 0
+          },
+          {
+            "id": "gap-5",
+            "description": "Tech corp's actual burnout rate in specific team/role",
+            "impact": "medium",
+            "resolvable": "partially",
+            "cost": 0
+          }
+        ],
+        "stakeholders": [
+          {
+            "id": "self",
+            "name": "Decision Maker",
+            "interests": [
+              "financial security",
+              "career growth",
+              "work-life balance"
+            ],
+            "influence": "primary"
+          },
+          {
+            "id": "spouse",
+            "name": "Spouse",
+            "interests": [
+              "relocation alignment",
+              "dual-career optimization",
+              "family stability"
+            ],
+            "influence": "high"
+          },
+          {
+            "id": "advisory-council",
+            "name": "Advisory Council",
+            "interests": [
+              "defensible recommendation",
+              "risk management"
+            ],
+            "influence": "medium"
+          },
+          {
+            "id": "immigration-attorney",
+            "name": "Immigration Counsel",
+            "interests": [
+              "visa compliance",
+              "timeline adherence"
+            ],
+            "influence": "constraint"
+          }
+        ],
+        "constraints": [
+          {
+            "id": "c1",
+            "type": "hard",
+            "description": "H-1B filing window deadline - eliminates government option if visa required",
+            "impact": "eliminates-option"
+          },
+          {
+            "id": "c2",
+            "type": "hard",
+            "description": "$2,500 budget for tax and immigration advice",
+            "impact": "limits-information"
+          },
+          {
+            "id": "c3",
+            "type": "hard",
+            "description": "Spouse biotech offer depends on relocation timeline",
+            "impact": "interdependency"
+          },
+          {
+            "id": "c4",
+            "type": "hard",
+            "description": "Risk ceiling: <20% probability of net financial loss over 3 years",
+            "impact": "eliminates-option"
+          },
+          {
+            "id": "c5",
+            "type": "soft",
+            "description": "12-slide deck within 10 business days using public data",
+            "impact": "process-constraint"
+          }
+        ],
+        "timeHorizon": "3 years primary, 10 years secondary",
+        "riskTolerance": "conservative - max 20% probability of net financial loss",
+        "expectedValues": {
+          "startup": {
+            "expectedValue": 348750,
+            "calculation": "(0.15 \u00d7 2500000) + (0.25 \u00d7 300000) + (0.60 \u00d7 -45000)",
+            "variance": "extremely high",
+            "probabilityOfLoss": 0.6,
+            "riskAdjustedValue": 150000
+          },
+          "tech-corp": {
+            "expectedValue": 240000,
+            "calculation": "(0.30 \u00d7 450000) + (0.50 \u00d7 180000) + (0.20 \u00d7 75000)",
+            "variance": "moderate",
+            "probabilityOfLoss": 0.05,
+            "riskAdjustedValue": 220000
+          },
+          "government": {
+            "expectedValue": 302000,
+            "calculation": "(0.80 \u00d7 350000) + (0.15 \u00d7 120000) + (0.05 \u00d7 80000)",
+            "variance": "low",
+            "probabilityOfLoss": 0.02,
+            "riskAdjustedValue": 295000
+          }
+        },
+        "multiCriteriaScores": {
+          "startup": {
+            "weightedScore": 4.35,
+            "breakdown": {
+              "financial-security": "0.30 \u00d7 3 = 0.90",
+              "work-life-balance": "0.25 \u00d7 2 = 0.50",
+              "career-advancement": "0.20 \u00d7 8 = 1.60",
+              "visa-compliance": "0.15 \u00d7 7 = 1.05",
+              "spouse-alignment": "0.10 \u00d7 6 = 0.60"
+            },
+            "constraintViolations": [
+              "FAILS risk ceiling - 60% loss probability > 20% threshold"
+            ]
+          },
+          "tech-corp": {
+            "weightedScore": 5.9,
+            "breakdown": {
+              "financial-security": "0.30 \u00d7 7 = 2.10",
+              "work-life-balance": "0.25 \u00d7 3 = 0.75",
+              "career-advancement": "0.20 \u00d7 7 = 1.40",
+              "visa-compliance": "0.15 \u00d7 9 = 1.35",
+              "spouse-alignment": "0.10 \u00d7 5 = 0.50"
+            },
+            "constraintViolations": [
+              "None - passes all hard constraints"
+            ]
+          },
+          "government": {
+            "weightedScore": 5.65,
+            "breakdown": {
+              "financial-security": "0.30 \u00d7 8 = 2.40",
+              "work-life-balance": "0.25 \u00d7 9 = 2.25",
+              "career-advancement": "0.20 \u00d7 4 = 0.80",
+              "visa-compliance": "0.15 \u00d7 1 = 0.15",
+              "spouse-alignment": "0.10 \u00d7 3 = 0.30"
+            },
+            "constraintViolations": [
+              "FAILS H-1B constraint if visa sponsorship required"
+            ]
+          }
+        },
+        "sensitivityInsights": [
+          "If startup failure probability drops to 40%, it becomes competitive but still violates risk ceiling",
+          "If tech corp burnout probability drops to 40%, its weighted score increases to 6.65",
+          "Government option only viable if you have alternative visa status (green card, citizenship)",
+          "Spouse alignment weight increase to 0.20 would favor startup due to relocation flexibility",
+          "Budget constraint of $2,500 is sufficient for gaps 2+3 ($2,000) but not gap 1 (equity analysis)"
+        ],
+        "recommendation": "PRELIMINARY: Pending constraint validation and deeper risk analysis in next stage",
+        "nextStageNeeded": true,
+        "suggestedNextStage": "constraint-validation-and-risk-analysis"
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('C')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_C" value="C" onchange="saveChoice('C')">
+                <label for="choice_C" class="candidate-label">[C]</label>
+                <span class="model-name">(mimo-v2-flash)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "decision-framework-server-decisionFramework",
+      "arguments": {
+        "decisionStatement": "Choose between three job offers (high-risk startup, large tech corporation, or stable government position) while managing H-1B visa constraints, spouse's biotech offer timing, $2,500 budget for tax/immigration advice, 20% risk tolerance for financial loss over 3 years, and 12-slide recommendation deck deadline within 10 business days",
+        "options": [
+          "High-risk startup: 15% equity, 30% lower base salary, 60% failure probability",
+          "Large tech corporation: market-rate salary + stock options, 70% burnout probability within 2 years",
+          "Stable government position: pension with 5-year vesting, limited career growth"
+        ],
+        "criteria": [
+          "Financial security (3-year net worth)",
+          "Work-life balance",
+          "Career advancement",
+          "Visa security",
+          "Spouse career coordination",
+          "Tax efficiency",
+          "Risk tolerance compliance (<20% probability of net loss)",
+          "Budget compliance ($2,500 for advice)",
+          "Timeline feasibility (10-day deck deadline)"
+        ],
+        "criteriaEvaluations": [
+          {
+            "option": "High-risk startup",
+            "Financial security": "High variance - 15% equity could be worth $0 or millions, 30% lower base salary reduces floor",
+            "Work-life balance": "Typically poor in startups, unpredictable hours",
+            "Career advancement": "High growth potential if successful, zero if fails",
+            "Visa security": "H-1B eligible, but company instability risks visa status",
+            "Spouse career coordination": "Relocation flexibility depends on startup location/success",
+            "Tax efficiency": "Complex - equity taxation across states, AMT considerations",
+            "Risk tolerance compliance": "60% failure rate creates high risk of financial loss",
+            "Budget compliance": "Likely exceeds $2,500 due to equity tax complexity",
+            "Timeline feasibility": "Can meet 10-day deadline with public data"
+          },
+          {
+            "option": "Large tech corporation",
+            "Financial security": "Stable base + stock options, lower variance than startup",
+            "Work-life balance": "70% burnout probability indicates poor work-life balance",
+            "Career advancement": "Structured growth paths, but may be slower than startup",
+            "Visa security": "H-1B eligible, established corporate sponsorship",
+            "Spouse career coordination": "Relocation timeline more predictable",
+            "Tax efficiency": "Public company stock options have clearer tax treatment",
+            "Risk tolerance compliance": "Burnout risk may impact earnings, but financial loss probability <20%",
+            "Budget compliance": "Should fit within $2,500 for tax/immigration advice",
+            "Timeline feasibility": "Can meet 10-day deadline"
+          },
+          {
+            "option": "Stable government position",
+            "Financial security": "Predictable pension, but lower upside potential",
+            "Work-life balance": "Typically better than private sector",
+            "Career advancement": "Limited growth opportunities",
+            "Visa security": "H-1B not applicable - must have work authorization",
+            "Spouse career coordination": "Stable timeline for relocation planning",
+            "Tax efficiency": "Pension contributions may have state tax implications",
+            "Risk tolerance compliance": "Lowest risk of financial loss, well under 20%",
+            "Budget compliance": "Simplest tax situation, should fit budget",
+            "Timeline feasibility": "Can meet 10-day deadline"
+          }
+        ],
+        "possibleOutcomes": [
+          {
+            "outcome": "Startup success (40% probability)",
+            "financialImpact": "Equity value 10-50x investment, base salary catch-up potential",
+            "visaStatus": "H-1B secured with successful company",
+            "spouseImpact": "Positive - relocation to startup hub with biotech opportunities"
+          },
+          {
+            "outcome": "Startup failure (60% probability)",
+            "financialImpact": "Lost equity, 30% lower salary for 1-2 years, job search costs",
+            "visaStatus": "H-1B at risk, 60-day grace period",
+            "spouseImpact": "Negative - relocation disruption, spouse offer at risk"
+          },
+          {
+            "outcome": "Tech corp success (30% probability - no burnout)",
+            "financialImpact": "Market salary + stock appreciation, steady wealth building",
+            "visaStatus": "H-1B secure with established sponsor",
+            "spouseImpact": "Neutral - predictable relocation timeline"
+          },
+          {
+            "outcome": "Tech corp burnout (70% probability)",
+            "financialImpact": "Forced career break, potential income interruption",
+            "visaStatus": "H-1B at risk during employment gap",
+            "spouseImpact": "Negative - stress impacts spouse career timing"
+          },
+          {
+            "outcome": "Government stability (100% probability)",
+            "financialImpact": "Steady but modest income, pension accumulation",
+            "visaStatus": "Requires work authorization (not H-1B)",
+            "spouseImpact": "Positive - stable timeline for spouse biotech offer"
+          }
+        ],
+        "informationGaps": [
+          "Exact equity valuation and dilution terms for startup",
+          "Specific stock option strike prices and vesting schedules for tech corp",
+          "Pension calculation methodology and state tax treatment for government role",
+          "H-1B lottery odds and processing timeline for current fiscal year",
+          "Spouse biotech offer location and specific relocation requirements",
+          "State tax residency rules for partial-year transitions",
+          "Startup failure timeline and severance terms",
+          "Tech corp burnout support programs and leave policies",
+          "Government position telework flexibility and geographic requirements"
+        ],
+        "stakeholders": [
+          "Primary decision maker (you)",
+          "Spouse (biotech career dependent on relocation)",
+          "Advisory council (12-slide deck recipients)",
+          "Immigration attorney (budget constrained)",
+          "Tax advisor (budget constrained)",
+          "Future family planning considerations"
+        ],
+        "constraints": [
+          "$2,500 maximum budget for tax and immigration advice",
+          "10 business days to produce recommendation deck",
+          "H-1B visa filing window deadline (imminent)",
+          "Spouse biotech offer timing dependency",
+          "<20% probability of 3-year net financial loss",
+          "Must use only publicly available data",
+          "Two-state tax complexity",
+          "Visa status work authorization requirements"
+        ],
+        "timeHorizon": "3 years (with immediate 10-day decision deadline for deck preparation)",
+        "riskTolerance": "Low - maximum 20% probability of net financial loss over 3 years",
+        "expectedValues": {
+          "High-risk startup": {
+            "financialEV": "40% \u00d7 high success + 60% \u00d7 (negative salary impact + job search costs)",
+            "visaEV": "40% secure + 60% at risk",
+            "overallRisk": "Exceeds 20% loss probability due to 60% failure rate"
+          },
+          "Large tech corporation": {
+            "financialEV": "Stable base + 30% upside from stock options - 70% burnout cost",
+            "visaEV": "High security with established sponsor",
+            "overallRisk": "Financial loss probability <20% despite burnout risk"
+          },
+          "Stable government position": {
+            "financialEV": "Predictable but modest growth, pension value accrual",
+            "visaEV": "Requires existing work authorization",
+            "overallRisk": "Lowest financial loss probability, well under 20%"
+          }
+        },
+        "multiCriteriaScores": {
+          "High-risk startup": {
+            "weightedScore": 45,
+            "breakdown": {
+              "financial": 60,
+              "workLife": 20,
+              "career": 80,
+              "visa": 40,
+              "spouse": 50,
+              "tax": 30,
+              "risk": 20,
+              "budget": 30,
+              "timeline": 80
+            }
+          },
+          "Large tech corporation": {
+            "weightedScore": 72,
+            "breakdown": {
+              "financial": 75,
+              "workLife": 30,
+              "career": 70,
+              "visa": 85,
+              "spouse": 65,
+              "tax": 70,
+              "risk": 75,
+              "budget": 80,
+              "timeline": 85
+            }
+          },
+          "Stable government position": {
+            "weightedScore": 68,
+            "breakdown": {
+              "financial": 70,
+              "workLife": 85,
+              "career": 40,
+              "visa": 20,
+              "spouse": 80,
+              "tax": 85,
+              "risk": 95,
+              "budget": 90,
+              "timeline": 90
+            }
+          }
+        },
+        "sensitivityInsights": [
+          "Risk tolerance is the most critical constraint - startup option violates <20% loss probability",
+          "Visa timing creates hard constraint - government position may be infeasible without work authorization",
+          "Spouse career coordination heavily favors options with predictable relocation timelines",
+          "Budget constraint limits ability to resolve tax complexity, favoring simpler options",
+          "10-day deck deadline requires using only public data, limiting deep due diligence"
+        ],
+        "recommendation": "Choose the large tech corporation option as it best balances all constraints: meets H-1B visa requirements, stays within 20% financial loss risk tolerance, provides predictable timeline for spouse coordination, fits $2,500 advice budget, and allows completion of 12-slide deck within 10 days. The 70% burnout risk is concerning but manageable with proactive career planning and the financial security provides foundation for future opportunities.",
+        "decisionId": "job_choice_2024",
+        "analysisType": "Multi-criteria decision analysis with probabilistic risk assessment",
+        "stage": "initial-analysis",
+        "iteration": 1,
+        "nextStageNeeded": true,
+        "suggestedNextStage": "Stress-test recommendation against worst-case scenarios and develop mitigation strategies for burnout risk"
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('D')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_D" value="D" onchange="saveChoice('D')">
+                <label for="choice_D" class="candidate-label">[D]</label>
+                <span class="model-name">(claude-sonnet-4.5)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "decision-framework-server-decisionFramework",
+      "arguments": {
+        "decisionStatement": "Select among three job opportunities (high-risk startup, large tech corporation, or stable government position) while satisfying visa timing constraints, budget limitations, spousal relocation dependencies, tax complexity, and a 20% maximum probability of net financial loss over three years",
+        "options": [
+          {
+            "id": "startup",
+            "name": "High-Risk Startup",
+            "description": "15% equity, 30% lower base salary, 60% failure probability, H-1B eligible",
+            "keyFeatures": [
+              "15% equity stake",
+              "Base salary 30% below market",
+              "60% chance of failure",
+              "H-1B visa sponsorship available",
+              "High upside potential if successful"
+            ]
+          },
+          {
+            "id": "techcorp",
+            "name": "Large Tech Corporation",
+            "description": "Market-rate salary plus stock options, 70% burnout probability within 2 years, H-1B eligible",
+            "keyFeatures": [
+              "Market-rate base salary",
+              "Stock options included",
+              "70% probability of burnout within 2 years",
+              "H-1B visa sponsorship available",
+              "Established company stability"
+            ]
+          },
+          {
+            "id": "government",
+            "name": "Stable Government Position",
+            "description": "Pension with 5-year vesting, limited career growth, no H-1B requirement",
+            "keyFeatures": [
+              "Defined benefit pension (5-year vesting)",
+              "High job security",
+              "Limited career advancement",
+              "No visa sponsorship needed (direct government employment)",
+              "Predictable work-life balance"
+            ]
+          }
+        ],
+        "criteria": [
+          {
+            "id": "financial_security",
+            "name": "Financial Security",
+            "weight": 0.3,
+            "description": "Expected 3-year net financial outcome and downside risk protection",
+            "measurementApproach": "Expected value calculation with risk-adjusted returns"
+          },
+          {
+            "id": "work_life_balance",
+            "name": "Work-Life Balance",
+            "weight": 0.25,
+            "description": "Sustainability of work demands and burnout risk",
+            "measurementApproach": "Probability-weighted quality of life scores"
+          },
+          {
+            "id": "career_advancement",
+            "name": "Career Advancement",
+            "weight": 0.2,
+            "description": "Long-term career trajectory and skill development opportunities",
+            "measurementApproach": "5-year career value projection"
+          },
+          {
+            "id": "visa_immigration",
+            "name": "Visa & Immigration Feasibility",
+            "weight": 0.15,
+            "description": "Ability to meet H-1B filing window and immigration requirements within budget",
+            "measurementApproach": "Binary feasibility with cost and timing constraints"
+          },
+          {
+            "id": "spousal_coordination",
+            "name": "Spousal Relocation Coordination",
+            "weight": 0.1,
+            "description": "Compatibility with spouse's conditional biotech offer timeline",
+            "measurementApproach": "Timeline alignment and flexibility score"
+          }
+        ],
+        "criteriaEvaluations": [
+          {
+            "optionId": "startup",
+            "criterionId": "financial_security",
+            "score": 5.5,
+            "maxScore": 10,
+            "rationale": "40% success scenario yields significant equity value (15% of potentially $50M+ valuation = $7.5M+), but 60% failure scenario results in 3-year earnings deficit of ~$90K (30% below market \u00d7 3 years). Expected value is positive but high variance. Risk of net loss over 3 years: ~35% (exceeds 20% threshold).",
+            "evidence": "Startup equity typically valued at 2-4x salary differential; 60% failure rate is industry-standard for early-stage ventures"
+          },
+          {
+            "optionId": "startup",
+            "criterionId": "work_life_balance",
+            "score": 4.0,
+            "maxScore": 10,
+            "rationale": "Startup culture typically demands 60-80 hour weeks with high stress, but offers autonomy and mission alignment. Burnout risk ~50% over 3 years.",
+            "evidence": "Startup employee surveys show 50-60% report high stress but also high engagement"
+          },
+          {
+            "optionId": "startup",
+            "criterionId": "career_advancement",
+            "score": 8.0,
+            "maxScore": 10,
+            "rationale": "Exceptional learning curve, broad responsibility, and network building. Even if company fails, startup experience is highly valued. Equity stake demonstrates senior role.",
+            "evidence": "15% equity suggests C-suite or senior leadership position with significant decision-making authority"
+          },
+          {
+            "optionId": "startup",
+            "criterionId": "visa_immigration",
+            "score": 6.0,
+            "maxScore": 10,
+            "rationale": "H-1B eligible but startup may have less experience with immigration process. Legal fees for H-1B: $3K-$5K (employer typically pays filing fees ~$2K, but premium processing $2.5K + attorney fees $1.5K-$3K may fall to employee). Risk of exceeding $2.5K budget: 60%.",
+            "evidence": "USCIS filing fees are public; attorney fees vary but startups often have less immigration infrastructure"
+          },
+          {
+            "optionId": "startup",
+            "criterionId": "spousal_coordination",
+            "score": 7.0,
+            "maxScore": 10,
+            "rationale": "Startups typically offer faster hiring timelines (2-4 weeks) and flexible start dates, enabling better coordination with spouse's biotech offer.",
+            "evidence": "Startup hiring processes are generally more agile than corporate or government"
+          },
+          {
+            "optionId": "techcorp",
+            "criterionId": "financial_security",
+            "score": 7.5,
+            "maxScore": 10,
+            "rationale": "Market-rate salary provides stable baseline. Stock options add 15-25% expected value over 3 years. 70% burnout risk may force early exit, reducing stock vesting. Expected 3-year earnings: $450K-$550K. Risk of net loss: ~5% (well within tolerance).",
+            "evidence": "Large tech companies offer predictable compensation; Glassdoor and Levels.fyi provide public salary data"
+          },
+          {
+            "optionId": "techcorp",
+            "criterionId": "work_life_balance",
+            "score": 3.0,
+            "maxScore": 10,
+            "rationale": "70% burnout probability within 2 years is severe. Indicates unsustainable work demands, poor management, or toxic culture. High likelihood of health and relationship impacts.",
+            "evidence": "70% burnout rate is exceptionally high; typical tech industry average is 40-50%"
+          },
+          {
+            "optionId": "techcorp",
+            "criterionId": "career_advancement",
+            "score": 7.0,
+            "maxScore": 10,
+            "rationale": "Strong brand name recognition, access to cutting-edge technology, and structured career development. However, burnout risk may truncate tenure and limit advancement.",
+            "evidence": "FAANG/large tech experience is highly portable and valued in job market"
+          },
+          {
+            "optionId": "techcorp",
+            "criterionId": "visa_immigration",
+            "score": 9.0,
+            "maxScore": 10,
+            "rationale": "Large tech companies have dedicated immigration teams and typically cover all H-1B costs. Employee out-of-pocket costs typically $0-$500 for personal tax advice. Well within $2.5K budget. High success rate with H-1B filings.",
+            "evidence": "Major tech employers routinely sponsor thousands of H-1B visas annually with established processes"
+          },
+          {
+            "optionId": "techcorp",
+            "criterionId": "spousal_coordination",
+            "score": 5.0,
+            "maxScore": 10,
+            "rationale": "Corporate hiring timelines are longer (6-12 weeks) and less flexible. May create coordination challenges with spouse's conditional offer timeline.",
+            "evidence": "Large company hiring involves multiple approval layers and standardized onboarding schedules"
+          },
+          {
+            "optionId": "government",
+            "criterionId": "financial_security",
+            "score": 8.0,
+            "maxScore": 10,
+            "rationale": "Stable salary with defined benefit pension (typically 1-2% per year of service \u00d7 final salary). 3-year earnings predictable. Pension value requires 5-year vesting (2 years beyond evaluation window). Risk of net loss: <1%. However, total compensation typically 10-20% below private sector.",
+            "evidence": "Federal/state government salary schedules are publicly available; pension formulas are defined by statute"
+          },
+          {
+            "optionId": "government",
+            "criterionId": "work_life_balance",
+            "score": 9.0,
+            "maxScore": 10,
+            "rationale": "Government positions typically offer 40-hour weeks, generous leave policies, and strong work-life boundaries. Burnout risk: <10%.",
+            "evidence": "Federal employee surveys consistently show higher work-life satisfaction than private sector"
+          },
+          {
+            "optionId": "government",
+            "criterionId": "career_advancement",
+            "score": 4.0,
+            "maxScore": 10,
+            "rationale": "Limited career growth explicitly stated. Advancement tied to seniority and grade schedules rather than performance. Skill development may lag private sector.",
+            "evidence": "Government career progression follows structured GS or equivalent pay scales with limited flexibility"
+          },
+          {
+            "optionId": "government",
+            "criterionId": "visa_immigration",
+            "score": 10.0,
+            "maxScore": 10,
+            "rationale": "Direct government employment typically does not require H-1B sponsorship (may qualify for different visa categories or direct hire authority for certain positions). Zero immigration legal costs. However, citizenship requirements may apply to certain positions.",
+            "evidence": "Federal government has separate hiring authorities; state/local governments vary but generally don't use H-1B process"
+          },
+          {
+            "optionId": "government",
+            "criterionId": "spousal_coordination",
+            "score": 3.0,
+            "maxScore": 10,
+            "rationale": "Government hiring is notoriously slow (3-6 months typical) with rigid start dates tied to budget cycles. Poor coordination potential with spouse's time-sensitive biotech offer.",
+            "evidence": "Federal hiring process involves security clearances, background checks, and bureaucratic approval chains"
+          }
+        ],
+        "possibleOutcomes": [
+          {
+            "optionId": "startup",
+            "scenario": "Startup succeeds",
+            "probability": 0.4,
+            "financialImpact": 7500000,
+            "description": "Company achieves successful exit; 15% equity stake worth $7.5M+ (assuming modest $50M valuation)",
+            "timeframe": "3-5 years"
+          },
+          {
+            "optionId": "startup",
+            "scenario": "Startup fails",
+            "probability": 0.6,
+            "financialImpact": -90000,
+            "description": "Company fails; 3-year cumulative salary deficit of $90K compared to market rate, equity worthless",
+            "timeframe": "1-3 years"
+          },
+          {
+            "optionId": "techcorp",
+            "scenario": "Complete 3 years without burnout",
+            "probability": 0.3,
+            "financialImpact": 550000,
+            "description": "Successfully navigate high-pressure environment, fully vest stock options, accumulate $550K over 3 years",
+            "timeframe": "3 years"
+          },
+          {
+            "optionId": "techcorp",
+            "scenario": "Burnout and exit within 2 years",
+            "probability": 0.7,
+            "financialImpact": 320000,
+            "description": "Burnout forces departure after ~18 months, partial stock vesting, earn ~$320K total with 3-6 month recovery gap",
+            "timeframe": "1.5-2 years"
+          },
+          {
+            "optionId": "government",
+            "scenario": "Complete 3 years, continue to vesting",
+            "probability": 0.95,
+            "financialImpact": 390000,
+            "description": "Stable employment, predictable earnings of ~$390K over 3 years (assuming $130K annual salary), on track for pension vesting at year 5",
+            "timeframe": "3 years"
+          },
+          {
+            "optionId": "government",
+            "scenario": "Leave before pension vesting",
+            "probability": 0.05,
+            "financialImpact": 260000,
+            "description": "Depart before 5-year vesting, forfeit pension benefits, earn only salary for 2 years",
+            "timeframe": "2 years"
+          }
+        ],
+        "informationGaps": [
+          {
+            "gap": "Startup valuation and equity details",
+            "impact": "Critical for financial modeling",
+            "costToResolve": "$500-$1,000 for equity valuation consultant",
+            "timeToResolve": "3-5 days",
+            "recommendation": "Request cap table, latest 409A valuation, and vesting schedule from startup"
+          },
+          {
+            "gap": "Specific H-1B sponsorship policies",
+            "impact": "High - affects visa feasibility and budget",
+            "costToResolve": "$500-$800 for immigration attorney consultation",
+            "timeToResolve": "2-3 days",
+            "recommendation": "Obtain written H-1B sponsorship commitments and cost-sharing agreements from startup and tech corp"
+          },
+          {
+            "gap": "Two-state tax implications",
+            "impact": "Moderate - affects net financial outcomes",
+            "costToResolve": "$800-$1,200 for dual-state tax analysis",
+            "timeToResolve": "5-7 days",
+            "recommendation": "Engage CPA with multi-state expertise to model equity vs. pension tax treatment"
+          },
+          {
+            "gap": "Spouse's biotech offer timeline and location",
+            "impact": "High - coordination constraint",
+            "costToResolve": "$0 - internal family discussion",
+            "timeToResolve": "1-2 days",
+            "recommendation": "Clarify spouse's offer deadline, start date flexibility, and geographic requirements"
+          },
+          {
+            "gap": "Government position citizenship requirements",
+            "impact": "Critical - may be disqualifying",
+            "costToResolve": "$0 - publicly available information",
+            "timeToResolve": "1 day",
+            "recommendation": "Verify whether position requires U.S. citizenship or if work authorization is sufficient"
+          },
+          {
+            "gap": "Tech corp burnout root causes",
+            "impact": "Moderate - affects work-life balance assessment",
+            "costToResolve": "$0 - Glassdoor, Blind, informational interviews",
+            "timeToResolve": "3-5 days",
+            "recommendation": "Research specific team/division culture; 70% burnout rate may be company-wide or team-specific"
+          }
+        ],
+        "stakeholders": [
+          {
+            "name": "Primary Decision Maker (You)",
+            "interests": [
+              "Financial security",
+              "Career advancement",
+              "Work-life balance",
+              "Immigration status stability"
+            ],
+            "influence": "Final decision authority",
+            "constraints": [
+              "20% maximum probability of net financial loss",
+              "$2,500 consulting budget",
+              "H-1B visa timing window"
+            ]
+          },
+          {
+            "name": "Spouse",
+            "interests": [
+              "Relocation timeline coordination",
+              "Family stability",
+              "Own career advancement in biotech"
+            ],
+            "influence": "High - conditional offer depends on your timeline",
+            "constraints": [
+              "Biotech offer timeline (likely 2-4 week decision window)",
+              "Geographic location requirements"
+            ]
+          },
+          {
+            "name": "Advisory Council",
+            "interests": [
+              "Rigorous analysis",
+              "Defensible methodology",
+              "Clear presentation"
+            ],
+            "influence": "Moderate - provides guidance and validation",
+            "constraints": [
+              "Requires 12-slide deck within 10 business days",
+              "Must use publicly available data"
+            ]
+          },
+          {
+            "name": "Immigration Attorney/Tax Advisor",
+            "interests": [
+              "Accurate legal/tax guidance",
+              "Professional liability management"
+            ],
+            "influence": "Moderate - expert guidance within budget",
+            "constraints": [
+              "$2,500 total budget for combined services",
+              "Limited time for analysis"
+            ]
+          }
+        ],
+        "constraints": [
+          {
+            "type": "financial",
+            "description": "Maximum 20% probability of net financial loss over 3 years",
+            "binding": true,
+            "impact": "Eliminates or significantly penalizes high-risk options"
+          },
+          {
+            "type": "budget",
+            "description": "$2,500 maximum for tax and immigration consulting",
+            "binding": true,
+            "impact": "Limits depth of professional analysis; must prioritize critical information gaps"
+          },
+          {
+            "type": "timing",
+            "description": "H-1B visa filing window (typically April 1 deadline for October 1 start)",
+            "binding": true,
+            "impact": "Eliminates private sector options if decision extends beyond filing window"
+          },
+          {
+            "type": "timing",
+            "description": "10 business days to produce 12-slide recommendation deck",
+            "binding": true,
+            "impact": "Limits time for information gathering and analysis"
+          },
+          {
+            "type": "coordination",
+            "description": "Spouse's biotech offer depends on relocation timeline",
+            "binding": true,
+            "impact": "Requires alignment of start dates and geographic locations"
+          },
+          {
+            "type": "data",
+            "description": "Advisory council deck must use only publicly available data",
+            "binding": true,
+            "impact": "Cannot include proprietary company information or confidential negotiations"
+          },
+          {
+            "type": "legal",
+            "description": "Government position may require U.S. citizenship",
+            "binding": "potentially",
+            "impact": "May eliminate government option entirely if citizenship required"
+          }
+        ],
+        "timeHorizon": "3 years primary evaluation window; 5 years for pension vesting consideration",
+        "riskTolerance": "Conservative - Maximum 20% probability of net financial loss over 3 years; prioritizes downside protection while remaining open to calculated upside",
+        "expectedValues": {
+          "startup": {
+            "financialEV": 2946000,
+            "calculation": "(0.40 \u00d7 $7,500,000) + (0.60 \u00d7 -$90,000) = $2,946,000",
+            "probabilityOfLoss": 0.6,
+            "violatesRiskConstraint": true,
+            "note": "High expected value but 60% probability of loss violates 20% risk ceiling"
+          },
+          "techcorp": {
+            "financialEV": 389000,
+            "calculation": "(0.30 \u00d7 $550,000) + (0.70 \u00d7 $320,000) = $389,000",
+            "probabilityOfLoss": 0.05,
+            "violatesRiskConstraint": false,
+            "note": "Moderate expected value with acceptable downside risk"
+          },
+          "government": {
+            "financialEV": 383500,
+            "calculation": "(0.95 \u00d7 $390,000) + (0.05 \u00d7 $260,000) = $383,500",
+            "probabilityOfLoss": 0.01,
+            "violatesRiskConstraint": false,
+            "note": "Stable expected value with minimal downside risk; excludes pension value beyond 3 years"
+          }
+        },
+        "multiCriteriaScores": {
+          "startup": {
+            "weightedScore": 6.05,
+            "calculation": "(5.5\u00d70.30) + (4.0\u00d70.25) + (8.0\u00d70.20) + (6.0\u00d70.15) + (7.0\u00d70.10) = 6.05",
+            "ranking": 3,
+            "strengths": [
+              "Exceptional career advancement",
+              "Good spousal coordination"
+            ],
+            "weaknesses": [
+              "Violates risk constraint",
+              "Moderate work-life balance",
+              "Immigration cost uncertainty"
+            ]
+          },
+          "techcorp": {
+            "weightedScore": 6.7,
+            "calculation": "(7.5\u00d70.30) + (3.0\u00d70.25) + (7.0\u00d70.20) + (9.0\u00d70.15) + (5.0\u00d70.10) = 6.70",
+            "ranking": 1,
+            "strengths": [
+              "Strong financial security",
+              "Excellent visa support",
+              "Good career advancement"
+            ],
+            "weaknesses": [
+              "Severe burnout risk",
+              "Moderate spousal coordination challenges"
+            ]
+          },
+          "government": {
+            "weightedScore": 6.65,
+            "calculation": "(8.0\u00d70.30) + (9.0\u00d70.25) + (4.0\u00d70.20) + (10.0\u00d70.15) + (3.0\u00d70.10) = 6.65",
+            "ranking": 2,
+            "strengths": [
+              "Excellent financial security",
+              "Outstanding work-life balance",
+              "Perfect visa solution"
+            ],
+            "weaknesses": [
+              "Limited career growth",
+              "Poor spousal coordination",
+              "May require citizenship"
+            ]
+          }
+        },
+        "sensitivityInsights": [
+          {
+            "parameter": "Startup success probability",
+            "insight": "If startup success probability increases from 40% to 50%, expected value rises to $3.696M, but probability of loss remains 50% (still violates risk constraint). Breakeven for risk constraint would require >80% success probability (unrealistic).",
+            "implication": "Startup cannot satisfy risk constraint under any realistic scenario"
+          },
+          {
+            "parameter": "Work-life balance weight",
+            "insight": "If work-life balance weight increases from 25% to 35% (reducing financial security to 20%), government position scores 7.15 vs. tech corp 6.20, reversing the ranking.",
+            "implication": "Decision is sensitive to personal value trade-offs between financial outcomes and quality of life"
+          },
+          {
+            "parameter": "Consulting budget allocation",
+            "insight": "Optimal budget allocation: $800 immigration attorney (H-1B analysis), $1,200 dual-state tax CPA, $500 equity valuation consultant = $2,500 total. Prioritizes resolving critical information gaps.",
+            "implication": "Budget is sufficient if carefully allocated to highest-impact information gaps"
+          },
+          {
+            "parameter": "Spouse's timeline flexibility",
+            "insight": "If spouse's biotech offer has 6+ month start date flexibility, government option becomes more viable (spousal coordination score increases from 3.0 to 7.0, overall score rises to 7.05, becoming top choice).",
+            "implication": "Spousal coordination is a critical swing factor; requires immediate clarification"
+          },
+          {
+            "parameter": "Tech corp burnout mitigation",
+            "insight": "If burnout probability can be reduced from 70% to 40% through team selection, negotiation, or boundary-setting, tech corp expected value rises to $436K and work-life balance score improves to 6.0, increasing overall score to 7.45.",
+            "implication": "Deep due diligence on specific team/role within tech corp could significantly improve attractiveness"
+          },
+          {
+            "parameter": "Government citizenship requirement",
+            "insight": "If government position requires U.S. citizenship (not just work authorization), this option is immediately disqualified, leaving only tech corp as viable option that satisfies risk constraint.",
+            "implication": "Citizenship requirement must be verified immediately as it may eliminate an option"
+          }
+        ],
+        "recommendation": "**PRIMARY RECOMMENDATION: Large Tech Corporation (with conditions)**\n\n**Rationale:**\n1. **Risk Constraint Compliance:** Tech corp is the only private-sector option that satisfies your 20% maximum probability of net financial loss (5% actual risk vs. 60% for startup).\n\n2. **Visa & Budget Feasibility:** Tech corp offers the most robust H-1B sponsorship infrastructure with minimal employee cost ($0-$500), preserving your $2,500 budget for critical tax analysis of equity compensation across two states.\n\n3. **Financial Security:** Expected 3-year value of $389K is competitive and stable, with stock options providing upside without catastrophic downside risk.\n\n4. **Career Advancement:** Strong brand recognition and technology exposure provide excellent long-term career optionality, even if tenure is shortened by burnout.\n\n**CRITICAL CONDITIONS:**\n- **Burnout Mitigation:** The 70% burnout probability is unacceptable. Before accepting, you must:\n  - Identify specific team/division and research culture through Glassdoor, Blind, and informational interviews\n  - Negotiate explicit work-life balance expectations and remote work flexibility\n  - Secure written commitment to reasonable hours and sustainable workload\n  - If burnout risk cannot be reduced below 40%, reconsider government option\n\n- **Spousal Coordination:** Clarify spouse's biotech offer timeline within 48 hours. If spouse needs decision within 2-3 weeks and tech corp hiring takes 8-12 weeks, coordination may be impossible.\n\n**ALTERNATIVE RECOMMENDATION: Government Position (if conditions met)**\nGovernment becomes the top choice if:\n1. Position does NOT require U.S. citizenship (verify immediately)\n2. Spouse's biotech offer has 4-6 month timeline flexibility\n3. You can accept limited career growth in exchange for exceptional work-life balance\n\nGovernment offers lowest risk (1% probability of loss), best work-life balance (9.0/10), and zero immigration costs, but requires patience with hiring timeline and acceptance of slower career trajectory.\n\n**REJECT: Startup**\nDespite highest expected value ($2.95M), startup violates your fundamental risk constraint with 60% probability of financial loss. The 30% salary reduction creates unacceptable downside risk that cannot be justified even with 15% equity upside.\n\n**IMMEDIATE ACTION PLAN (Next 48 Hours):**\n1. Verify government position citizenship requirements (1 hour, $0)\n2. Clarify spouse's biotech offer timeline and location (2 hours, $0)\n3. Schedule immigration attorney consultation for H-1B analysis ($800, 2 days)\n4. Research tech corp specific team culture via Glassdoor/Blind (4 hours, $0)\n5. Request written H-1B sponsorship terms from tech corp (1 day, $0)\n\n**BUDGET ALLOCATION ($2,500):**\n- Immigration attorney (H-1B strategy): $800\n- Dual-state tax CPA (equity vs. pension analysis): $1,200\n- Equity valuation consultant (startup due diligence): $500\n- Reserve: $0 (fully allocated)\n\n**12-SLIDE DECK OUTLINE (10 Business Days):**\n1. Executive Summary & Recommendation\n2. Decision Framework & Methodology\n3. Three Options Overview\n4. Evaluation Criteria & Weights\n5. Financial Analysis & Expected Values\n6. Risk Analysis & Constraint Compliance\n7. Multi-Criteria Scoring Results\n8. Sensitivity Analysis\n9. Stakeholder Considerations\n10. Information Gaps & Mitigation\n11. Implementation Timeline\n12. Appendix: Data Sources & Assumptions\n\nAll data sources: USCIS public filings, Glassdoor, Levels.fyi, federal salary schedules, published startup failure rates, academic research on burnout.\"",
+        "decisionId": "job-offer-evaluation-2024-001",
+        "analysisType": "Multi-criteria decision analysis with probabilistic risk assessment under constraints",
+        "stage": "Comprehensive evaluation with conditional recommendation",
+        "iteration": 1,
+        "nextStageNeeded": true,
+        "suggestedNextStage": "Information gap resolution and sensitivity refinement - Resolve critical unknowns (citizenship requirement, spousal timeline, tech corp team-specific burnout risk) within 48 hours, then refine analysis with actual data and produce final recommendation deck"
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+
+            <div class="confidence-section">
+                <h4>How confident are you in your choice?</h4>
+                <div class="confidence-buttons">
+                    <button class="confidence-btn" onclick="saveConfidence(1)">1 - Very Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(2)">2 - Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(3)">3 - Neutral</button>
+                    <button class="confidence-btn" onclick="saveConfidence(4)">4 - Confident</button>
+                    <button class="confidence-btn" onclick="saveConfidence(5)">5 - Very Confident</button>
+                </div>
+            </div>
+
+            <div class="notes-section">
+                <h4>Notes (optional)</h4>
+                <textarea id="notes" placeholder="Any additional comments..." onchange="saveNotes()"></textarea>
+            </div>
+
+            <div id="save-status" class="save-status unsaved">Not saved yet</div>
+
+            <div class="skip-reason" id="skip-reason-section">
+                <h4>Reason for skipping:</h4>
+                <select id="skip-reason" onchange="saveSkipReason()">
+                    <option value="">-- Select a reason --</option>
+                    <option value="all_equally_wrong">All options are equally wrong/incorrect</option>
+                    <option value="all_equally_similar">All options are equally similar (can't decide)</option>
+                    <option value="ground_truth_unclear">Ground truth is unclear or ambiguous</option>
+                    <option value="too_complex">Too complex to evaluate</option>
+                    <option value="other">Other (add note below)</option>
+                </select>
+            </div>
+
+            <div class="confirm-section">
+                <button class="confirm-btn" id="confirm-btn" onclick="confirmAndNext()">Confirm & Next</button>
+                <button class="skip-btn" id="skip-btn" onclick="toggleSkip()">Skip</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const sampleId = "c0920df5-d6c9-5cb3-9672-7baa7a6eee91";
+        const itemId = "rank_0295";
+
+        function getAnnotations() {
+            const saved = localStorage.getItem('best_match_annotations');
+            return saved ? JSON.parse(saved) : {};
+        }
+
+        function saveAnnotations(annotations) {
+            localStorage.setItem('best_match_annotations', JSON.stringify(annotations));
+        }
+
+        function selectCandidate(label) {
+            document.getElementById('choice_' + label).checked = true;
+            saveChoice(label);
+        }
+
+        function saveChoice(label) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].choice = label;
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveConfidence(level) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].confidence = level;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveNotes() {
+            const notes = document.getElementById('notes').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].notes = notes;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function toggleSkip() {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+
+            if (annotations[itemId].skipped) {
+                // Un-skip
+                annotations[itemId].skipped = false;
+                annotations[itemId].skipReason = null;
+            } else {
+                // Skip - clear any choice
+                annotations[itemId].skipped = true;
+                annotations[itemId].choice = null;
+                annotations[itemId].confirmed = false;
+            }
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveSkipReason() {
+            const reason = document.getElementById('skip-reason').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].skipReason = reason;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function skipAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.skipReason) {
+                alert('Please select a reason for skipping.');
+                return;
+            }
+
+            // Mark as confirmed skip
+            ann.skipped = true;
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Navigate to next
+            setTimeout(() => {
+                window.location.href = 'rank_0296.html';
+            }, 300);
+        }
+
+        function updateUI() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // Update skip state
+            const skipBtn = document.getElementById('skip-btn');
+            const skipReasonSection = document.getElementById('skip-reason-section');
+            const confirmBtn = document.getElementById('confirm-btn');
+
+            if (ann.skipped) {
+                skipBtn.textContent = 'Undo Skip';
+                skipBtn.classList.add('skipped');
+                skipReasonSection.classList.add('visible');
+                confirmBtn.textContent = 'Confirm Skip & Next';
+                confirmBtn.onclick = skipAndNext;
+
+                // Disable candidate selection when skipped
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '0.5';
+                    el.style.pointerEvents = 'none';
+                });
+            } else {
+                skipBtn.textContent = 'Skip';
+                skipBtn.classList.remove('skipped');
+                skipReasonSection.classList.remove('visible');
+                confirmBtn.textContent = 'Confirm & Next';
+                confirmBtn.onclick = confirmAndNext;
+
+                // Enable candidate selection
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '1';
+                    el.style.pointerEvents = 'auto';
+                });
+            }
+
+            // Update skip reason dropdown
+            if (ann.skipReason) {
+                document.getElementById('skip-reason').value = ann.skipReason;
+            }
+
+            // Update candidate selection
+            document.querySelectorAll('.candidate').forEach(el => el.classList.remove('selected'));
+            if (ann.choice) {
+                const radio = document.getElementById('choice_' + ann.choice);
+                if (radio) {
+                    radio.checked = true;
+                    radio.closest('.candidate').classList.add('selected');
+                }
+            }
+
+            // Update confidence buttons
+            document.querySelectorAll('.confidence-btn').forEach((btn, idx) => {
+                btn.classList.toggle('selected', ann.confidence === idx + 1);
+            });
+
+            // Update notes
+            if (ann.notes) {
+                document.getElementById('notes').value = ann.notes;
+            }
+
+            // Update save status
+            const status = document.getElementById('save-status');
+            if (ann.skipped) {
+                status.textContent = 'Marked as SKIP' + (ann.skipReason ? ' - ' + ann.skipReason : '');
+                status.className = 'save-status saved';
+            } else if (ann.choice) {
+                status.textContent = 'Saved: Choice ' + ann.choice + (ann.confidence ? ', Confidence ' + ann.confidence : '');
+                status.className = 'save-status saved';
+            } else {
+                status.textContent = 'Not saved yet - please select a response or skip';
+                status.className = 'save-status unsaved';
+            }
+        }
+
+        function confirmBeforeNav(event) {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // If a choice is made, confirm it before navigating
+            if (ann.choice && !ann.confirmed) {
+                ann.confirmed = true;
+                ann.confirmedAt = new Date().toISOString();
+                annotations[itemId] = ann;
+                saveAnnotations(annotations);
+            }
+            // Allow navigation to proceed
+        }
+
+        function confirmAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.choice) {
+                alert('Please select a response before confirming.');
+                return;
+            }
+
+            // Mark as confirmed
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Update button state
+            const btn = document.getElementById('confirm-btn');
+            btn.textContent = 'Confirmed!';
+            btn.classList.add('confirmed');
+
+            // Navigate to next after brief delay
+            setTimeout(() => {
+                window.location.href = 'rank_0296.html';
+            }, 500);
+        }
+
+        // Load saved state on page load
+        window.onload = function() {
+            updateUI();
+            // Update confirm button if already confirmed
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+            if (ann.confirmed) {
+                const btn = document.getElementById('confirm-btn');
+                btn.textContent = 'Confirmed';
+                btn.classList.add('confirmed');
+            }
+        };
+    </script>
+</body>
+</html>

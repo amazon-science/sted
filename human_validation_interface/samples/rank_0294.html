@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sample 288 / 343</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            line-height: 1.5;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header h2 { margin: 0 0 10px 0; color: #333; }
+        .progress { color: #666; }
+        .nav-buttons { margin-top: 15px; }
+        .nav-buttons a {
+            display: inline-block;
+            padding: 8px 16px;
+            margin-right: 10px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .nav-buttons a:hover { background: #0056b3; }
+        .nav-buttons a.disabled {
+            background: #ccc;
+            pointer-events: none;
+        }
+
+        .task-description {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2196f3;
+        }
+        .task-description h3 { margin: 0 0 10px 0; color: #1565c0; }
+
+        .ground-truth {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #4caf50;
+        }
+        .ground-truth h3 { margin: 0 0 15px 0; color: #2e7d32; }
+
+        .candidates-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .candidates-section h3 { margin: 0 0 15px 0; color: #333; }
+
+        .candidate {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .candidate:hover { background: #f0f0f0; border-color: #ddd; }
+        .candidate.selected {
+            background: #e8f5e9;
+            border-color: #4caf50;
+        }
+        .candidate-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .candidate-label {
+            font-size: 18px;
+            font-weight: bold;
+            margin-left: 10px;
+            color: #333;
+        }
+        .model-name {
+            margin-left: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 13px;
+            margin: 0;
+        }
+        .ground-truth pre {
+            background: #1b5e20;
+            color: #c5e1a5;
+        }
+        .response-json { background: #37474f; }
+
+        .confidence-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff3e0;
+            border-radius: 8px;
+        }
+        .confidence-section h4 { margin: 0 0 10px 0; }
+        .confidence-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .confidence-btn {
+            padding: 8px 16px;
+            border: 1px solid #ccc;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .confidence-btn:hover { background: #f5f5f5; }
+        .confidence-btn.selected {
+            background: #ff9800;
+            color: white;
+            border-color: #ff9800;
+        }
+
+        .notes-section {
+            margin-top: 15px;
+        }
+        .notes-section textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            min-height: 60px;
+            font-family: inherit;
+        }
+
+        .save-status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .save-status.saved { background: #e8f5e9; color: #2e7d32; }
+        .save-status.unsaved { background: #ffebee; color: #c62828; }
+
+        .confirm-section {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .confirm-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .confirm-btn:hover { background: #388e3c; transform: scale(1.02); }
+        .confirm-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .confirm-btn.confirmed {
+            background: #2196f3;
+        }
+        .skip-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #9e9e9e;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 20px;
+        }
+        .skip-btn:hover { background: #757575; }
+        .skip-btn.skipped {
+            background: #ff9800;
+        }
+        .skip-reason {
+            margin-top: 15px;
+            display: none;
+        }
+        .skip-reason.visible {
+            display: block;
+        }
+        .skip-reason select {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 100%;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Sample 288 of 343</h2>
+            <div class="progress">ID: 3f7ee455-365c-5842-8eeb-0bf2f79f8406</div>
+            <div class="nav-buttons">
+                <a href='rank_0286.html'>Previous</a>
+                <a href="../index.html">Back to List</a>
+                <a href='rank_0288.html' onclick='confirmBeforeNav(event)'>Next</a>
+            </div>
+        </div>
+
+        <div class="task-description">
+            <h3>Task: Select the Most Similar Response</h3>
+            <p>Compare the responses below to the Ground Truth and select the one that is <strong>MOST SIMILAR</strong>.</p>
+            <p>Consider: same tool names, same parameters, same structure, functional equivalence.</p>
+        </div>
+
+        <div class="ground-truth">
+            <h3>Ground Truth (Reference)</h3>
+            <pre>{
+  "tool_calls": [
+    {
+      "name": "think-tool-server-think",
+      "arguments": {
+        "thought": "Let me break this problem down step-by-step. We need to find the latest possible start date for foundation work while satisfying all constraints. Let me start by understanding the timeline.\n\nKey constraints:\n1. Planting season starts April 1 (this is our hard deadline)\n2. Foundation phase requires exactly 8 weeks (56 days) of work\n3. Material delivery occurs 7 days after construction starts\n4. Soil-stability inspection must be approved at least 5 days before planting (by March 27)\n5. Audit board sign-off must occur at least 10 days before planting (by March 22) on a Tuesday or Friday\n6. Storm delay March 20-22 (3 days guaranteed)\n7. 2-day weather contingency needed\n8. Labor constraints: 40 hours/week, $9,600 budget\n\nWorking backwards from April 1:\n- Latest inspection approval: March 27\n- Latest audit sign-off: March 22 (Tuesday or Friday)\n- Storm delay: March 20-22\n- Weather contingency: 2 days\n- Foundation work: 56 days\n\nLet me map this out day by day in reverse to find the latest start date.\n\nFirst, let's establish the actual working timeline accounting for the storm delay and contingency. Since March 20-22 is a guaranteed storm delay, we need to add 3 days to our 56-day foundation work. Additionally, we want a 2-day weather contingency. This means we actually need 56 + 3 + 2 = 61 days of elapsed time from start to finish.\n\nCounting backwards 61 days from April 1 takes us to late January. But we need to consider when different activities occur during this 61-day period.\n\nMore precisely:\n- The 56 days of actual work need to be scheduled around the March 20-22 storm\n- Material delivery happens exactly 7 days after construction starts\n- Inspection happens after foundation is complete but before March 27\n- Audit happens before March 22 on a Tuesday/Friday\n\nLet me think about this differently: the 56 days is actual work days, but construction happens 7 days per week (with the storm as an exception). The storm March 20-22 creates 3 non-working days, and we add 2 more for contingency, making 5 non-working days total.\n\nSo we need 56 working days + 5 non-working days = 61 total calendar days from construction start to April 1.\n\nLatest possible start = April 1 minus 61 days = January 30\n\nBut let me verify:\n- Start: January 30\n- Material delivery: February 6 (7 days later)\n- Storm delay: March 20-22 (days 49-51 into construction, halting work)\n- Weather contingency: 2 days (let's say March 18-19)\n- Foundation work finishes: around March 28 (accounting for the storm and contingency)\n- Inspection approval: by March 27 \u2713\n- Audit approval: by March 22 \u2713\n\nWait, let me recalculate more carefully. The 56 days is total work hours, not necessarily calendar days. With 40 hours per week, that would be 40/8 = 5 seven-hour days per week for 11.2 weeks = 78.4 calendar days just for the foundation work.\n\nLet me reconsider: 56 calendar days of 7-day weeks = 8 weeks of work. The constraint says \"exactly 8 weeks (56 days) of work\" - this could mean either 56 working days or 56 calendar days. Given the phrasing \"8 weeks (56 days)\" it likely means 8 calendar weeks of work activities.\n\nSo 56 calendar days of foundation work + 3 storm days + 2 contingency days = 61 total calendar days needed.\n\nLatest start: April 1 minus 61 days = January 30\n\nLet me verify all constraints with January 30 start:\n1. Construction period: January 30 to March 31\n2. Material delivery: February 6 (7 days after start) - this should be fine\n3. Storm delay: March 20-22 - work stops these days\n4. Inspection: Must be approved by March 27. If construction finishes by March 31, inspection could happen March 28, 29, 30, or 31 - but March 27 deadline is problematic\n\nI see an issue - my calculation assumed the 61 days includes the completion date, but we need construction finished before inspections, which must be completed by March 27.\n\nLet me recalculate properly:\n- Construction must finish to allow inspection\n- Inspection must complete by March 27\n- So construction must finish by March 27 at latest\n- Construction duration: 56 calendar days\n- Storm delay adds 3 days\n- Contingency adds 2 days\n- Total: 56 + 3 + 2 = 61 calendar days\n\nSo construction must start by March 27 - 61 days = January 25\n\nLet me check:\n- Start: January 25\n- Construction finish: January 25 + 56 work days + 5 delay days = March 26\n- Inspection window: March 26-27 \u2713\n- Audit: Must be March 22 (Tuesday) or March 21 (Thursday) - actually needs to be by March 22 on a Tuesday or Friday\n\nMarch 22, 2023 was a Wednesday, so we'd need March 21 (Tuesday) or March 24 (Friday). Latest possible audit would be March 21 (Tuesday)."
+      }
+    }
+  ]
+}</pre>
+        </div>
+
+        <div class="candidates-section">
+            <h3>Candidate Responses - Select the Most Similar:</h3>
+            
+        <div class="candidate" onclick="selectCandidate('A')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_A" value="A" onchange="saveChoice('A')">
+                <label for="choice_A" class="candidate-label">[A]</label>
+                <span class="model-name">(gemini-2.5-flash-lite)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "think-tool-server-think",
+      "arguments": {
+        "thought": "The garden\u2019s planting season starts on April 1. The foundation phase requires exactly 8 weeks (56 days) of work, but the crew can only log 40 hours per week and must stay within the $9,600 labor budget. The soil-stability inspection must be approved at least 5 days before planting, the audit board must sign off at least 10 days before planting on a meeting day (Tuesday or Friday), and material delivery occurs 7 days after construction starts \u2013 any later start incurs a penalty. A guaranteed 3-day storm delay will occur March 20-22, and you want to add a 2-day weather contingency. Considering all these constraints, what is the latest calendar date you can begin the foundation work while still guaranteeing that the project finishes on time, the inspection and audit approvals occur on schedule, the material delivery deadline is met, and the labor budget is not exceeded? Provide the reasoning steps you use to arrive at the date.\n\n1. **Identify the Fixed End Date:**\n* Planting season starts: April 1. This is the absolute latest the foundation work can be completed.\n\n2. **Work Backwards from the Planting Date:**\n\n*   **Soil-Stability Inspection:** Must be approved at least 5 days before planting.\n    *   April 1 - 5 days = March 27. The inspection must be approved by March 27.\n*   **Audit Board Sign-off:** Must be approved at least 10 days before planting *and* on a Tuesday or Friday.\n    *   April 1 - 10 days = March 22.\n    *   We need to find the closest Tuesday or Friday *before* March 22.\n    *   March 22 is a Friday. So, the audit must be approved by March 22.\n*   **Foundation Work Duration:** Exactly 8 weeks (56 days).\n*   **Storm Delay:** March 20-22 (3 days). This *will* happen.\n*   **Weather Contingency:** 2 days. This is a buffer we want to add.\n\n3. **Calculate the Latest Foundation Completion Date:**\n\n*   The foundation work must be completed *before* the soil-stability inspection deadline.\n*   Latest completion date for foundation: March 27 (inspection deadline).\n\n4. **Calculate the Latest Foundation Start Date, Considering Work Duration and Delays:**\n\n*   **Work backwards from the completion date (March 27):**\n    *   Foundation work duration: 56 days.\n    *   March 27 - 56 days = February 1 (approximately, we'll refine this).\n\n*   **Incorporate the storm delay:** The storm delay (March 20-22) falls within the potential work period. Since it's a guaranteed delay, we need to add these 3 days to our calculation.\n    *   If we started on Feb 1, the work would end around March 26. The storm delay would push this to March 29. This is too late.\n    *   We need to start earlier to account for the storm. Let's add 3 days to the start date.\n\n*   **Incorporate the weather contingency:** We want to add a 2-day buffer.\n    *   Add another 2 days to the start date.\n\n*   **Revised Calculation (working backwards from March 27, accounting for delays):**\n    *   We need to finish by March 27.\n    *   Subtract 56 days of work: March 27 - 56 days.\n    *   Let's count backwards from March 27:\n        *   March: 27 days\n        *   February: 29 days (2024 is a leap year)\n        *   Total days in Feb + March = 27 + 29 = 56 days.\n        *   So, 56 days *before* March 27 is February 1.\n\n    *   Now, let's add the delays to the *start* date to ensure we finish on time.\n    *   If we start on February 1, the 56 days of work would end on March 27.\n    *   However, the storm delay (March 20-22) will occur. This means the 56 days of *actual work* will be spread over a longer calendar period.\n    *   We need to start 3 days earlier to compensate for the storm delay.\n    *   February 1 - 3 days = January 29.\n\n    *   Now, add the 2-day weather contingency. This means we want to start 2 days *even earlier* to have that buffer.\n    *   January 29 - 2 days = January 27.\n\n5. **Check Material Delivery:**\n\n*   Material delivery: 7 days after construction starts.\n*   If we start on January 27, material delivery would be February 3.\n*   This is well before the planting date, so no penalty is incurred.\n\n6. **Check Labor Budget:**\n\n*   Total hours available: 40 hours/week * 8 weeks = 320 hours.\n*   The problem states the crew *can* log 40 hours/week and must stay within the $9,600 budget. This implies the budget is sufficient for the required hours. We don't have information to calculate the exact cost per hour, but the constraint is met by the given parameters.\n\n7. **Final Date and Reasoning:**\n\n*   **Latest Start Date:** January 27.\n\n*   **Reasoning Steps:**\n    1.  **Target Completion:** The project must be ready by April 1 (planting season start).\n    2.  **Inspection Deadline:** Soil-stability inspection needs approval by March 27 (5 days before April 1).\n    3.  **Audit Deadline:** Audit board needs sign-off by March 22 (10 days before April 1, and a Friday).\n    4.  **Foundation Work:** Requires 56 days of work. To finish by March 27, the latest the work could *theoretically* start is February 1 (March 27 - 56 days).\n    5.  **Storm Delay:** A 3-day storm delay (March 20-22) is guaranteed. This pushes the completion date back by 3 days if we don't adjust the start. To finish by March 27, we must start 3 days earlier: February 1 - 3 days = January 29.\n    6.  **Weather Contingency:** A 2-day weather contingency is desired. To build this buffer, we start 2 days earlier: January 29 - 2 days = January 27.\n    7.  **Material Delivery:** Starting January 27 means materials arrive February 3, meeting the \"7 days after construction starts\" requirement and avoiding penalties.\n    8.  **Labor Budget:** The 8 weeks of work at 40 hours/week (320 hours total) is assumed to be within the $9,600 budget.\n\nTherefore, the latest calendar date to begin the foundation work is January 27."
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('B')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_B" value="B" onchange="saveChoice('B')">
+                <label for="choice_B" class="candidate-label">[B]</label>
+                <span class="model-name">(claude-sonnet-4)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "think-tool-server-think",
+      "arguments": {
+        "thought": "This is a complex project scheduling problem with multiple constraints. Let me break down all the requirements and work backwards from the planting season start date.\n\nGiven information:\n- Planting season starts: April 1\n- Foundation phase: exactly 8 weeks (56 days) of work\n- Crew capacity: 40 hours per week\n- Labor budget: $9,600\n- Soil-stability inspection: must be approved at least 5 days before planting\n- Audit board sign-off: at least 10 days before planting, on meeting day (Tuesday or Friday)\n- Material delivery: occurs 7 days after construction starts, any later start incurs penalty\n- Storm delay: guaranteed 3 days (March 20-22)\n- Weather contingency: additional 2 days desired\n- Need to find: latest start date for foundation work\n\nLet me work backwards from April 1:\n\n1. Planting starts: April 1\n2. Soil inspection must be approved by: March 27 (5 days before April 1)\n3. Audit board must sign off by: March 22 (10 days before April 1)\n   - But March 22 is a Friday (assuming 2024), so this works for the meeting day requirement\n4. Foundation work must be complete by: March 27 (to allow for soil inspection)\n\nNow, the foundation work takes 56 days, but there are delays to account for:\n- Storm delay: 3 days (March 20-22)\n- Weather contingency: 2 days\n- Total delays: 5 days\n\nSo the total calendar time needed = 56 days of work + 5 days of delays = 61 calendar days\n\nWorking backwards from March 27:\nMarch 27 - 61 days = January 26\n\nBut wait, I need to check if this conflicts with the storm delay dates and other constraints.\n\nLet me recalculate more carefully:\n\nIf foundation work starts on January 26:\n- Day 1: January 26\n- Day 56: March 21 (but this includes the storm delay period)\n\nActually, let me think about this differently. The storm delay occurs March 20-22, so if work is ongoing during this period, it adds 3 days to the schedule.\n\nLet me also check the material delivery constraint:\n- Material delivery occurs 7 days after construction starts\n- Any later start incurs penalty\n- So we want to avoid starting too late to miss this delivery window\n\nAnd I should verify the labor budget constraint:\n- 56 days of work \u00d7 40 hours/week \u00f7 7 days/week = 56 \u00d7 40/7 = 320 hours total\n- Budget is $9,600\n- Implied hourly rate = $9,600 \u00f7 320 = $30/hour\n- This seems feasible, so the budget constraint is satisfied if we stay within 40 hours/week\n\nLet me recalculate the timeline more systematically..."
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('C')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_C" value="C" onchange="saveChoice('C')">
+                <label for="choice_C" class="candidate-label">[C]</label>
+                <span class="model-name">(qwen3-32b)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "think-tool-server-think",
+      "arguments": {
+        "thought": "First, I need to determine the latest possible start date for the foundation work by working backward from the planting season start date of April 1. The foundation phase requires 8 weeks (56 days) of work, so the foundation work must be completed by March 23 to allow for the 3-day storm delay (March 20-22) and the 2-day weather contingency. This means the foundation work must start by February 16. However, I also need to consider the soil-stability inspection, which must be approved at least 5 days before planting, and the audit board sign-off, which must occur at least 10 days before planting on a meeting day (Tuesday or Friday). Additionally, material delivery occurs 7 days after construction starts, and any later start incurs a penalty. I need to ensure that all these constraints are met while staying within the $9,600 labor budget. The crew can only log 40 hours per week, so I need to calculate the total number of hours required for the foundation work and ensure that it does not exceed the budget. The total number of hours required for the foundation work is 56 days * 40 hours/day = 2,240 hours. The labor budget is $9,600, so the hourly rate is $9,600 / 2,240 hours = $4.29 per hour. I need to ensure that the hourly rate is not exceeded. The latest possible start date for the foundation work is February 16, but I need to check if this date allows for the soil-stability inspection and audit board sign-off to occur on schedule. The soil-stability inspection must be approved at least 5 days before planting, so it must be approved by March 26. The audit board must sign off at least 10 days before planting on a meeting day (Tuesday or Friday), so it must be signed off by March 21 on a Tuesday or Friday. The material delivery occurs 7 days after construction starts, so it must occur by February 23. If the foundation work starts on February 16, the material delivery will occur on February 23, which is 7 days after construction starts. This meets the material delivery deadline. The soil-stability inspection must be approved by March 26, which is 5 days before planting. The audit board must sign off by March 21 on a Tuesday or Friday. If the foundation work starts on February 16, the audit board sign-off will occur on March 21, which is a Tuesday. This meets the audit board sign-off requirement. The soil-stability inspection must be approved by March 26, which is 5 days before planting. If the foundation work starts on February 16, the soil-stability inspection will be approved on March 26, which is 5 days before planting. This meets the soil-stability inspection requirement. The total number of hours required for the foundation work is 56 days * 40 hours/day = 2,240 hours. The labor budget is $9,600, so the hourly rate is $9,600 / 2,240 hours = $4.29 per hour. This meets the labor budget requirement. Therefore, the latest possible start date for the foundation work is February 16."
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+
+            <div class="confidence-section">
+                <h4>How confident are you in your choice?</h4>
+                <div class="confidence-buttons">
+                    <button class="confidence-btn" onclick="saveConfidence(1)">1 - Very Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(2)">2 - Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(3)">3 - Neutral</button>
+                    <button class="confidence-btn" onclick="saveConfidence(4)">4 - Confident</button>
+                    <button class="confidence-btn" onclick="saveConfidence(5)">5 - Very Confident</button>
+                </div>
+            </div>
+
+            <div class="notes-section">
+                <h4>Notes (optional)</h4>
+                <textarea id="notes" placeholder="Any additional comments..." onchange="saveNotes()"></textarea>
+            </div>
+
+            <div id="save-status" class="save-status unsaved">Not saved yet</div>
+
+            <div class="skip-reason" id="skip-reason-section">
+                <h4>Reason for skipping:</h4>
+                <select id="skip-reason" onchange="saveSkipReason()">
+                    <option value="">-- Select a reason --</option>
+                    <option value="all_equally_wrong">All options are equally wrong/incorrect</option>
+                    <option value="all_equally_similar">All options are equally similar (can't decide)</option>
+                    <option value="ground_truth_unclear">Ground truth is unclear or ambiguous</option>
+                    <option value="too_complex">Too complex to evaluate</option>
+                    <option value="other">Other (add note below)</option>
+                </select>
+            </div>
+
+            <div class="confirm-section">
+                <button class="confirm-btn" id="confirm-btn" onclick="confirmAndNext()">Confirm & Next</button>
+                <button class="skip-btn" id="skip-btn" onclick="toggleSkip()">Skip</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const sampleId = "3f7ee455-365c-5842-8eeb-0bf2f79f8406";
+        const itemId = "rank_0287";
+
+        function getAnnotations() {
+            const saved = localStorage.getItem('best_match_annotations');
+            return saved ? JSON.parse(saved) : {};
+        }
+
+        function saveAnnotations(annotations) {
+            localStorage.setItem('best_match_annotations', JSON.stringify(annotations));
+        }
+
+        function selectCandidate(label) {
+            document.getElementById('choice_' + label).checked = true;
+            saveChoice(label);
+        }
+
+        function saveChoice(label) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].choice = label;
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveConfidence(level) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].confidence = level;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveNotes() {
+            const notes = document.getElementById('notes').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].notes = notes;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function toggleSkip() {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+
+            if (annotations[itemId].skipped) {
+                // Un-skip
+                annotations[itemId].skipped = false;
+                annotations[itemId].skipReason = null;
+            } else {
+                // Skip - clear any choice
+                annotations[itemId].skipped = true;
+                annotations[itemId].choice = null;
+                annotations[itemId].confirmed = false;
+            }
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveSkipReason() {
+            const reason = document.getElementById('skip-reason').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].skipReason = reason;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function skipAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.skipReason) {
+                alert('Please select a reason for skipping.');
+                return;
+            }
+
+            // Mark as confirmed skip
+            ann.skipped = true;
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Navigate to next
+            setTimeout(() => {
+                window.location.href = 'rank_0288.html';
+            }, 300);
+        }
+
+        function updateUI() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // Update skip state
+            const skipBtn = document.getElementById('skip-btn');
+            const skipReasonSection = document.getElementById('skip-reason-section');
+            const confirmBtn = document.getElementById('confirm-btn');
+
+            if (ann.skipped) {
+                skipBtn.textContent = 'Undo Skip';
+                skipBtn.classList.add('skipped');
+                skipReasonSection.classList.add('visible');
+                confirmBtn.textContent = 'Confirm Skip & Next';
+                confirmBtn.onclick = skipAndNext;
+
+                // Disable candidate selection when skipped
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '0.5';
+                    el.style.pointerEvents = 'none';
+                });
+            } else {
+                skipBtn.textContent = 'Skip';
+                skipBtn.classList.remove('skipped');
+                skipReasonSection.classList.remove('visible');
+                confirmBtn.textContent = 'Confirm & Next';
+                confirmBtn.onclick = confirmAndNext;
+
+                // Enable candidate selection
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '1';
+                    el.style.pointerEvents = 'auto';
+                });
+            }
+
+            // Update skip reason dropdown
+            if (ann.skipReason) {
+                document.getElementById('skip-reason').value = ann.skipReason;
+            }
+
+            // Update candidate selection
+            document.querySelectorAll('.candidate').forEach(el => el.classList.remove('selected'));
+            if (ann.choice) {
+                const radio = document.getElementById('choice_' + ann.choice);
+                if (radio) {
+                    radio.checked = true;
+                    radio.closest('.candidate').classList.add('selected');
+                }
+            }
+
+            // Update confidence buttons
+            document.querySelectorAll('.confidence-btn').forEach((btn, idx) => {
+                btn.classList.toggle('selected', ann.confidence === idx + 1);
+            });
+
+            // Update notes
+            if (ann.notes) {
+                document.getElementById('notes').value = ann.notes;
+            }
+
+            // Update save status
+            const status = document.getElementById('save-status');
+            if (ann.skipped) {
+                status.textContent = 'Marked as SKIP' + (ann.skipReason ? ' - ' + ann.skipReason : '');
+                status.className = 'save-status saved';
+            } else if (ann.choice) {
+                status.textContent = 'Saved: Choice ' + ann.choice + (ann.confidence ? ', Confidence ' + ann.confidence : '');
+                status.className = 'save-status saved';
+            } else {
+                status.textContent = 'Not saved yet - please select a response or skip';
+                status.className = 'save-status unsaved';
+            }
+        }
+
+        function confirmBeforeNav(event) {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // If a choice is made, confirm it before navigating
+            if (ann.choice && !ann.confirmed) {
+                ann.confirmed = true;
+                ann.confirmedAt = new Date().toISOString();
+                annotations[itemId] = ann;
+                saveAnnotations(annotations);
+            }
+            // Allow navigation to proceed
+        }
+
+        function confirmAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.choice) {
+                alert('Please select a response before confirming.');
+                return;
+            }
+
+            // Mark as confirmed
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Update button state
+            const btn = document.getElementById('confirm-btn');
+            btn.textContent = 'Confirmed!';
+            btn.classList.add('confirmed');
+
+            // Navigate to next after brief delay
+            setTimeout(() => {
+                window.location.href = 'rank_0288.html';
+            }, 500);
+        }
+
+        // Load saved state on page load
+        window.onload = function() {
+            updateUI();
+            // Update confirm button if already confirmed
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+            if (ann.confirmed) {
+                const btn = document.getElementById('confirm-btn');
+                btn.textContent = 'Confirmed';
+                btn.classList.add('confirmed');
+            }
+        };
+    </script>
+</body>
+</html>

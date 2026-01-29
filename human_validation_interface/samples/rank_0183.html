@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sample 177 / 343</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            line-height: 1.5;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header h2 { margin: 0 0 10px 0; color: #333; }
+        .progress { color: #666; }
+        .nav-buttons { margin-top: 15px; }
+        .nav-buttons a {
+            display: inline-block;
+            padding: 8px 16px;
+            margin-right: 10px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .nav-buttons a:hover { background: #0056b3; }
+        .nav-buttons a.disabled {
+            background: #ccc;
+            pointer-events: none;
+        }
+
+        .task-description {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2196f3;
+        }
+        .task-description h3 { margin: 0 0 10px 0; color: #1565c0; }
+
+        .ground-truth {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #4caf50;
+        }
+        .ground-truth h3 { margin: 0 0 15px 0; color: #2e7d32; }
+
+        .candidates-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .candidates-section h3 { margin: 0 0 15px 0; color: #333; }
+
+        .candidate {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .candidate:hover { background: #f0f0f0; border-color: #ddd; }
+        .candidate.selected {
+            background: #e8f5e9;
+            border-color: #4caf50;
+        }
+        .candidate-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .candidate-label {
+            font-size: 18px;
+            font-weight: bold;
+            margin-left: 10px;
+            color: #333;
+        }
+        .model-name {
+            margin-left: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 13px;
+            margin: 0;
+        }
+        .ground-truth pre {
+            background: #1b5e20;
+            color: #c5e1a5;
+        }
+        .response-json { background: #37474f; }
+
+        .confidence-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff3e0;
+            border-radius: 8px;
+        }
+        .confidence-section h4 { margin: 0 0 10px 0; }
+        .confidence-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .confidence-btn {
+            padding: 8px 16px;
+            border: 1px solid #ccc;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .confidence-btn:hover { background: #f5f5f5; }
+        .confidence-btn.selected {
+            background: #ff9800;
+            color: white;
+            border-color: #ff9800;
+        }
+
+        .notes-section {
+            margin-top: 15px;
+        }
+        .notes-section textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            min-height: 60px;
+            font-family: inherit;
+        }
+
+        .save-status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .save-status.saved { background: #e8f5e9; color: #2e7d32; }
+        .save-status.unsaved { background: #ffebee; color: #c62828; }
+
+        .confirm-section {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .confirm-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .confirm-btn:hover { background: #388e3c; transform: scale(1.02); }
+        .confirm-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .confirm-btn.confirmed {
+            background: #2196f3;
+        }
+        .skip-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #9e9e9e;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 20px;
+        }
+        .skip-btn:hover { background: #757575; }
+        .skip-btn.skipped {
+            background: #ff9800;
+        }
+        .skip-reason {
+            margin-top: 15px;
+            display: none;
+        }
+        .skip-reason.visible {
+            display: block;
+        }
+        .skip-reason select {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 100%;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Sample 177 of 343</h2>
+            <div class="progress">ID: b6cef84b-2adf-5530-8710-692f4c955304</div>
+            <div class="nav-buttons">
+                <a href='rank_0175.html'>Previous</a>
+                <a href="../index.html">Back to List</a>
+                <a href='rank_0177.html' onclick='confirmBeforeNav(event)'>Next</a>
+            </div>
+        </div>
+
+        <div class="task-description">
+            <h3>Task: Select the Most Similar Response</h3>
+            <p>Compare the responses below to the Ground Truth and select the one that is <strong>MOST SIMILAR</strong>.</p>
+            <p>Consider: same tool names, same parameters, same structure, functional equivalence.</p>
+        </div>
+
+        <div class="ground-truth">
+            <h3>Ground Truth (Reference)</h3>
+            <pre>{
+  "tool_calls": [
+    {
+      "name": "think-tool-server-think",
+      "arguments": {
+        "thought": "The user is asking for a comprehensive compliance framework covering CCPA, CPRA, and HIPAA with several critical constraints:\n\n1. $15K legal budget limit\n2. 10-week MVP launch schedule  \n3. Three phased releases\n4. Must reconcile rapid \"privacy-by-design\" certification vs full patient-rights workflow\n5. Must produce risk-assessment matrix with data-minimization controls linked to legal citations\n6. All reasoning must be captured in compliance wiki with full traceability for auditors\n\nThis is a complex multi-stakeholder, multi-constraint problem that requires systemic thinking. I need to structure the reasoning process itself while also organizing the deliverables. Let me break this down systematically.\n\nKey considerations:\n- Budget constraint suggests we need to leverage existing frameworks vs building from scratch\n- Timeline suggests phased approach with critical path analysis\n- Multiple regulations suggest common controls and differentiated controls\n- Stakeholder conflict suggests we need sequencing and resource allocation strategy\n- Wiki requirement suggests we need a knowledge management approach throughout\n\nLet me start by mapping out the fundamental structure."
+      }
+    }
+  ]
+}</pre>
+        </div>
+
+        <div class="candidates-section">
+            <h3>Candidate Responses - Select the Most Similar:</h3>
+            
+        <div class="candidate" onclick="selectCandidate('A')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_A" value="A" onchange="saveChoice('A')">
+                <label for="choice_A" class="candidate-label">[A]</label>
+                <span class="model-name">(qwen3-32b)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "think-tool-server-think",
+      "arguments": {
+        "thought": "To develop a comprehensive compliance framework for your healthcare-data startup that satisfies CCPA, CPRA, and HIPAA, while adhering to a tight budget and a 10-week MVP launch schedule, we need to structure the entire reasoning process in a systematic and traceable manner. Here's a step-by-step approach to achieve this: [https://www.healthit.gov/hipaa] [https://oag.ca.gov/privacy/ccpa] [https://oag.ca.gov/privacy/cpra]"
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('B')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_B" value="B" onchange="saveChoice('B')">
+                <label for="choice_B" class="candidate-label">[B]</label>
+                <span class="model-name">(claude-sonnet-4.5)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "think-tool-server-think",
+      "arguments": {
+        "thought": "This is a complex, multi-stakeholder compliance project with tight constraints. Let me break down the key requirements:\n\n1. **Regulatory Scope**: CCPA, CPRA, HIPAA\n2. **Constraints**: $15K budget, 10-week timeline, MVP launch\n3. **Deliverables**: 3 phased releases, risk-assessment matrix, privacy-by-design certification path, patient-rights workflow\n4. **Stakeholders**: Board, investors, CPO, hospital partner\n5. **Documentation**: Traceable reasoning with citations for audit trail\n\nI need to structure a comprehensive approach that addresses all these dimensions systematically."
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('C')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_C" value="C" onchange="saveChoice('C')">
+                <label for="choice_C" class="candidate-label">[C]</label>
+                <span class="model-name">(claude-opus-4.5)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "think-tool-server-think",
+      "arguments": {
+        "thought": "## Initial Problem Decomposition\n\nThis is a complex multi-constraint compliance framework problem. Let me break down the overlapping requirements:\n\n**Stakeholders & Their Requirements:**\n1. **Board** - Needs \"board-ready\" deliverable (executive summary, risk visibility)\n2. **Investors** - Want rapid \"privacy-by-design\" certification (speed, marketability)\n3. **Chief Privacy Officer (CPO)** - Requires full patient-rights workflow (completeness, operational)\n4. **Hospital Partner** - Needs audit-ready risk-assessment matrix with legal citations (traceability)\n5. **Future Auditors** - Need traceable reasoning in compliance wiki (documentation)\n\n**Hard Constraints:**\n- Budget: $15K legal budget\n- Timeline: 10-week MVP launch\n- Phased delivery: 3 releases required\n- Regulatory scope: CCPA, CPRA, HIPAA (overlapping but distinct)\n\n**Deliverables Required:**\n1. Compliance framework (phased)\n2. Privacy-by-design certification pathway\n3. Patient-rights workflow\n4. Risk-assessment matrix with data-minimization controls \u2192 legal citations\n5. Compliance wiki with traceable reasoning\n\nLet me think about the regulatory landscape first to understand the citation requirements."
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+
+            <div class="confidence-section">
+                <h4>How confident are you in your choice?</h4>
+                <div class="confidence-buttons">
+                    <button class="confidence-btn" onclick="saveConfidence(1)">1 - Very Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(2)">2 - Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(3)">3 - Neutral</button>
+                    <button class="confidence-btn" onclick="saveConfidence(4)">4 - Confident</button>
+                    <button class="confidence-btn" onclick="saveConfidence(5)">5 - Very Confident</button>
+                </div>
+            </div>
+
+            <div class="notes-section">
+                <h4>Notes (optional)</h4>
+                <textarea id="notes" placeholder="Any additional comments..." onchange="saveNotes()"></textarea>
+            </div>
+
+            <div id="save-status" class="save-status unsaved">Not saved yet</div>
+
+            <div class="skip-reason" id="skip-reason-section">
+                <h4>Reason for skipping:</h4>
+                <select id="skip-reason" onchange="saveSkipReason()">
+                    <option value="">-- Select a reason --</option>
+                    <option value="all_equally_wrong">All options are equally wrong/incorrect</option>
+                    <option value="all_equally_similar">All options are equally similar (can't decide)</option>
+                    <option value="ground_truth_unclear">Ground truth is unclear or ambiguous</option>
+                    <option value="too_complex">Too complex to evaluate</option>
+                    <option value="other">Other (add note below)</option>
+                </select>
+            </div>
+
+            <div class="confirm-section">
+                <button class="confirm-btn" id="confirm-btn" onclick="confirmAndNext()">Confirm & Next</button>
+                <button class="skip-btn" id="skip-btn" onclick="toggleSkip()">Skip</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const sampleId = "b6cef84b-2adf-5530-8710-692f4c955304";
+        const itemId = "rank_0176";
+
+        function getAnnotations() {
+            const saved = localStorage.getItem('best_match_annotations');
+            return saved ? JSON.parse(saved) : {};
+        }
+
+        function saveAnnotations(annotations) {
+            localStorage.setItem('best_match_annotations', JSON.stringify(annotations));
+        }
+
+        function selectCandidate(label) {
+            document.getElementById('choice_' + label).checked = true;
+            saveChoice(label);
+        }
+
+        function saveChoice(label) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].choice = label;
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveConfidence(level) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].confidence = level;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveNotes() {
+            const notes = document.getElementById('notes').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].notes = notes;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function toggleSkip() {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+
+            if (annotations[itemId].skipped) {
+                // Un-skip
+                annotations[itemId].skipped = false;
+                annotations[itemId].skipReason = null;
+            } else {
+                // Skip - clear any choice
+                annotations[itemId].skipped = true;
+                annotations[itemId].choice = null;
+                annotations[itemId].confirmed = false;
+            }
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveSkipReason() {
+            const reason = document.getElementById('skip-reason').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].skipReason = reason;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function skipAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.skipReason) {
+                alert('Please select a reason for skipping.');
+                return;
+            }
+
+            // Mark as confirmed skip
+            ann.skipped = true;
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Navigate to next
+            setTimeout(() => {
+                window.location.href = 'rank_0177.html';
+            }, 300);
+        }
+
+        function updateUI() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // Update skip state
+            const skipBtn = document.getElementById('skip-btn');
+            const skipReasonSection = document.getElementById('skip-reason-section');
+            const confirmBtn = document.getElementById('confirm-btn');
+
+            if (ann.skipped) {
+                skipBtn.textContent = 'Undo Skip';
+                skipBtn.classList.add('skipped');
+                skipReasonSection.classList.add('visible');
+                confirmBtn.textContent = 'Confirm Skip & Next';
+                confirmBtn.onclick = skipAndNext;
+
+                // Disable candidate selection when skipped
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '0.5';
+                    el.style.pointerEvents = 'none';
+                });
+            } else {
+                skipBtn.textContent = 'Skip';
+                skipBtn.classList.remove('skipped');
+                skipReasonSection.classList.remove('visible');
+                confirmBtn.textContent = 'Confirm & Next';
+                confirmBtn.onclick = confirmAndNext;
+
+                // Enable candidate selection
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '1';
+                    el.style.pointerEvents = 'auto';
+                });
+            }
+
+            // Update skip reason dropdown
+            if (ann.skipReason) {
+                document.getElementById('skip-reason').value = ann.skipReason;
+            }
+
+            // Update candidate selection
+            document.querySelectorAll('.candidate').forEach(el => el.classList.remove('selected'));
+            if (ann.choice) {
+                const radio = document.getElementById('choice_' + ann.choice);
+                if (radio) {
+                    radio.checked = true;
+                    radio.closest('.candidate').classList.add('selected');
+                }
+            }
+
+            // Update confidence buttons
+            document.querySelectorAll('.confidence-btn').forEach((btn, idx) => {
+                btn.classList.toggle('selected', ann.confidence === idx + 1);
+            });
+
+            // Update notes
+            if (ann.notes) {
+                document.getElementById('notes').value = ann.notes;
+            }
+
+            // Update save status
+            const status = document.getElementById('save-status');
+            if (ann.skipped) {
+                status.textContent = 'Marked as SKIP' + (ann.skipReason ? ' - ' + ann.skipReason : '');
+                status.className = 'save-status saved';
+            } else if (ann.choice) {
+                status.textContent = 'Saved: Choice ' + ann.choice + (ann.confidence ? ', Confidence ' + ann.confidence : '');
+                status.className = 'save-status saved';
+            } else {
+                status.textContent = 'Not saved yet - please select a response or skip';
+                status.className = 'save-status unsaved';
+            }
+        }
+
+        function confirmBeforeNav(event) {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // If a choice is made, confirm it before navigating
+            if (ann.choice && !ann.confirmed) {
+                ann.confirmed = true;
+                ann.confirmedAt = new Date().toISOString();
+                annotations[itemId] = ann;
+                saveAnnotations(annotations);
+            }
+            // Allow navigation to proceed
+        }
+
+        function confirmAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.choice) {
+                alert('Please select a response before confirming.');
+                return;
+            }
+
+            // Mark as confirmed
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Update button state
+            const btn = document.getElementById('confirm-btn');
+            btn.textContent = 'Confirmed!';
+            btn.classList.add('confirmed');
+
+            // Navigate to next after brief delay
+            setTimeout(() => {
+                window.location.href = 'rank_0177.html';
+            }, 500);
+        }
+
+        // Load saved state on page load
+        window.onload = function() {
+            updateUI();
+            // Update confirm button if already confirmed
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+            if (ann.confirmed) {
+                const btn = document.getElementById('confirm-btn');
+                btn.textContent = 'Confirmed';
+                btn.classList.add('confirmed');
+            }
+        };
+    </script>
+</body>
+</html>

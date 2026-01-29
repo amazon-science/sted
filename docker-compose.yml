@@ -1,0 +1,42 @@
+# STED Temperature Experiment - Single Model per EC2 Instance
+#
+# Available models: sted/model_config.py (MODEL_REGISTRY)
+#
+# Usage:
+#   # Build
+#   docker-compose build
+#
+#   # List models
+#   docker-compose run --rm experiment --list-models
+#
+#   # Run single model (set MODEL_ID env var)
+#   MODEL_ID=us.amazon.nova-2-lite-v1:0 docker-compose up
+#
+#   # Or override on command line
+#   docker-compose run --rm -e MODEL_ID=us.amazon.nova-2-lite-v1:0 experiment
+
+version: '3.8'
+
+services:
+  experiment:
+    build: .
+    image: sted-experiment:latest
+    volumes:
+      - ./results:/app/results
+      - ./logs:/app/logs
+    environment:
+      # Model selection (required) - from MODEL_REGISTRY
+      - MODEL_ID=${MODEL_ID:-}
+      # Experiment parameters (optional)
+      - TEMPERATURES=${TEMPERATURES:-0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0}
+      - SAMPLES=${SAMPLES:-1006}
+      - RUNS=${RUNS:-10}
+      - MAX_WORKERS=${MAX_WORKERS:-}
+      # AWS credentials (for Bedrock models)
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_SESSION_TOKEN
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-west-2}
+      # OpenAI credentials (for OpenRouter models)
+      - OPENAI_API_KEY
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}

@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Tuple, Optional, Set, Union
+from typing import Dict, Any, List, Tuple, Union
 import json
 import numpy as np
 import time
@@ -24,17 +24,17 @@ def collect_all_values(data: Union[Dict, List, Any]) -> List[Tuple[str, Any]]:
             # Collect dictionary values
             for key, value in obj.items():
                 _collect_recursive(value)
-                
+
         elif isinstance(obj, list):
             # Collect list elements
             for idx, item in enumerate(obj):
                 _collect_recursive(item)
-                
+
         else:
             # Leaf value (string, number, boolean, None, etc.)
             if isinstance(obj, str):
                 values.append(obj)
-    
+
     _collect_recursive(data)
     return values
 
@@ -55,7 +55,7 @@ def count_json_elements(json_obj: Any) -> int:
         return len(json_obj) + sum(count_json_elements(item) for item in json_obj)
     else:
         return 1  # Primitive value counts as 1 element
-    
+
 def parse_json_outputs(outputs: List[Union[str, Dict]]) -> List[Dict]:
     """
     Parse a list of JSON outputs that might be strings or dictionaries.
@@ -72,8 +72,7 @@ def parse_json_outputs(outputs: List[Union[str, Dict]]) -> List[Dict]:
             try:
                 parsed.append(json.loads(output))
             except json.JSONDecodeError as e:
-                print(f"Warning: Could not parse JSON string at index {i}: {e}")
-                print(f"String preview: {output[:100]}...")
+                warnings.warn(f"Could not parse JSON string at index {i}: {e}")
         elif isinstance(output, list):
             if isinstance(output[0], dict) and len(output)>0:
                 parsed.append({"responses": output})
@@ -85,10 +84,10 @@ def parse_json_outputs(outputs: List[Union[str, Dict]]) -> List[Dict]:
             parsed.append(output)
         else:
             parsed.append({"responses": output})
-    
+
     return parsed
 
-def getEmbeddings(text, model_id, bedrock_client, max_retries=10, initial_delay=2, output_embedding_length=1024):
+def get_embeddings(text, model_id, bedrock_client, max_retries=10, initial_delay=2, output_embedding_length=512):
     """
     Get embeddings from Bedrock with proper retry and connection handling
     
@@ -107,12 +106,12 @@ def getEmbeddings(text, model_id, bedrock_client, max_retries=10, initial_delay=
     if not text or not text.strip():
         warnings.warn(f"Empty or whitespace-only text provided for embedding: '{text}'")
         return np.zeros(output_embedding_length)
-    
+
     def exponential_delay(attempt):
         # Add jitter to prevent thundering herd
         jitter = 0.1 * initial_delay * np.random.random()
         return initial_delay * (2 ** attempt) + jitter
-    
+
     if model_id == "amazon.titan-embed-text-v1":
         request_body = {
             "inputText": text
@@ -125,13 +124,18 @@ def getEmbeddings(text, model_id, bedrock_client, max_retries=10, initial_delay=
             "embeddingTypes": ["float"]
         }
     elif model_id == "cohere.embed-multilingual-v3":
+        # Cohere Embed Multilingual V3 returns fixed 1024-dim embeddings
+        # Does not support dimensions/normalize/embeddingTypes params
         request_body = {
             "texts": [text],
             "input_type": "clustering",
-            "truncate": "END",
-            "dimensions": output_embedding_length,
-            "normalize": True,
-            "embeddingTypes": ["float"]
+            "truncate": "END"
+        }
+    elif model_id in ["cohere.embed-v4:0", "us.cohere.embed-v4:0"]:
+        request_body = {
+            "texts": [text],
+            "input_type": "search_document",
+            "embedding_types": ["float"]
         }
     else:
         raise ValueError(f"Unknown model_id: {model_id}")
@@ -145,22 +149,23 @@ def getEmbeddings(text, model_id, bedrock_client, max_retries=10, initial_delay=
                 accept="application/json",
                 contentType="application/json")
             response_body = json.loads(response.get("body").read())
-            
+
             # Handle different response formats
             if model_id == "cohere.embed-multilingual-v3":
                 embedding = response_body.get("embeddings", [[]])[0]
+            elif model_id in ["cohere.embed-v4:0", "us.cohere.embed-v4:0"]:
+                # Cohere Embed V4 returns embeddings as dict with 'float' key
+                embeddings_dict = response_body.get("embeddings", {})
+                embedding = embeddings_dict.get("float", [[]])[0]
             else:
                 embedding = response_body.get("embedding", [])
-                
+
             return np.array(embedding).astype(np.float32)
-        except Exception as e:
-            # Catch other exceptions (like connection errors)
-            print(f"Unexpected error on attempt {attempt + 1}: {str(e)}")
+        except Exception:
             if attempt == max_retries - 1:
                 raise
-            
+
             delay = exponential_delay(attempt)
-            print(f"Retrying in {delay:.2f} seconds...")
             time.sleep(delay)
 
     # This should be unreachable with the retry logic above
@@ -186,7 +191,7 @@ def create_bedrock_client(region_name="us-west-2", config=None):
             tcp_keepalive=True
         )
     session = boto3.Session()
-    
+
     return session.client(
         'bedrock-runtime',
         config=config,

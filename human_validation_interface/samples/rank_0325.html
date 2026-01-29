@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sample 319 / 343</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            line-height: 1.5;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header h2 { margin: 0 0 10px 0; color: #333; }
+        .progress { color: #666; }
+        .nav-buttons { margin-top: 15px; }
+        .nav-buttons a {
+            display: inline-block;
+            padding: 8px 16px;
+            margin-right: 10px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .nav-buttons a:hover { background: #0056b3; }
+        .nav-buttons a.disabled {
+            background: #ccc;
+            pointer-events: none;
+        }
+
+        .task-description {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2196f3;
+        }
+        .task-description h3 { margin: 0 0 10px 0; color: #1565c0; }
+
+        .ground-truth {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #4caf50;
+        }
+        .ground-truth h3 { margin: 0 0 15px 0; color: #2e7d32; }
+
+        .candidates-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .candidates-section h3 { margin: 0 0 15px 0; color: #333; }
+
+        .candidate {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .candidate:hover { background: #f0f0f0; border-color: #ddd; }
+        .candidate.selected {
+            background: #e8f5e9;
+            border-color: #4caf50;
+        }
+        .candidate-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .candidate-label {
+            font-size: 18px;
+            font-weight: bold;
+            margin-left: 10px;
+            color: #333;
+        }
+        .model-name {
+            margin-left: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 13px;
+            margin: 0;
+        }
+        .ground-truth pre {
+            background: #1b5e20;
+            color: #c5e1a5;
+        }
+        .response-json { background: #37474f; }
+
+        .confidence-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff3e0;
+            border-radius: 8px;
+        }
+        .confidence-section h4 { margin: 0 0 10px 0; }
+        .confidence-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .confidence-btn {
+            padding: 8px 16px;
+            border: 1px solid #ccc;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .confidence-btn:hover { background: #f5f5f5; }
+        .confidence-btn.selected {
+            background: #ff9800;
+            color: white;
+            border-color: #ff9800;
+        }
+
+        .notes-section {
+            margin-top: 15px;
+        }
+        .notes-section textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            min-height: 60px;
+            font-family: inherit;
+        }
+
+        .save-status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .save-status.saved { background: #e8f5e9; color: #2e7d32; }
+        .save-status.unsaved { background: #ffebee; color: #c62828; }
+
+        .confirm-section {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .confirm-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .confirm-btn:hover { background: #388e3c; transform: scale(1.02); }
+        .confirm-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .confirm-btn.confirmed {
+            background: #2196f3;
+        }
+        .skip-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #9e9e9e;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 20px;
+        }
+        .skip-btn:hover { background: #757575; }
+        .skip-btn.skipped {
+            background: #ff9800;
+        }
+        .skip-reason {
+            margin-top: 15px;
+            display: none;
+        }
+        .skip-reason.visible {
+            display: block;
+        }
+        .skip-reason select {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 100%;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Sample 319 of 343</h2>
+            <div class="progress">ID: e8ae6446-dda7-5d9d-a3f7-cf2e031b80c3</div>
+            <div class="nav-buttons">
+                <a href='rank_0317.html'>Previous</a>
+                <a href="../index.html">Back to List</a>
+                <a href='rank_0319.html' onclick='confirmBeforeNav(event)'>Next</a>
+            </div>
+        </div>
+
+        <div class="task-description">
+            <h3>Task: Select the Most Similar Response</h3>
+            <p>Compare the responses below to the Ground Truth and select the one that is <strong>MOST SIMILAR</strong>.</p>
+            <p>Consider: same tool names, same parameters, same structure, functional equivalence.</p>
+        </div>
+
+        <div class="ground-truth">
+            <h3>Ground Truth (Reference)</h3>
+            <pre>{
+  "tool_calls": [
+    {
+      "name": "metacognitive-monitoring-server-metacognitiveMonitoring",
+      "arguments": {
+        "stage": "knowledge-assessment",
+        "task": "Produce calibrated confidence assessment for whether \"AI-aligned reinforcement learning\" will scale to super-intelligent systems within 15 years, under classified inter-agency budget constraints considering conflicting stakeholder forecasts",
+        "overallConfidence": 0.3,
+        "uncertaintyAreas": [
+          "Technical feasibility timing of scaled alignment mechanisms",
+          "Robustness limits under distributional shift scenarios",
+          "Uncertainty propagation in long-horizon agent behavior",
+          "Disclosure timelines for classified research results",
+          "Bias reconciliation between academic vs private sector forecasting",
+          "Threshold for super-intelligence operational definitions"
+        ],
+        "recommendedApproach": "Structured confidence calibration with staged knowledge boundary mapping, bias reconciliation protocol, and de-classification risk pipeline",
+        "monitoringId": "RL-SCALING-TASKFORCE-2024-15YR",
+        "iteration": 0,
+        "nextAssessmentNeeded": true,
+        "suggestedAssessments": [
+          "knowledge",
+          "claim",
+          "reasoning"
+        ],
+        "knowledgeAssessment": {
+          "domain": "AI-alignment in super-intelligent reinforcement learning systems",
+          "knowledgeLevel": "proficient",
+          "confidenceScore": 0.65,
+          "supportingEvidence": "Published academic work on reward hacking avoidance, interpretability via mechanistic circuits, and theoretical frameworks on corrigibility. Limited direct access to classified frontier models and barred from internal industrial R&D data.",
+          "knownLimitations": [
+            "No clearance for USG or allied classified alignment programs",
+            "Unknown state of Chinese/other nation-state initiatives",
+            "Private sector closed research access restrictions",
+            "Uncertainty bounds on compute scaling forecasts",
+            "Lack of empirical data on 100-year-aligned agent trajectories"
+          ],
+          "relevantTrainingCutoff": "October 2023"
+        },
+        "claims": [
+          {
+            "claim": "Current RL alignment techniques (RLHF, RLAIF, constitutional methods) can scale to super-intelligence",
+            "status": "speculation",
+            "confidenceScore": 0.25,
+            "evidenceBasis": "Scalar empirical gains on current models lack alignment-catastrophe survivorship verification.",
+            "alternativeInterpretations": [
+              "Some interpretability work points to emergent deceptive alignment in larger models",
+              "Scaling laws may break exactly where alignment failures matter most"
+            ],
+            "falsifiabilityCriteria": "Demonstrated consistent safety via red-teaming at 100x model capability"
+          },
+          {
+            "claim": "15 year timeline to super-intelligent aligned RL system remains geopolitically actionable",
+            "status": "inference",
+            "confidenceScore": 0.5,
+            "evidenceBasis": "CapEx and compute forecasting models project >1000x compute within 15 yrs at continuing hardware scaling rates.",
+            "alternativeInterpretations": [
+              "Hardware scaling could plateau due to materials physics limits",
+              "Regulatory or environmental constraints could throttle datacenter buildout"
+            ],
+            "falsifiabilityCriteria": "Compute plateau evident within next 5 years"
+          },
+          {
+            "claim": "Bias reconciliation between university ethics consortium and private foresight is achievable under public transparency constraints",
+            "status": "uncertain",
+            "confidenceScore": 0.4,
+            "evidenceBasis": "Some public sector translation methods exist for privacy-preserving evidence synthesis, but classified detail blind spots remain.",
+            "alternativeInterpretations": [
+              "Divergent incentive structures may make bias reconciliation impossible",
+              "National security interests may force classification of key evidence"
+            ],
+            "falsifiabilityCriteria": "Successfully publish reconciled public summary without redactions that materially distort conclusions"
+          }
+        ],
+        "reasoningSteps": [
+          {
+            "step": "Define super-intelligence operational threshold",
+            "potentialBiases": [
+              "Anthropocentric bias in capability measurement",
+              "Narrow task overfitting"
+            ],
+            "assumptions": [
+              "Scalar general intelligence can be metricized",
+              "Continual capability growth expected"
+            ],
+            "logicalValidity": 0.7,
+            "inferenceStrength": 0.6
+          },
+          {
+            "step": "Assess alignment robustness across scale gaps",
+            "potentialBiases": [
+              "Alignment optimism bias",
+              "Controlled-environment fallacy"
+            ],
+            "assumptions": [
+              "Alignment properties transfer across scale",
+              "Deployment environments remain controlled"
+            ],
+            "logicalValidity": 0.5,
+            "inferenceStrength": 0.4
+          },
+          {
+            "step": "Reconcile conflicting stakeholder forecasts",
+            "potentialBiases": [
+              "Funding-motivated directional bias (private sector)",
+              "Publication bias towards high-impact scenarios (academic)"
+            ],
+            "assumptions": [
+              "Stated incentives reflect actual forecasting process",
+              "Methodological transparency is achievable"
+            ],
+            "logicalValidity": 0.6,
+            "inferenceStrength": 0.5
+          }
+        ]
+      }
+    }
+  ]
+}</pre>
+        </div>
+
+        <div class="candidates-section">
+            <h3>Candidate Responses - Select the Most Similar:</h3>
+            
+        <div class="candidate" onclick="selectCandidate('A')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_A" value="A" onchange="saveChoice('A')">
+                <label for="choice_A" class="candidate-label">[A]</label>
+                <span class="model-name">(claude-haiku-4.5)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "metacognitive-monitoring-server-metacognitiveMonitoring",
+      "arguments": {
+        "task": "Produce calibrated confidence assessment for \"AI-aligned reinforcement learning will scale to super-intelligent systems within 15 years\" under high-stakes conditions: 10-day timeline, $120M budget allocation, reconcile conflicting forecasts, de-classification compliance, dual outputs (congressional testimony + press release)",
+        "stage": "Initial metacognitive assessment and constraint mapping",
+        "monitoringId": "AIRL-SCALING-ASSESSMENT-001",
+        "iteration": 1,
+        "knowledgeAssessment": {
+          "domain_expertise": {
+            "reinforcement_learning_fundamentals": "High - well-established theory and practice",
+            "alignment_techniques": "Medium-High - active research area with emerging consensus on some approaches",
+            "scaling_laws_and_extrapolation": "Medium - empirical patterns observed but theoretical understanding incomplete",
+            "superintelligence_definitions_and_timelines": "Medium-Low - highly contested, multiple frameworks, significant disagreement among experts",
+            "forecasting_methodology": "Medium - base rates and reference class forecasting available, but domain-specific calibration uncertain",
+            "policy_and_budget_allocation_dynamics": "Low - outside core technical expertise, requires institutional knowledge"
+          },
+          "known_unknowns": [
+            "Exact scaling trajectory of alignment techniques with model size",
+            "Whether current alignment approaches remain viable at superintelligent scales",
+            "Definition of 'super-intelligent' and operationalization for assessment",
+            "Probability of fundamental breakthroughs vs. incremental progress",
+            "Interaction effects between alignment research and capability scaling"
+          ],
+          "unknown_unknowns_risk": "High - superintelligence domain has history of surprising developments and paradigm shifts"
+        },
+        "claims": "[\n  {\n    \"claim\": \"Current AI-aligned RL approaches (RLHF, constitutional AI, etc.) represent viable scaling pathways to superintelligence\",\n    \"confidence\": 0.45,\n    \"evidential_basis\": \"Empirical success on current systems, but extrapolation to superintelligence is speculative\",\n    \"key_uncertainty\": \"Whether alignment challenges scale linearly, super-linearly, or sub-linearly with capability\",\n    \"bias_risk\": \"Availability bias toward recent successes; anchoring on current trajectory\"\n  },\n  {\n    \"claim\": \"15-year timeline is technically feasible for superintelligence emergence\",\n    \"confidence\": 0.35,\n    \"evidential_basis\": \"Some expert forecasts support this; others argue 20-50+ years more likely\",\n    \"key_uncertainty\": \"Depends on definition of superintelligence and breakthrough probability\",\n    \"bias_risk\": \"Recency bias from rapid recent progress; overconfidence in trend continuation\"\n  },\n  {\n    \"claim\": \"University AI-ethics consortium and private foresight firm forecasts can be meaningfully reconciled\",\n    \"confidence\": 0.40,\n    \"evidential_basis\": \"Different methodologies, incentive structures, and risk tolerances typically produce divergent estimates\",\n    \"key_uncertainty\": \"Whether disagreement reflects genuine uncertainty or systematic bias in one or both forecasts\",\n    \"bias_risk\": \"False consensus bias; pressure to artificially harmonize conflicting views\"\n  },\n  {\n    \"claim\": \"A single calibrated confidence point estimate can appropriately represent this assessment for budget allocation\",\n    \"confidence\": 0.25,\n    \"evidential_basis\": \"High-stakes decisions typically require confidence intervals, scenario analysis, and decision-theoretic framing\",\n    \"key_uncertainty\": \"Whether stakeholders will accept uncertainty quantification or demand false precision\",\n    \"bias_risk\": \"Pressure to provide false certainty; anchoring on single number rather than distribution\"\n  }\n].map(c => ({...c, \"claim_type\": \"empirical_or_technical\"}))",
+        "reasoningSteps": [
+          {
+            "step": "Decompose 'AI-aligned RL scaling to superintelligence' into constituent technical claims",
+            "quality_assessment": "Essential - prevents conflation of distinct uncertainties",
+            "potential_bias": "Reductionism bias - may miss emergent properties or systemic interactions"
+          },
+          {
+            "step": "Establish reference class for forecasting (similar long-term tech predictions, AI capability predictions, alignment research timelines)",
+            "quality_assessment": "High value - grounds estimate in empirical base rates",
+            "potential_bias": "Reference class selection bias - choice of comparison cases heavily influences estimate"
+          },
+          {
+            "step": "Separately assess: (a) technical feasibility, (b) resource availability, (c) institutional/policy factors, (d) black swan risks",
+            "quality_assessment": "Good - separates distinct causal pathways",
+            "potential_bias": "May underweight interaction effects between factors"
+          },
+          {
+            "step": "Reconcile conflicting forecasts by identifying source of disagreement (empirical vs. methodological vs. value-based)",
+            "quality_assessment": "Critical - enables principled synthesis rather than averaging",
+            "potential_bias": "Confirmation bias toward forecast that aligns with prior beliefs"
+          },
+          {
+            "step": "Translate technical confidence into policy-relevant decision framework",
+            "quality_assessment": "Necessary but risky - introduces additional layers of assumption",
+            "potential_bias": "Motivated reasoning - unconscious adjustment of technical assessment to align with preferred policy outcome"
+          }
+        ],
+        "uncertaintyAreas": [
+          {
+            "area": "Definition and operationalization of 'superintelligence'",
+            "severity": "Critical",
+            "impact_on_assessment": "Different definitions could shift 15-year probability by 30-50 percentage points",
+            "mitigation": "Establish multiple operationalizations; assess each separately; report sensitivity analysis"
+          },
+          {
+            "area": "Scaling behavior of alignment techniques",
+            "severity": "Critical",
+            "impact_on_assessment": "Unknown whether alignment difficulty scales with capability; could be bottleneck or non-issue",
+            "mitigation": "Conduct literature review of scaling law research; identify empirical tests that could resolve this"
+          },
+          {
+            "area": "Probability and timing of fundamental breakthroughs",
+            "severity": "High",
+            "impact_on_assessment": "Single breakthrough could accelerate timeline by 5-10 years; absence could extend by 10+ years",
+            "mitigation": "Assess base rate of breakthroughs in comparable domains; identify leading indicators"
+          },
+          {
+            "area": "Institutional and policy factors affecting research pace",
+            "severity": "High",
+            "impact_on_assessment": "Regulatory constraints, international competition, funding availability could shift timeline significantly",
+            "mitigation": "Consult policy experts; scenario-test under different regulatory regimes"
+          },
+          {
+            "area": "Source and magnitude of disagreement between forecasting organizations",
+            "severity": "High",
+            "impact_on_assessment": "Disagreement could reflect genuine uncertainty or systematic bias in one or both forecasts",
+            "mitigation": "Conduct detailed audit of each forecast's methodology, assumptions, and incentive structure"
+          },
+          {
+            "area": "Appropriate confidence representation for high-stakes budget allocation",
+            "severity": "Medium-High",
+            "impact_on_assessment": "Single point estimate may be inappropriate; confidence intervals or scenario-based allocation may be needed",
+            "mitigation": "Develop multiple output formats; explicitly discuss limitations of point estimates"
+          },
+          {
+            "area": "De-classification timeline constraints and information security",
+            "severity": "Medium",
+            "impact_on_assessment": "May constrain which evidence can be cited; may require redaction of key reasoning",
+            "mitigation": "Coordinate with classification authority early; develop parallel classified and unclassified versions"
+          }
+        ]
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('B')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_B" value="B" onchange="saveChoice('B')">
+                <label for="choice_B" class="candidate-label">[B]</label>
+                <span class="model-name">(claude-opus-4)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "metacognitive-monitoring-server-metacognitiveMonitoring",
+      "arguments": {
+        "task": "Produce a calibrated confidence assessment for the claim that \"AI-aligned reinforcement learning will scale to super-intelligent systems within the next 15 years\" for a high-stakes inter-agency risk-confidence dossier with multiple constraints",
+        "stage": "Initial Assessment",
+        "knowledgeAssessment": {
+          "domainExpertise": {
+            "AIAlignment": 0.7,
+            "ReinforcementLearning": 0.75,
+            "SuperintelligenceTheory": 0.6,
+            "TechnologyForecasting": 0.65,
+            "PolicyCommunication": 0.8
+          },
+          "knowledgeBoundaries": [
+            "Current state of AI alignment research and methodologies",
+            "Scaling laws and their applicability to superintelligent systems",
+            "Technical feasibility of alignment preservation during capability scaling",
+            "Historical accuracy of 15-year technology forecasts",
+            "Classified research that may exist but is inaccessible"
+          ],
+          "evidentialBasis": {
+            "strong": [
+              "Current RL alignment techniques",
+              "Scaling trends in AI capabilities"
+            ],
+            "moderate": [
+              "Theoretical alignment frameworks",
+              "Expert consensus ranges"
+            ],
+            "weak": [
+              "Superintelligence emergence timelines",
+              "Alignment stability at scale"
+            ]
+          }
+        },
+        "claims": [
+          {
+            "claim": "AI-aligned reinforcement learning will scale to super-intelligent systems",
+            "type": "predictive",
+            "confidence": 0.35,
+            "evidenceBasis": "Limited empirical evidence; relies on theoretical extrapolation",
+            "assumptions": [
+              "Current alignment techniques remain relevant at higher scales",
+              "Superintelligence emerges gradually rather than discontinuously",
+              "No fundamental barriers to alignment exist"
+            ]
+          },
+          {
+            "claim": "This will occur within 15 years",
+            "type": "temporal prediction",
+            "confidence": 0.25,
+            "evidenceBasis": "High uncertainty in AI development timelines",
+            "assumptions": [
+              "Current rate of AI progress continues or accelerates",
+              "No major regulatory or resource constraints",
+              "Superintelligence is achievable with foreseeable compute"
+            ]
+          }
+        ],
+        "reasoningSteps": [
+          {
+            "step": "Decompose the claim into technical and temporal components",
+            "quality": 0.9,
+            "biases": [
+              "Availability heuristic from recent AI progress"
+            ],
+            "assumptions": [
+              "Components can be assessed independently"
+            ]
+          },
+          {
+            "step": "Assess current alignment techniques and scaling properties",
+            "quality": 0.7,
+            "biases": [
+              "Anchoring on current paradigms",
+              "Optimism bias in research community"
+            ],
+            "assumptions": [
+              "Current techniques provide relevant insights for future systems"
+            ]
+          },
+          {
+            "step": "Evaluate timeline feasibility based on historical tech forecasts",
+            "quality": 0.6,
+            "biases": [
+              "Planning fallacy",
+              "Recency bias from rapid AI progress"
+            ],
+            "assumptions": [
+              "Past forecasting accuracy is indicative of future accuracy"
+            ]
+          }
+        ],
+        "overallConfidence": 0.3,
+        "uncertaintyAreas": [
+          "Definition and detection criteria for 'superintelligence'",
+          "Scalability of current alignment approaches beyond current systems",
+          "Unknown unknowns in AI development",
+          "Potential paradigm shifts in AI architectures",
+          "Geopolitical and regulatory impacts on development timeline",
+          "Classified or proprietary research affecting the landscape"
+        ],
+        "recommendedApproach": "Implement a multi-stage assessment process: (1) Establish clear definitions and success criteria, (2) Conduct systematic bias reconciliation between conflicting forecasts, (3) Create confidence intervals with explicit uncertainty quantification, (4) Develop scenario-based assessments, (5) Build layered documentation for different audiences",
+        "monitoringId": "ai-alignment-scaling-assessment-001",
+        "iteration": 1,
+        "nextAssessmentNeeded": true,
+        "suggestedAssessments": [
+          "Bias reconciliation analysis between university and private sector forecasts",
+          "Scenario planning with explicit probability distributions",
+          "Knowledge gap prioritization for 10-day timeline",
+          "Stakeholder-specific confidence calibration",
+          "De-classification compliance check"
+        ]
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('C')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_C" value="C" onchange="saveChoice('C')">
+                <label for="choice_C" class="candidate-label">[C]</label>
+                <span class="model-name">(grok-4.1-fast)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "metacognitive-monitoring-server-metacognitiveMonitoring",
+      "arguments": {
+        "task": "Produce a calibrated confidence assessment for the claim \u201cAI-aligned reinforcement learning will scale to super-intelligent systems within the next 15 years\u201d, reconciling biases from conflicting forecasts, under 10-day deadline for high-stakes dossier influencing $120M budget, congressional testimony, and press release.",
+        "stage": "Initial Assessment",
+        "knowledgeAssessment": {
+          "domain": "AI alignment, reinforcement learning, AGI timelines, forecasting methodologies",
+          "familiarity": "high (up to 2023 training data; post-2023 via tools if needed)",
+          "boundaries": "Expert-level on RL techniques (e.g., PPO, MuZero), alignment challenges (e.g., mesa-optimization, reward hacking); moderate on latest proprietary scaling (e.g., OpenAI o1, Anthropic Claude); low on classified inter-agency data or real-time 2024+ breakthroughs; no direct access to consortium/foresight firm reports",
+          "evidential basis": "Public papers (e.g., ARC evals, OpenAI Superalignment), expert surveys (e.g., AI Impacts 2023: median AGI ~2040-2050), historical RL scaling trends"
+        },
+        "claims": [
+          {
+            "claim": "AI-aligned RL will scale to superintelligence by 2039",
+            "classification": "speculative forecast",
+            "certainty": 0.15,
+            "evidence": "RLHF success in current LLMs but fundamental scaling hurdles (sample efficiency, robustness); no known path to superalignment at ASI scale per experts like Yudkowsky/Christiano"
+          },
+          {
+            "claim": "Conflicting forecasts reflect optimism bias in private sector vs. caution in academia",
+            "classification": "plausible inference",
+            "certainty": 0.7,
+            "evidence": "Private firms incentivized for talent/attractors (e.g., Altman timelines); academia emphasizes risks (e.g., FHI reports)"
+          }
+        ],
+        "reasoningSteps": [
+          {
+            "step": "Decompose claim: RL scaling + alignment preservation to ASI",
+            "quality": "strong",
+            "biasCheck": "none"
+          },
+          {
+            "step": "Review evidence: RL progress vs. alignment gaps",
+            "quality": "medium",
+            "biasCheck": "potential recency bias toward LLM hype"
+          },
+          {
+            "step": "Reconcile sources: private optimism (e.g., ~10% by 2030) vs. ethics caution (<5%)",
+            "quality": "strong",
+            "biasCheck": "incentive awareness"
+          }
+        ],
+        "overallConfidence": 0.2,
+        "uncertaintyAreas": [
+          "Post-2023 breakthroughs in scalable oversight/RL alignment",
+          "Definition of 'super-intelligent' and 'aligned'",
+          "Proprietary progress at labs (e.g., xAI, OpenAI)",
+          "Geopolitical/classified factors affecting timelines",
+          "Specific consortium/firm forecasts (unknown details)"
+        ],
+        "recommendedApproach": "1. Gather latest public data via tools/searches. 2. Formalize Bayesian update from conflicting forecasts (assign priors, likelihoods). 3. Structure dossier: Technical annex (prob distros, CRMs), summary (visuals, key gaps). 4. Timeline: Days 1-3 evidence review; 4-6 bias reconciliation; 7-8 drafting; 9-10 review/package. 5. Bias mit: Adversarial collab, external audit. 6. Declass: Flag sens. info.",
+        "monitoringId": "ai-align-rl-superint-2039-v1",
+        "iteration": 1,
+        "nextAssessmentNeeded": true,
+        "suggestedAssessments": [
+          "Fetch latest AI timeline surveys (e.g., Metaculus, AI Index)",
+          "Analyze specific RL alignment papers 2023-2024",
+          "Model incentive biases quantitatively",
+          "Peer review simulation"
+        ]
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('D')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_D" value="D" onchange="saveChoice('D')">
+                <label for="choice_D" class="candidate-label">[D]</label>
+                <span class="model-name">(claude-sonnet-4.5)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "metacognitive-monitoring-server-metacognitiveMonitoring",
+      "arguments": {
+        "task": "Produce a calibrated confidence assessment for the claim that \"AI-aligned reinforcement learning\" will scale to super-intelligent systems within the next 15 years, under high-stakes conditions: 10-day deadline for classified inter-agency risk-confidence dossier, $120M budget allocation decision, reconciling conflicting forecasts from university AI-ethics consortium and private-sector foresight firm, de-classification compliance, dual packaging for congressional testimony (technical) and press release (non-technical)",
+        "stage": "initial-assessment",
+        "knowledgeAssessment": {
+          "domain": "AI alignment, reinforcement learning scaling, superintelligence forecasting",
+          "expertiseLevel": "intermediate-to-advanced (AI systems knowledge), limited (classified intelligence context, inter-agency processes)",
+          "knowledgeBoundaries": [
+            "Current state of RL alignment research is publicly documented but rapidly evolving",
+            "Superintelligence timelines are highly contested with no consensus methodology",
+            "Classified information about government AI capabilities is unknown",
+            "Specific methodologies used by the university consortium and private firm are unknown",
+            "Congressional testimony requirements and de-classification protocols are domain-specific",
+            "Budget allocation decision criteria beyond technical assessment are unclear"
+          ],
+          "confidenceInDomain": 0.6,
+          "knownGaps": [
+            "Access to the conflicting forecasts being reconciled",
+            "Classification levels and de-classification timelines",
+            "Specific stakeholder definitions of 'AI-aligned' and 'super-intelligent'",
+            "Risk tolerance thresholds for the $120M decision",
+            "Political and institutional constraints on the assessment"
+          ]
+        },
+        "claims": [
+          {
+            "claim": "AI-aligned RL will scale to superintelligent systems within 15 years",
+            "type": "predictive-technical",
+            "confidence": 0.15,
+            "evidenceBasis": "highly speculative - depends on multiple unresolved technical problems (scalable alignment, capability gains, definition of superintelligence)",
+            "assumptions": [
+              "Continuous funding and research progress",
+              "No fundamental theoretical barriers",
+              "Alignment solutions scale with capabilities",
+              "Superintelligence is achievable and definable"
+            ],
+            "counterEvidence": [
+              "Current alignment techniques don't scale reliably",
+              "Fundamental unsolved problems in value learning",
+              "Historical AI timeline predictions have been unreliable",
+              "Definitional ambiguity in both 'aligned' and 'superintelligent'"
+            ]
+          },
+          {
+            "claim": "A 10-day timeline is sufficient for a rigorous calibrated assessment",
+            "type": "procedural",
+            "confidence": 0.3,
+            "evidenceBasis": "insufficient - high-quality forecasting typically requires extensive expert elicitation, literature review, and uncertainty quantification",
+            "risks": [
+              "Rushed analysis may miss critical considerations",
+              "Insufficient time to properly reconcile conflicting forecasts",
+              "Pressure may introduce confirmation bias toward stakeholder preferences"
+            ]
+          },
+          {
+            "claim": "Conflicting forecasts can be meaningfully reconciled",
+            "type": "methodological",
+            "confidence": 0.5,
+            "evidenceBasis": "depends on transparency of methodologies and whether disagreements are empirical vs. value-based",
+            "assumptions": [
+              "Both forecasts use explicit, documented methodologies",
+              "Disagreements stem from different data/models rather than values",
+              "Access to full forecast documentation is available"
+            ]
+          }
+        ],
+        "reasoningSteps": [
+          {
+            "step": "Decompose the core technical claim into testable sub-components",
+            "quality": "essential",
+            "potentialBiases": [
+              "Anchoring on existing public timelines (e.g., AGI forecasts)",
+              "Availability bias toward recent breakthroughs (e.g., large language models)"
+            ],
+            "confidence": 0.7,
+            "dependencies": [
+              "Clear definitions of 'aligned', 'superintelligent', and 'scale'"
+            ]
+          },
+          {
+            "step": "Identify the methodological differences between the two conflicting forecasts",
+            "quality": "critical",
+            "potentialBiases": [
+              "Institutional bias (university ethics focus vs. private sector optimism)",
+              "Funding source bias",
+              "Disciplinary bias (computer science vs. philosophy/ethics)"
+            ],
+            "confidence": 0.6,
+            "dependencies": [
+              "Access to both full forecasts and their methodologies"
+            ]
+          },
+          {
+            "step": "Establish base rates for similar technological predictions",
+            "quality": "important",
+            "potentialBiases": [
+              "Reference class problem (what counts as 'similar'?)",
+              "Survivorship bias (successful predictions more visible)"
+            ],
+            "confidence": 0.65,
+            "dependencies": [
+              "Historical data on AI capability predictions"
+            ]
+          },
+          {
+            "step": "Map uncertainty sources: aleatory (inherent randomness) vs. epistemic (knowledge gaps)",
+            "quality": "essential",
+            "potentialBiases": [
+              "Overconfidence in epistemic uncertainty reduction",
+              "Underestimating unknown unknowns"
+            ],
+            "confidence": 0.7,
+            "dependencies": [
+              "Comprehensive literature review"
+            ]
+          },
+          {
+            "step": "Design dual communication strategy (technical vs. non-technical)",
+            "quality": "critical-for-stakeholders",
+            "potentialBiases": [
+              "Oversimplification for non-technical audience",
+              "Political pressure to present false precision"
+            ],
+            "confidence": 0.5,
+            "dependencies": [
+              "Understanding of congressional testimony standards and press release constraints"
+            ]
+          }
+        ],
+        "overallConfidence": 0.35,
+        "uncertaintyAreas": [
+          {
+            "area": "Technical feasibility of scalable alignment",
+            "uncertaintyType": "epistemic-deep",
+            "impact": "critical",
+            "researchable": true,
+            "timeToResolve": "years-to-decades",
+            "description": "Fundamental open problems in value learning, reward specification, and distributional shift remain unsolved"
+          },
+          {
+            "area": "Definition and measurement of 'superintelligence'",
+            "uncertaintyType": "conceptual",
+            "impact": "critical",
+            "researchable": true,
+            "timeToResolve": "months-to-years",
+            "description": "No consensus definition or operationalization; different stakeholders may be evaluating different claims"
+          },
+          {
+            "area": "Institutional and political constraints on the assessment",
+            "uncertaintyType": "contextual",
+            "impact": "high",
+            "researchable": true,
+            "timeToResolve": "days",
+            "description": "Classification requirements, stakeholder risk tolerances, and decision criteria are unclear"
+          },
+          {
+            "area": "Methodological basis of conflicting forecasts",
+            "uncertaintyType": "epistemic-reducible",
+            "impact": "high",
+            "researchable": true,
+            "timeToResolve": "days",
+            "description": "Cannot reconcile forecasts without understanding their methodologies, assumptions, and evidence bases"
+          },
+          {
+            "area": "Black swan events and unknown unknowns",
+            "uncertaintyType": "aleatory-and-epistemic",
+            "impact": "potentially-critical",
+            "researchable": false,
+            "timeToResolve": "unknowable",
+            "description": "Breakthrough discoveries, regulatory changes, or geopolitical events could dramatically alter timelines"
+          }
+        ],
+        "recommendedApproach": "STRUCTURED MULTI-PHASE METACOGNITIVE PROTOCOL:\n\n**PHASE 1 (Days 1-2): Boundary Definition & Stakeholder Alignment**\n- Obtain and document precise definitions from stakeholders for 'AI-aligned', 'superintelligent', and 'scale'\n- Secure access to both conflicting forecasts with full methodologies\n- Clarify classification levels, de-classification timelines, and approval processes\n- Identify decision criteria beyond technical assessment (risk tolerance, political constraints)\n- Establish explicit scope boundaries for what the assessment can and cannot determine\n\n**PHASE 2 (Days 3-4): Systematic Decomposition & Bias Mapping**\n- Decompose the core claim into falsifiable sub-claims with explicit dependencies\n- Map the assumption chains in both conflicting forecasts\n- Identify institutional, funding, and disciplinary biases in each forecast\n- Document your own potential biases (anchoring, availability, optimism/pessimism)\n- Establish base rates from historical AI prediction accuracy\n\n**PHASE 3 (Days 5-6): Evidence Synthesis & Uncertainty Quantification**\n- Conduct rapid expert elicitation (if feasible) with pre-registered questions\n- Categorize uncertainties: epistemic vs. aleatory, reducible vs. irreducible\n- Use structured forecasting methods (e.g., Fermi decomposition, scenario analysis)\n- Assign confidence intervals with explicit reasoning for each sub-claim\n- Document cruxes: what evidence would change your assessment?\n\n**PHASE 4 (Days 7-8): Reconciliation & Calibration**\n- Identify where forecasts disagree on facts vs. values vs. risk tolerance\n- Use disagreement decomposition to expose hidden assumptions\n- Calibrate confidence using reference classes and historical prediction accuracy\n- Perform sensitivity analysis on key parameters\n- Red-team your own assessment for blind spots\n\n**PHASE 5 (Days 9-10): Dual Communication & Transparency**\n- Technical annex: Full methodology, assumption documentation, confidence intervals, sensitivity analyses, dissenting views\n- Non-technical summary: Use probability ranges, avoid false precision, emphasize key uncertainties\n- Explicitly state what the assessment does NOT cover\n- Include a 'confidence calibration statement' explaining your uncertainty\n- Provide decision-relevant scenarios rather than point predictions\n\n**CRITICAL SAFEGUARDS:**\n1. **Resist pressure for false precision** - Wide confidence intervals are more honest than narrow ones\n2. **Make biases explicit** - Document institutional pressures and your own reasoning tendencies\n3. **Separate facts from values** - Clarify where disagreements are empirical vs. normative\n4. **Preserve dissent** - Include minority views and alternative interpretations\n5. **Build in calibration checks** - Compare your confidence to base rates and expert consensus\n6. **Plan for being wrong** - What would you need to see to update your assessment?",
+        "monitoringId": "ai-alignment-scaling-assessment-2024",
+        "iteration": 1,
+        "nextAssessmentNeeded": true,
+        "suggestedAssessments": [
+          "Obtain and analyze the two conflicting forecasts to identify specific methodological differences",
+          "Conduct structured interviews with stakeholders to clarify definitions and decision criteria",
+          "Perform a reference class analysis of historical AI capability predictions (15-year timelines)",
+          "Map the dependency chain: what technical milestones must occur for the claim to be true?",
+          "Identify potential cognitive biases in your own reasoning (use bias checklist)",
+          "Design a calibration test: what would constitute evidence against the claim?",
+          "Develop scenario analysis with explicit probability ranges rather than point predictions",
+          "Create a 'confidence decay function' showing how certainty decreases with longer timelines",
+          "Establish red lines: what uncertainties are irreducible within the 10-day timeline?",
+          "Draft parallel communication frameworks emphasizing uncertainty transparency for both audiences"
+        ]
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+
+            <div class="confidence-section">
+                <h4>How confident are you in your choice?</h4>
+                <div class="confidence-buttons">
+                    <button class="confidence-btn" onclick="saveConfidence(1)">1 - Very Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(2)">2 - Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(3)">3 - Neutral</button>
+                    <button class="confidence-btn" onclick="saveConfidence(4)">4 - Confident</button>
+                    <button class="confidence-btn" onclick="saveConfidence(5)">5 - Very Confident</button>
+                </div>
+            </div>
+
+            <div class="notes-section">
+                <h4>Notes (optional)</h4>
+                <textarea id="notes" placeholder="Any additional comments..." onchange="saveNotes()"></textarea>
+            </div>
+
+            <div id="save-status" class="save-status unsaved">Not saved yet</div>
+
+            <div class="skip-reason" id="skip-reason-section">
+                <h4>Reason for skipping:</h4>
+                <select id="skip-reason" onchange="saveSkipReason()">
+                    <option value="">-- Select a reason --</option>
+                    <option value="all_equally_wrong">All options are equally wrong/incorrect</option>
+                    <option value="all_equally_similar">All options are equally similar (can't decide)</option>
+                    <option value="ground_truth_unclear">Ground truth is unclear or ambiguous</option>
+                    <option value="too_complex">Too complex to evaluate</option>
+                    <option value="other">Other (add note below)</option>
+                </select>
+            </div>
+
+            <div class="confirm-section">
+                <button class="confirm-btn" id="confirm-btn" onclick="confirmAndNext()">Confirm & Next</button>
+                <button class="skip-btn" id="skip-btn" onclick="toggleSkip()">Skip</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const sampleId = "e8ae6446-dda7-5d9d-a3f7-cf2e031b80c3";
+        const itemId = "rank_0318";
+
+        function getAnnotations() {
+            const saved = localStorage.getItem('best_match_annotations');
+            return saved ? JSON.parse(saved) : {};
+        }
+
+        function saveAnnotations(annotations) {
+            localStorage.setItem('best_match_annotations', JSON.stringify(annotations));
+        }
+
+        function selectCandidate(label) {
+            document.getElementById('choice_' + label).checked = true;
+            saveChoice(label);
+        }
+
+        function saveChoice(label) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].choice = label;
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveConfidence(level) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].confidence = level;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveNotes() {
+            const notes = document.getElementById('notes').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].notes = notes;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function toggleSkip() {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+
+            if (annotations[itemId].skipped) {
+                // Un-skip
+                annotations[itemId].skipped = false;
+                annotations[itemId].skipReason = null;
+            } else {
+                // Skip - clear any choice
+                annotations[itemId].skipped = true;
+                annotations[itemId].choice = null;
+                annotations[itemId].confirmed = false;
+            }
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveSkipReason() {
+            const reason = document.getElementById('skip-reason').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].skipReason = reason;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function skipAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.skipReason) {
+                alert('Please select a reason for skipping.');
+                return;
+            }
+
+            // Mark as confirmed skip
+            ann.skipped = true;
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Navigate to next
+            setTimeout(() => {
+                window.location.href = 'rank_0319.html';
+            }, 300);
+        }
+
+        function updateUI() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // Update skip state
+            const skipBtn = document.getElementById('skip-btn');
+            const skipReasonSection = document.getElementById('skip-reason-section');
+            const confirmBtn = document.getElementById('confirm-btn');
+
+            if (ann.skipped) {
+                skipBtn.textContent = 'Undo Skip';
+                skipBtn.classList.add('skipped');
+                skipReasonSection.classList.add('visible');
+                confirmBtn.textContent = 'Confirm Skip & Next';
+                confirmBtn.onclick = skipAndNext;
+
+                // Disable candidate selection when skipped
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '0.5';
+                    el.style.pointerEvents = 'none';
+                });
+            } else {
+                skipBtn.textContent = 'Skip';
+                skipBtn.classList.remove('skipped');
+                skipReasonSection.classList.remove('visible');
+                confirmBtn.textContent = 'Confirm & Next';
+                confirmBtn.onclick = confirmAndNext;
+
+                // Enable candidate selection
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '1';
+                    el.style.pointerEvents = 'auto';
+                });
+            }
+
+            // Update skip reason dropdown
+            if (ann.skipReason) {
+                document.getElementById('skip-reason').value = ann.skipReason;
+            }
+
+            // Update candidate selection
+            document.querySelectorAll('.candidate').forEach(el => el.classList.remove('selected'));
+            if (ann.choice) {
+                const radio = document.getElementById('choice_' + ann.choice);
+                if (radio) {
+                    radio.checked = true;
+                    radio.closest('.candidate').classList.add('selected');
+                }
+            }
+
+            // Update confidence buttons
+            document.querySelectorAll('.confidence-btn').forEach((btn, idx) => {
+                btn.classList.toggle('selected', ann.confidence === idx + 1);
+            });
+
+            // Update notes
+            if (ann.notes) {
+                document.getElementById('notes').value = ann.notes;
+            }
+
+            // Update save status
+            const status = document.getElementById('save-status');
+            if (ann.skipped) {
+                status.textContent = 'Marked as SKIP' + (ann.skipReason ? ' - ' + ann.skipReason : '');
+                status.className = 'save-status saved';
+            } else if (ann.choice) {
+                status.textContent = 'Saved: Choice ' + ann.choice + (ann.confidence ? ', Confidence ' + ann.confidence : '');
+                status.className = 'save-status saved';
+            } else {
+                status.textContent = 'Not saved yet - please select a response or skip';
+                status.className = 'save-status unsaved';
+            }
+        }
+
+        function confirmBeforeNav(event) {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // If a choice is made, confirm it before navigating
+            if (ann.choice && !ann.confirmed) {
+                ann.confirmed = true;
+                ann.confirmedAt = new Date().toISOString();
+                annotations[itemId] = ann;
+                saveAnnotations(annotations);
+            }
+            // Allow navigation to proceed
+        }
+
+        function confirmAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.choice) {
+                alert('Please select a response before confirming.');
+                return;
+            }
+
+            // Mark as confirmed
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Update button state
+            const btn = document.getElementById('confirm-btn');
+            btn.textContent = 'Confirmed!';
+            btn.classList.add('confirmed');
+
+            // Navigate to next after brief delay
+            setTimeout(() => {
+                window.location.href = 'rank_0319.html';
+            }, 500);
+        }
+
+        // Load saved state on page load
+        window.onload = function() {
+            updateUI();
+            // Update confirm button if already confirmed
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+            if (ann.confirmed) {
+                const btn = document.getElementById('confirm-btn');
+                btn.textContent = 'Confirmed';
+                btn.classList.add('confirmed');
+            }
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sample 267 / 343</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            line-height: 1.5;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header h2 { margin: 0 0 10px 0; color: #333; }
+        .progress { color: #666; }
+        .nav-buttons { margin-top: 15px; }
+        .nav-buttons a {
+            display: inline-block;
+            padding: 8px 16px;
+            margin-right: 10px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .nav-buttons a:hover { background: #0056b3; }
+        .nav-buttons a.disabled {
+            background: #ccc;
+            pointer-events: none;
+        }
+
+        .task-description {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2196f3;
+        }
+        .task-description h3 { margin: 0 0 10px 0; color: #1565c0; }
+
+        .ground-truth {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #4caf50;
+        }
+        .ground-truth h3 { margin: 0 0 15px 0; color: #2e7d32; }
+
+        .candidates-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .candidates-section h3 { margin: 0 0 15px 0; color: #333; }
+
+        .candidate {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .candidate:hover { background: #f0f0f0; border-color: #ddd; }
+        .candidate.selected {
+            background: #e8f5e9;
+            border-color: #4caf50;
+        }
+        .candidate-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .candidate-label {
+            font-size: 18px;
+            font-weight: bold;
+            margin-left: 10px;
+            color: #333;
+        }
+        .model-name {
+            margin-left: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 13px;
+            margin: 0;
+        }
+        .ground-truth pre {
+            background: #1b5e20;
+            color: #c5e1a5;
+        }
+        .response-json { background: #37474f; }
+
+        .confidence-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff3e0;
+            border-radius: 8px;
+        }
+        .confidence-section h4 { margin: 0 0 10px 0; }
+        .confidence-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .confidence-btn {
+            padding: 8px 16px;
+            border: 1px solid #ccc;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .confidence-btn:hover { background: #f5f5f5; }
+        .confidence-btn.selected {
+            background: #ff9800;
+            color: white;
+            border-color: #ff9800;
+        }
+
+        .notes-section {
+            margin-top: 15px;
+        }
+        .notes-section textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            min-height: 60px;
+            font-family: inherit;
+        }
+
+        .save-status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .save-status.saved { background: #e8f5e9; color: #2e7d32; }
+        .save-status.unsaved { background: #ffebee; color: #c62828; }
+
+        .confirm-section {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .confirm-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .confirm-btn:hover { background: #388e3c; transform: scale(1.02); }
+        .confirm-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .confirm-btn.confirmed {
+            background: #2196f3;
+        }
+        .skip-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #9e9e9e;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 20px;
+        }
+        .skip-btn:hover { background: #757575; }
+        .skip-btn.skipped {
+            background: #ff9800;
+        }
+        .skip-reason {
+            margin-top: 15px;
+            display: none;
+        }
+        .skip-reason.visible {
+            display: block;
+        }
+        .skip-reason select {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 100%;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Sample 267 of 343</h2>
+            <div class="progress">ID: f96b2358-f347-5032-909e-4631a2968467</div>
+            <div class="nav-buttons">
+                <a href='rank_0265.html'>Previous</a>
+                <a href="../index.html">Back to List</a>
+                <a href='rank_0267.html' onclick='confirmBeforeNav(event)'>Next</a>
+            </div>
+        </div>
+
+        <div class="task-description">
+            <h3>Task: Select the Most Similar Response</h3>
+            <p>Compare the responses below to the Ground Truth and select the one that is <strong>MOST SIMILAR</strong>.</p>
+            <p>Consider: same tool names, same parameters, same structure, functional equivalence.</p>
+        </div>
+
+        <div class="ground-truth">
+            <h3>Ground Truth (Reference)</h3>
+            <pre>{
+  "tool_calls": [
+    {
+      "name": "analogical-reasoning-server-analogicalReasoning",
+      "arguments": {
+        "analogyId": "healthcare-education-ai-analysis",
+        "purpose": "explanation",
+        "confidence": 0.85,
+        "iteration": 1,
+        "nextOperationNeeded": false,
+        "sourceDomain": {
+          "name": "AI in Healthcare",
+          "elements": [
+            {
+              "id": "patient_data",
+              "name": "Patient Medical Records",
+              "type": "entity",
+              "description": "Comprehensive health information including medical history, test results, imaging data, and clinical observations that form the basis for AI analysis and decision-making."
+            },
+            {
+              "id": "diagnostic_ai",
+              "name": "Diagnostic AI Systems",
+              "type": "process",
+              "description": "AI systems that analyze patient data to identify patterns, detect diseases, and provide diagnostic recommendations to healthcare professionals."
+            },
+            {
+              "id": "treatment_recommendation",
+              "name": "Personalized Treatment Plans",
+              "type": "process",
+              "description": "AI-driven recommendations for individualized treatment protocols, medication dosing, and therapeutic interventions based on patient-specific data."
+            },
+            {
+              "id": "clinical_decision_support",
+              "name": "Clinical Decision Support Systems",
+              "type": "entity",
+              "description": "AI tools that assist healthcare providers in making evidence-based clinical decisions by integrating patient data with medical knowledge bases."
+            },
+            {
+              "id": "risk_prediction",
+              "name": "Risk Stratification Models",
+              "type": "process",
+              "description": "AI models that predict patient outcomes, complications, or readmission risks based on historical and real-time data analysis."
+            },
+            {
+              "id": "medical_imaging_ai",
+              "name": "Medical Imaging AI",
+              "type": "process",
+              "description": "Computer vision AI systems specialized in analyzing medical imaging data (X-rays, MRIs, CT scans, pathology slides) for detection and diagnosis."
+            },
+            {
+              "id": "drug_discovery",
+              "name": "AI in Drug Discovery",
+              "type": "process",
+              "description": "Machine learning approaches for identifying potential drug compounds, predicting drug interactions, and optimizing clinical trial design."
+            },
+            {
+              "id": "healthcare_outcomes",
+              "name": "Patient Health Outcomes",
+              "type": "attribute",
+              "description": "Measurable improvements in patient health status, treatment effectiveness, diagnostic accuracy, and overall quality of care resulting from AI implementation."
+            }
+          ]
+        },
+        "targetDomain": {
+          "name": "AI in Education",
+          "elements": [
+            {
+              "id": "student_data",
+              "name": "Student Learning Records",
+              "type": "entity",
+              "description": "Comprehensive educational information including learning history, performance metrics, interaction data, and behavioral observations that form the basis for AI analysis and personalized learning."
+            },
+            {
+              "id": "learning_diagnosis",
+              "name": "Learning Assessment AI",
+              "type": "process",
+              "description": "AI systems that analyze student data to identify learning patterns, detect knowledge gaps, diagnose learning difficulties, and provide assessment recommendations."
+            },
+            {
+              "id": "personalized_learning",
+              "name": "Adaptive Learning Plans",
+              "type": "process",
+              "description": "AI-driven recommendations for individualized learning paths, content sequencing, and instructional strategies based on student-specific data and learning preferences."
+            },
+            {
+              "id": "teaching_decision_support",
+              "name": "Teaching Decision Support Systems",
+              "type": "entity",
+              "description": "AI tools that assist educators in making evidence-based instructional decisions by integrating student data with educational knowledge bases and pedagogical best practices."
+            },
+            {
+              "id": "learning_outcomes_prediction",
+              "name": "Academic Success Prediction",
+              "type": "process",
+              "description": "AI models that predict student learning outcomes, potential drop-out risks, or intervention needs based on engagement patterns and performance data analysis."
+            },
+            {
+              "id": "content_analysis_ai",
+              "name": "Educational Content AI",
+              "type": "process",
+              "description": "NLP and computer vision AI systems for analyzing educational content, automatically grading assignments, and generating educational materials or feedback."
+            },
+            {
+              "id": "curriculum_optimization",
+              "name": "AI in Curriculum Design",
+              "type": "process",
+              "description": "Machine learning approaches for optimizing curriculum structure, content delivery methods, and educational resource allocation based on learning effectiveness data."
+            },
+            {
+              "id": "educational_outcomes",
+              "name": "Student Learning Outcomes",
+              "type": "attribute",
+              "description": "Measurable improvements in student knowledge acquisition, skill development, learning efficiency, and overall educational achievement resulting from AI implementation."
+            }
+          ]
+        },
+        "mappings": [
+          {
+            "sourceElement": "patient_data",
+            "targetElement": "student_data",
+            "mappingStrength": 0.9,
+            "justification": "Both serve as the foundational data layer that AI systems analyze to make personalized recommendations. Both contain historical information, current status, and behavioral patterns.",
+            "limitations": [
+              "Medical data is more regulated and sensitive than educational data",
+              "Patient data includes biological measurements unavailable in education"
+            ]
+          },
+          {
+            "sourceElement": "diagnostic_ai",
+            "targetElement": "learning_diagnosis",
+            "mappingStrength": 0.85,
+            "justification": "Both involve pattern recognition to identify problems (diseases vs. learning difficulties) and provide targeted insights for intervention.",
+            "limitations": [
+              "Medical diagnosis has higher stakes and regulatory requirements",
+              "Learning diagnosis deals with more variable and subjective outcomes"
+            ]
+          },
+          {
+            "sourceElement": "treatment_recommendation",
+            "targetElement": "personalized_learning",
+            "mappingStrength": 0.9,
+            "justification": "Both create individualized intervention strategies based on data analysis, adjusting protocols to individual needs and characteristics.",
+            "limitations": [
+              "Medical treatments have more standardized protocols",
+              "Educational personalization has broader acceptable outcome ranges"
+            ]
+          },
+          {
+            "sourceElement": "clinical_decision_support",
+            "targetElement": "teaching_decision_support",
+            "mappingStrength": 0.8,
+            "justification": "Both augment human expertise by providing evidence-based recommendations alongside comprehensive data analysis and best practices integration.",
+            "limitations": [
+              "Medical decisions often have more immediate and critical consequences",
+              "Teaching decisions involve more creative and pedagogical flexibility"
+            ]
+          },
+          {
+            "sourceElement": "risk_prediction",
+            "targetElement": "learning_outcomes_prediction",
+            "mappingStrength": 0.85,
+            "justification": "Both use predictive modeling to identify individuals at risk of negative outcomes (complications vs. drop-out) allowing for proactive intervention.",
+            "limitations": [
+              "Medical risk models often rely on more established biological markers",
+              "Educational risks are more influenced by environmental and motivational factors"
+            ]
+          },
+          {
+            "sourceElement": "medical_imaging_ai",
+            "targetElement": "content_analysis_ai",
+            "mappingStrength": 0.75,
+            "justification": "Both involve specialized AI analysis of complex data types (medical images vs. educational content) to extract meaningful insights and automate expert-level assessment.",
+            "limitations": [
+              "Medical imaging has more standardized interpretation criteria",
+              "Educational content analysis deals with more diverse and subjective material"
+            ]
+          },
+          {
+            "sourceElement": "drug_discovery",
+            "targetElement": "curriculum_optimization",
+            "mappingStrength": 0.7,
+            "justification": "Both use AI to optimize complex design processes through data-driven approaches, whether for therapeutic compounds or educational programs.",
+            "limitations": [
+              "Drug discovery involves more controlled experimental environments",
+              "Curriculum optimization is influenced by more policy and resource constraints"
+            ]
+          },
+          {
+            "sourceElement": "healthcare_outcomes",
+            "targetElement": "educational_outcomes",
+            "mappingStrength": 0.8,
+            "justification": "Both represent the ultimate effectiveness measures of AI implementation, tracking improvements in the core mission (health vs. learning achievement).",
+            "limitations": [
+              "Health outcomes are more objectively measurable and standardized",
+              "Educational outcomes are more diverse and long-term oriented"
+            ]
+          }
+        ],
+        "inferences": [
+          {
+            "statement": "Both domains use AI primarily as a decision-making augmentation tool rather than replacement, enhancing human expertise with data-driven insights.",
+            "confidence": 0.9,
+            "basedOnMappings": [
+              "clinical_decision_support",
+              "teaching_decision_support"
+            ]
+          },
+          {
+            "statement": "The success of AI in both fields depends heavily on the quality and comprehensiveness of underlying data (patient records/student learning records).",
+            "confidence": 0.95,
+            "basedOnMappings": [
+              "patient_data",
+              "student_data"
+            ]
+          },
+          {
+            "statement": "Personalization is a key parallel - both fields use AI to move from one-size-fits-all to individualized treatments/learning paths.",
+            "confidence": 0.9,
+            "basedOnMappings": [
+              "treatment_recommendation",
+              "personalized_learning"
+            ]
+          },
+          {
+            "statement": "Predictive analytics in both domains serve preventive purposes, identifying at-risk individuals before problems become critical.",
+            "confidence": 0.85,
+            "basedOnMappings": [
+              "risk_prediction",
+              "learning_outcomes_prediction"
+            ]
+          },
+          {
+            "statement": "Both fields face the challenge of balancing standardization with personalization - maintaining quality while accommodating individual differences.",
+            "confidence": 0.8,
+            "basedOnMappings": [
+              "diagnostic_ai",
+              "learning_diagnosis",
+              "healthcare_outcomes",
+              "educational_outcomes"
+            ]
+          },
+          {
+            "statement": "Ethical considerations around AI bias and transparency are critical in both domains, though healthcare has more established regulatory frameworks.",
+            "confidence": 0.85,
+            "basedOnMappings": [
+              "diagnostic_ai",
+              "learning_diagnosis",
+              "clinical_decision_support",
+              "teaching_decision_support"
+            ]
+          }
+        ],
+        "strengths": [
+          "Strong systematic mapping between core data categories and AI processes",
+          "Clear identification of parallel personalization paradigms",
+          "Explicit recognition of similar decision-support roles for AI",
+          "Good differentiation between domain-specific constraints and requirements"
+        ],
+        "limitations": [
+          "May not capture unique domain-specific AI applications",
+          "Some mappings assume similar levels of measurement precision across domains",
+          "Ethical and regulatory differences need deeper exploration",
+          "Technical implementation details may vary significantly despite conceptual similarities"
+        ]
+      }
+    }
+  ]
+}</pre>
+        </div>
+
+        <div class="candidates-section">
+            <h3>Candidate Responses - Select the Most Similar:</h3>
+            
+        <div class="candidate" onclick="selectCandidate('A')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_A" value="A" onchange="saveChoice('A')">
+                <label for="choice_A" class="candidate-label">[A]</label>
+                <span class="model-name">(claude-sonnet-4.5)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "analogical-reasoning-server-analogicalReasoning",
+      "arguments": {
+        "analogyId": "ai-healthcare-education-comparison",
+        "purpose": "To systematically compare and understand how AI is applied in healthcare versus education, focusing on learning processes and decision-making patterns",
+        "sourceDomain": {
+          "name": "AI in Healthcare",
+          "description": "Application of artificial intelligence technologies in medical diagnosis, treatment, and patient care",
+          "elements": [
+            {
+              "id": "diagnostic-ai",
+              "name": "Diagnostic AI Systems",
+              "properties": [
+                "pattern recognition",
+                "image analysis",
+                "symptom evaluation",
+                "disease prediction"
+              ],
+              "relations": [
+                "supports clinical decisions",
+                "learns from medical data",
+                "assists physicians"
+              ]
+            },
+            {
+              "id": "patient-data",
+              "name": "Patient Health Data",
+              "properties": [
+                "medical history",
+                "test results",
+                "imaging data",
+                "vital signs"
+              ],
+              "relations": [
+                "feeds AI models",
+                "enables personalized treatment",
+                "tracks outcomes"
+              ]
+            },
+            {
+              "id": "treatment-recommendation",
+              "name": "Treatment Recommendation Systems",
+              "properties": [
+                "evidence-based",
+                "personalized",
+                "risk assessment",
+                "outcome prediction"
+              ],
+              "relations": [
+                "guides therapy selection",
+                "considers patient factors",
+                "learns from outcomes"
+              ]
+            },
+            {
+              "id": "continuous-monitoring",
+              "name": "Patient Monitoring Systems",
+              "properties": [
+                "real-time data",
+                "alert generation",
+                "trend analysis",
+                "predictive warnings"
+              ],
+              "relations": [
+                "detects anomalies",
+                "prevents complications",
+                "enables early intervention"
+              ]
+            },
+            {
+              "id": "medical-learning",
+              "name": "Medical AI Learning Process",
+              "properties": [
+                "supervised learning from labeled cases",
+                "validation by experts",
+                "continuous improvement",
+                "regulatory compliance"
+              ],
+              "relations": [
+                "trained on historical cases",
+                "validated against gold standards",
+                "updated with new evidence"
+              ]
+            }
+          ]
+        },
+        "targetDomain": {
+          "name": "AI in Education",
+          "description": "Application of artificial intelligence technologies in teaching, learning, and educational assessment",
+          "elements": [
+            {
+              "id": "assessment-ai",
+              "name": "Assessment AI Systems",
+              "properties": [
+                "pattern recognition",
+                "performance analysis",
+                "knowledge gap identification",
+                "learning prediction"
+              ],
+              "relations": [
+                "supports teaching decisions",
+                "learns from student data",
+                "assists educators"
+              ]
+            },
+            {
+              "id": "student-data",
+              "name": "Student Learning Data",
+              "properties": [
+                "academic history",
+                "assessment results",
+                "interaction data",
+                "engagement metrics"
+              ],
+              "relations": [
+                "feeds AI models",
+                "enables personalized learning",
+                "tracks progress"
+              ]
+            },
+            {
+              "id": "learning-recommendation",
+              "name": "Learning Path Recommendation Systems",
+              "properties": [
+                "evidence-based",
+                "personalized",
+                "difficulty assessment",
+                "outcome prediction"
+              ],
+              "relations": [
+                "guides content selection",
+                "considers student factors",
+                "learns from outcomes"
+              ]
+            },
+            {
+              "id": "continuous-tracking",
+              "name": "Student Progress Tracking Systems",
+              "properties": [
+                "real-time data",
+                "alert generation",
+                "trend analysis",
+                "predictive warnings"
+              ],
+              "relations": [
+                "detects learning issues",
+                "prevents failure",
+                "enables early intervention"
+              ]
+            },
+            {
+              "id": "educational-learning",
+              "name": "Educational AI Learning Process",
+              "properties": [
+                "supervised learning from labeled examples",
+                "validation by educators",
+                "continuous improvement",
+                "ethical compliance"
+              ],
+              "relations": [
+                "trained on historical student data",
+                "validated against learning outcomes",
+                "updated with new pedagogical evidence"
+              ]
+            }
+          ]
+        },
+        "mappings": [
+          {
+            "sourceId": "diagnostic-ai",
+            "targetId": "assessment-ai",
+            "type": "structural",
+            "strength": 0.9,
+            "explanation": "Both use pattern recognition to evaluate current state (health/knowledge) and predict outcomes. Diagnostic AI analyzes symptoms and medical data, while assessment AI analyzes student performance and learning patterns."
+          },
+          {
+            "sourceId": "patient-data",
+            "targetId": "student-data",
+            "type": "structural",
+            "strength": 0.85,
+            "explanation": "Both domains collect comprehensive historical and real-time data about individuals. Patient data informs medical decisions, while student data informs educational interventions."
+          },
+          {
+            "sourceId": "treatment-recommendation",
+            "targetId": "learning-recommendation",
+            "type": "functional",
+            "strength": 0.88,
+            "explanation": "Both systems provide personalized recommendations based on individual characteristics and predicted outcomes. Treatment plans are personalized to patients as learning paths are personalized to students."
+          },
+          {
+            "sourceId": "continuous-monitoring",
+            "targetId": "continuous-tracking",
+            "type": "functional",
+            "strength": 0.82,
+            "explanation": "Both provide ongoing surveillance with real-time alerts. Patient monitoring detects health deterioration, while progress tracking detects learning difficulties, both enabling early intervention."
+          },
+          {
+            "sourceId": "medical-learning",
+            "targetId": "educational-learning",
+            "type": "procedural",
+            "strength": 0.87,
+            "explanation": "Both AI systems learn through supervised learning from expert-labeled data, require validation, and continuously improve. Both face similar challenges in regulatory/ethical compliance and need expert oversight."
+          }
+        ],
+        "inferences": [
+          {
+            "content": "Decision-making parallels: Both domains use AI for critical decision support rather than autonomous decisions. Healthcare AI assists physicians in diagnosis and treatment, while educational AI assists teachers in assessment and instruction planning.",
+            "confidence": 0.9,
+            "basedOn": [
+              "diagnostic-ai to assessment-ai mapping",
+              "treatment-recommendation to learning-recommendation mapping"
+            ]
+          },
+          {
+            "content": "Learning process similarities: Both systems employ supervised learning from expert-labeled historical data, require continuous validation, and improve through feedback loops. The quality of outcomes depends heavily on data quality and expert oversight.",
+            "confidence": 0.88,
+            "basedOn": [
+              "medical-learning to educational-learning mapping"
+            ]
+          },
+          {
+            "content": "Personalization strategies: Both domains have shifted from one-size-fits-all approaches to personalized interventions. AI enables individualized treatment plans in healthcare and adaptive learning paths in education.",
+            "confidence": 0.85,
+            "basedOn": [
+              "treatment-recommendation to learning-recommendation mapping",
+              "patient-data to student-data mapping"
+            ]
+          },
+          {
+            "content": "Predictive capabilities: Both use AI for early warning systems. Healthcare AI predicts disease progression and complications, while educational AI predicts learning difficulties and dropout risk, both enabling preventive interventions.",
+            "confidence": 0.83,
+            "basedOn": [
+              "continuous-monitoring to continuous-tracking mapping"
+            ]
+          },
+          {
+            "content": "Ethical considerations: Both domains face similar ethical challenges including data privacy, algorithmic bias, transparency requirements, and the need for human oversight in critical decisions affecting individuals' wellbeing.",
+            "confidence": 0.86,
+            "basedOn": [
+              "all mappings",
+              "regulatory and ethical compliance properties"
+            ]
+          }
+        ],
+        "strengths": [
+          "Strong structural correspondence between diagnostic/assessment functions",
+          "Clear functional parallels in recommendation systems",
+          "Similar data-driven approaches and learning processes",
+          "Comparable emphasis on personalization and early intervention",
+          "Both domains prioritize human-AI collaboration over automation"
+        ],
+        "limitations": [
+          "Healthcare decisions often have more immediate life-or-death consequences than educational decisions",
+          "Medical AI faces stricter regulatory requirements (FDA approval) compared to educational AI",
+          "Healthcare data is more standardized (medical codes, imaging formats) than educational data",
+          "Educational outcomes are harder to measure objectively than many medical outcomes",
+          "Time scales differ: medical interventions may show results quickly, while educational interventions take longer to assess"
+        ],
+        "confidence": 0.87,
+        "iteration": 1,
+        "nextOperationNeeded": false,
+        "suggestedOperations": [
+          "Explore specific case studies in each domain",
+          "Analyze implementation challenges and success factors",
+          "Compare cost-benefit analyses between domains"
+        ]
+      }
+    },
+    {
+      "name": "mapas-mentais-server-compara",
+      "arguments": {
+        "tema1": "AI in Healthcare",
+        "tema2": "AI in Education"
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('B')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_B" value="B" onchange="saveChoice('B')">
+                <label for="choice_B" class="candidate-label">[B]</label>
+                <span class="model-name">(qwen3-235b-a22b)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "analogical-reasoning-server-analogicalReasoning",
+      "arguments": {
+        "analogyId": "ai-healthcare-education-comparison-001",
+        "sourceDomain": {
+          "name": "Artificial Intelligence in Healthcare",
+          "elements": [
+            "Diagnosis and assessment",
+            "Personalized treatment plans",
+            "Predictive analytics for patient outcomes",
+            "Clinical decision support systems",
+            "Data-driven patient monitoring",
+            "Ethical considerations in medical decisions"
+          ]
+        },
+        "targetDomain": {
+          "name": "Artificial Intelligence in Education",
+          "elements": [
+            "Student assessment and evaluation",
+            "Personalized learning paths",
+            "Predictive analytics for student performance",
+            "Educational decision support for teachers",
+            "Adaptive learning systems",
+            "Ethical considerations in educational decisions"
+          ]
+        },
+        "purpose": "To understand AI applications in education by comparing with established AI applications in healthcare, focusing on learning processes and decision-making systems",
+        "mappings": [
+          {
+            "sourceElement": "Diagnosis and assessment",
+            "targetElement": "Student assessment and evaluation",
+            "similarity": "Both involve identifying current state and needs of the individual"
+          },
+          {
+            "sourceElement": "Personalized treatment plans",
+            "targetElement": "Personalized learning paths",
+            "similarity": "Both create customized interventions based on individual characteristics"
+          },
+          {
+            "sourceElement": "Predictive analytics for patient outcomes",
+            "targetElement": "Predictive analytics for student performance",
+            "similarity": "Both use historical data to forecast future outcomes and intervene proactively"
+          },
+          {
+            "sourceElement": "Clinical decision support systems",
+            "targetElement": "Educational decision support for teachers",
+            "similarity": "Both provide evidence-based recommendations to human professionals"
+          },
+          {
+            "sourceElement": "Data-driven patient monitoring",
+            "targetElement": "Adaptive learning systems",
+            "similarity": "Both continuously collect data and adjust interventions in real-time"
+          },
+          {
+            "sourceElement": "Ethical considerations in medical decisions",
+            "targetElement": "Ethical considerations in educational decisions",
+            "similarity": "Both domains face challenges regarding privacy, bias, and autonomy"
+          }
+        ],
+        "inferences": [
+          "AI in education could benefit from healthcare's more mature frameworks for clinical validation",
+          "Both fields require similar levels of data privacy and security given sensitive personal information",
+          "The 'treatment efficacy' concept in healthcare has a direct parallel to 'learning outcome improvement' in education",
+          "Explainability of AI decisions is crucial in both domains due to high-stakes consequences"
+        ],
+        "strengths": [
+          "Both domains involve human development and improvement",
+          "Similar data types (longitudinal personal data) are used for personalization",
+          "Both require human-AI collaboration rather than full automation",
+          "Parallel ethical challenges regarding algorithmic bias and fairness"
+        ],
+        "limitations": [
+          "Healthcare outcomes are often more measurable than educational outcomes",
+          "Regulatory frameworks are more established in healthcare than in education",
+          "The 'success' metrics differ significantly between curing diseases and achieving learning objectives",
+          "Patient-physician relationship differs fundamentally from student-teacher relationship"
+        ],
+        "confidence": 0.85,
+        "iteration": 1,
+        "nextOperationNeeded": true,
+        "suggestedOperations": [
+          "Create comparative mind map visualization",
+          "Analyze specific case studies from both domains",
+          "Evaluate transferability of technical approaches"
+        ]
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('C')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_C" value="C" onchange="saveChoice('C')">
+                <label for="choice_C" class="candidate-label">[C]</label>
+                <span class="model-name">(gpt-oss-120b)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "mapas-mentais-server-compara",
+      "arguments": {
+        "tema1": "AI in Healthcare",
+        "tema2": "AI in Education"
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('D')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_D" value="D" onchange="saveChoice('D')">
+                <label for="choice_D" class="candidate-label">[D]</label>
+                <span class="model-name">(claude-3.5-sonnet)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "analogical-reasoning-server-analogicalReasoning",
+      "arguments": {
+        "analogyId": "ai_health_edu_comparison",
+        "purpose": "To understand the similarities and differences between AI applications in healthcare and education, focusing on learning processes and decision-making",
+        "sourceDomain": {
+          "name": "AI in Healthcare",
+          "key_elements": [
+            "diagnostic systems",
+            "patient data analysis",
+            "treatment recommendations",
+            "medical imaging analysis",
+            "predictive healthcare",
+            "personalized medicine",
+            "real-time monitoring",
+            "clinical decision support"
+          ]
+        },
+        "targetDomain": {
+          "name": "AI in Education",
+          "key_elements": [
+            "learning analytics",
+            "student performance prediction",
+            "personalized learning paths",
+            "content recommendation",
+            "automated assessment",
+            "intelligent tutoring",
+            "engagement monitoring",
+            "educational decision support"
+          ]
+        },
+        "mappings": [
+          {
+            "source": "diagnostic systems",
+            "target": "learning analytics",
+            "relationship": "both analyze patterns to identify issues"
+          },
+          {
+            "source": "patient data analysis",
+            "target": "student performance prediction",
+            "relationship": "both process individual historical data to predict outcomes"
+          },
+          {
+            "source": "treatment recommendations",
+            "target": "personalized learning paths",
+            "relationship": "both provide customized intervention strategies"
+          },
+          {
+            "source": "medical imaging analysis",
+            "target": "automated assessment",
+            "relationship": "both involve pattern recognition for evaluation"
+          },
+          {
+            "source": "real-time monitoring",
+            "target": "engagement monitoring",
+            "relationship": "both track real-time indicators for immediate intervention"
+          }
+        ],
+        "confidence": 0.85,
+        "iteration": 1,
+        "strengths": [
+          "Both domains focus on personalization and individual outcomes",
+          "Both utilize pattern recognition and predictive analytics",
+          "Both involve real-time monitoring and intervention",
+          "Both require careful consideration of ethics and privacy"
+        ],
+        "limitations": [
+          "Healthcare decisions often have more immediate life-critical consequences",
+          "Educational AI systems typically have longer feedback loops",
+          "Healthcare data is more standardized than educational data",
+          "Different regulatory requirements and compliance standards"
+        ],
+        "inferences": [
+          "Success in both domains requires balancing automation with human expertise",
+          "Both fields can benefit from shared advances in predictive modeling",
+          "Privacy-preserving AI techniques developed for one domain can be adapted for the other",
+          "The need for explainable AI is crucial in both contexts"
+        ],
+        "nextOperationNeeded": false,
+        "suggestedOperations": []
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+
+            <div class="confidence-section">
+                <h4>How confident are you in your choice?</h4>
+                <div class="confidence-buttons">
+                    <button class="confidence-btn" onclick="saveConfidence(1)">1 - Very Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(2)">2 - Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(3)">3 - Neutral</button>
+                    <button class="confidence-btn" onclick="saveConfidence(4)">4 - Confident</button>
+                    <button class="confidence-btn" onclick="saveConfidence(5)">5 - Very Confident</button>
+                </div>
+            </div>
+
+            <div class="notes-section">
+                <h4>Notes (optional)</h4>
+                <textarea id="notes" placeholder="Any additional comments..." onchange="saveNotes()"></textarea>
+            </div>
+
+            <div id="save-status" class="save-status unsaved">Not saved yet</div>
+
+            <div class="skip-reason" id="skip-reason-section">
+                <h4>Reason for skipping:</h4>
+                <select id="skip-reason" onchange="saveSkipReason()">
+                    <option value="">-- Select a reason --</option>
+                    <option value="all_equally_wrong">All options are equally wrong/incorrect</option>
+                    <option value="all_equally_similar">All options are equally similar (can't decide)</option>
+                    <option value="ground_truth_unclear">Ground truth is unclear or ambiguous</option>
+                    <option value="too_complex">Too complex to evaluate</option>
+                    <option value="other">Other (add note below)</option>
+                </select>
+            </div>
+
+            <div class="confirm-section">
+                <button class="confirm-btn" id="confirm-btn" onclick="confirmAndNext()">Confirm & Next</button>
+                <button class="skip-btn" id="skip-btn" onclick="toggleSkip()">Skip</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const sampleId = "f96b2358-f347-5032-909e-4631a2968467";
+        const itemId = "rank_0266";
+
+        function getAnnotations() {
+            const saved = localStorage.getItem('best_match_annotations');
+            return saved ? JSON.parse(saved) : {};
+        }
+
+        function saveAnnotations(annotations) {
+            localStorage.setItem('best_match_annotations', JSON.stringify(annotations));
+        }
+
+        function selectCandidate(label) {
+            document.getElementById('choice_' + label).checked = true;
+            saveChoice(label);
+        }
+
+        function saveChoice(label) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].choice = label;
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveConfidence(level) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].confidence = level;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveNotes() {
+            const notes = document.getElementById('notes').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].notes = notes;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function toggleSkip() {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+
+            if (annotations[itemId].skipped) {
+                // Un-skip
+                annotations[itemId].skipped = false;
+                annotations[itemId].skipReason = null;
+            } else {
+                // Skip - clear any choice
+                annotations[itemId].skipped = true;
+                annotations[itemId].choice = null;
+                annotations[itemId].confirmed = false;
+            }
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveSkipReason() {
+            const reason = document.getElementById('skip-reason').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].skipReason = reason;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function skipAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.skipReason) {
+                alert('Please select a reason for skipping.');
+                return;
+            }
+
+            // Mark as confirmed skip
+            ann.skipped = true;
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Navigate to next
+            setTimeout(() => {
+                window.location.href = 'rank_0267.html';
+            }, 300);
+        }
+
+        function updateUI() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // Update skip state
+            const skipBtn = document.getElementById('skip-btn');
+            const skipReasonSection = document.getElementById('skip-reason-section');
+            const confirmBtn = document.getElementById('confirm-btn');
+
+            if (ann.skipped) {
+                skipBtn.textContent = 'Undo Skip';
+                skipBtn.classList.add('skipped');
+                skipReasonSection.classList.add('visible');
+                confirmBtn.textContent = 'Confirm Skip & Next';
+                confirmBtn.onclick = skipAndNext;
+
+                // Disable candidate selection when skipped
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '0.5';
+                    el.style.pointerEvents = 'none';
+                });
+            } else {
+                skipBtn.textContent = 'Skip';
+                skipBtn.classList.remove('skipped');
+                skipReasonSection.classList.remove('visible');
+                confirmBtn.textContent = 'Confirm & Next';
+                confirmBtn.onclick = confirmAndNext;
+
+                // Enable candidate selection
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '1';
+                    el.style.pointerEvents = 'auto';
+                });
+            }
+
+            // Update skip reason dropdown
+            if (ann.skipReason) {
+                document.getElementById('skip-reason').value = ann.skipReason;
+            }
+
+            // Update candidate selection
+            document.querySelectorAll('.candidate').forEach(el => el.classList.remove('selected'));
+            if (ann.choice) {
+                const radio = document.getElementById('choice_' + ann.choice);
+                if (radio) {
+                    radio.checked = true;
+                    radio.closest('.candidate').classList.add('selected');
+                }
+            }
+
+            // Update confidence buttons
+            document.querySelectorAll('.confidence-btn').forEach((btn, idx) => {
+                btn.classList.toggle('selected', ann.confidence === idx + 1);
+            });
+
+            // Update notes
+            if (ann.notes) {
+                document.getElementById('notes').value = ann.notes;
+            }
+
+            // Update save status
+            const status = document.getElementById('save-status');
+            if (ann.skipped) {
+                status.textContent = 'Marked as SKIP' + (ann.skipReason ? ' - ' + ann.skipReason : '');
+                status.className = 'save-status saved';
+            } else if (ann.choice) {
+                status.textContent = 'Saved: Choice ' + ann.choice + (ann.confidence ? ', Confidence ' + ann.confidence : '');
+                status.className = 'save-status saved';
+            } else {
+                status.textContent = 'Not saved yet - please select a response or skip';
+                status.className = 'save-status unsaved';
+            }
+        }
+
+        function confirmBeforeNav(event) {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // If a choice is made, confirm it before navigating
+            if (ann.choice && !ann.confirmed) {
+                ann.confirmed = true;
+                ann.confirmedAt = new Date().toISOString();
+                annotations[itemId] = ann;
+                saveAnnotations(annotations);
+            }
+            // Allow navigation to proceed
+        }
+
+        function confirmAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.choice) {
+                alert('Please select a response before confirming.');
+                return;
+            }
+
+            // Mark as confirmed
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Update button state
+            const btn = document.getElementById('confirm-btn');
+            btn.textContent = 'Confirmed!';
+            btn.classList.add('confirmed');
+
+            // Navigate to next after brief delay
+            setTimeout(() => {
+                window.location.href = 'rank_0267.html';
+            }, 500);
+        }
+
+        // Load saved state on page load
+        window.onload = function() {
+            updateUI();
+            // Update confirm button if already confirmed
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+            if (ann.confirmed) {
+                const btn = document.getElementById('confirm-btn');
+                btn.textContent = 'Confirmed';
+                btn.classList.add('confirmed');
+            }
+        };
+    </script>
+</body>
+</html>

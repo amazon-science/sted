@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sample 258 / 343</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            line-height: 1.5;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header h2 { margin: 0 0 10px 0; color: #333; }
+        .progress { color: #666; }
+        .nav-buttons { margin-top: 15px; }
+        .nav-buttons a {
+            display: inline-block;
+            padding: 8px 16px;
+            margin-right: 10px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .nav-buttons a:hover { background: #0056b3; }
+        .nav-buttons a.disabled {
+            background: #ccc;
+            pointer-events: none;
+        }
+
+        .task-description {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2196f3;
+        }
+        .task-description h3 { margin: 0 0 10px 0; color: #1565c0; }
+
+        .ground-truth {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #4caf50;
+        }
+        .ground-truth h3 { margin: 0 0 15px 0; color: #2e7d32; }
+
+        .candidates-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .candidates-section h3 { margin: 0 0 15px 0; color: #333; }
+
+        .candidate {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .candidate:hover { background: #f0f0f0; border-color: #ddd; }
+        .candidate.selected {
+            background: #e8f5e9;
+            border-color: #4caf50;
+        }
+        .candidate-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .candidate-label {
+            font-size: 18px;
+            font-weight: bold;
+            margin-left: 10px;
+            color: #333;
+        }
+        .model-name {
+            margin-left: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 13px;
+            margin: 0;
+        }
+        .ground-truth pre {
+            background: #1b5e20;
+            color: #c5e1a5;
+        }
+        .response-json { background: #37474f; }
+
+        .confidence-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff3e0;
+            border-radius: 8px;
+        }
+        .confidence-section h4 { margin: 0 0 10px 0; }
+        .confidence-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .confidence-btn {
+            padding: 8px 16px;
+            border: 1px solid #ccc;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .confidence-btn:hover { background: #f5f5f5; }
+        .confidence-btn.selected {
+            background: #ff9800;
+            color: white;
+            border-color: #ff9800;
+        }
+
+        .notes-section {
+            margin-top: 15px;
+        }
+        .notes-section textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            min-height: 60px;
+            font-family: inherit;
+        }
+
+        .save-status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .save-status.saved { background: #e8f5e9; color: #2e7d32; }
+        .save-status.unsaved { background: #ffebee; color: #c62828; }
+
+        .confirm-section {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .confirm-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .confirm-btn:hover { background: #388e3c; transform: scale(1.02); }
+        .confirm-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .confirm-btn.confirmed {
+            background: #2196f3;
+        }
+        .skip-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #9e9e9e;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 20px;
+        }
+        .skip-btn:hover { background: #757575; }
+        .skip-btn.skipped {
+            background: #ff9800;
+        }
+        .skip-reason {
+            margin-top: 15px;
+            display: none;
+        }
+        .skip-reason.visible {
+            display: block;
+        }
+        .skip-reason select {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 100%;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Sample 258 of 343</h2>
+            <div class="progress">ID: 0c30c024-29ca-5a67-8b48-2ec1b1b8ee5b</div>
+            <div class="nav-buttons">
+                <a href='rank_0256.html'>Previous</a>
+                <a href="../index.html">Back to List</a>
+                <a href='rank_0258.html' onclick='confirmBeforeNav(event)'>Next</a>
+            </div>
+        </div>
+
+        <div class="task-description">
+            <h3>Task: Select the Most Similar Response</h3>
+            <p>Compare the responses below to the Ground Truth and select the one that is <strong>MOST SIMILAR</strong>.</p>
+            <p>Consider: same tool names, same parameters, same structure, functional equivalence.</p>
+        </div>
+
+        <div class="ground-truth">
+            <h3>Ground Truth (Reference)</h3>
+            <pre>{
+  "tool_calls": [
+    {
+      "name": "clear-thought-server-debuggingapproach",
+      "arguments": {
+        "approachName": "divide_conquer",
+        "issue": "Real-time collaborative editing delays and data loss during network instability in a shared document system",
+        "steps": [
+          "Isolate the network instability impact by testing different network conditions (WiFi drops, high latency, packet loss)",
+          "Test the client-side behavior by introducing artificial network delays and disconnections",
+          "Monitor the server-side state management during client disconnections/reconnections",
+          "Trace the data flow path: user input \u2192 client buffer \u2192 network \u2192 server \u2192 other clients",
+          "Analyze the synchronization protocol and conflict resolution mechanisms",
+          "Examine the client-side caching and retry strategies",
+          "Verify the presence and handling of acknowledgments from the server",
+          "Test edge cases like rapid connect/disconnect cycles and partial data transmission",
+          "Review the client storage (localStorage/indexedDB) implementation for offline handling",
+          "Analyze the reconnection and state reconciliation process"
+        ]
+      }
+    }
+  ]
+}</pre>
+        </div>
+
+        <div class="candidates-section">
+            <h3>Candidate Responses - Select the Most Similar:</h3>
+            
+        <div class="candidate" onclick="selectCandidate('A')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_A" value="A" onchange="saveChoice('A')">
+                <label for="choice_A" class="candidate-label">[A]</label>
+                <span class="model-name">(claude-sonnet-4.5)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "clear-thought-server-debuggingapproach",
+      "arguments": {
+        "approachName": "Divide and Conquer",
+        "issue": "Real-time collaborative web application experiencing delayed or lost user changes during unstable network connections, affecting data consistency across multiple clients",
+        "steps": [
+          {
+            "step": 1,
+            "action": "Isolate the problem domain",
+            "description": "Divide the system into key components: Client-side state management, Network transport layer (WebSocket/HTTP), Server-side message processing, Data persistence layer, and Conflict resolution mechanism. Test each independently to identify which layer(s) are failing."
+          },
+          {
+            "step": 2,
+            "action": "Test network layer reliability",
+            "description": "Use network throttling tools (Chrome DevTools, Network Link Conditioner) to simulate poor connections. Monitor: message delivery rates, acknowledgment timeouts, reconnection behavior, and message queue buildup. Check if WebSocket connections are properly maintained and if fallback mechanisms exist."
+          },
+          {
+            "step": 3,
+            "action": "Examine client-side state synchronization",
+            "description": "Add comprehensive logging to track: when changes are made locally, when they're sent to server, when acknowledgments are received, and when remote changes are applied. Look for race conditions, missing acknowledgments, or state overwrites. Verify optimistic UI updates are being rolled back on failure."
+          },
+          {
+            "step": 4,
+            "action": "Analyze server-side message handling",
+            "description": "Instrument the server to log: message receipt timestamps, processing order, broadcast timing, and any dropped messages. Check for: message queue overflow, processing bottlenecks, improper ordering, or missing broadcast to some clients. Verify idempotency of operations."
+          },
+          {
+            "step": 5,
+            "action": "Investigate conflict resolution logic",
+            "description": "Test scenarios with concurrent edits: same location edits, overlapping changes, and rapid successive changes. Verify operational transformation (OT) or CRDT implementation correctness. Check if vector clocks or version numbers are properly maintained and compared."
+          },
+          {
+            "step": 6,
+            "action": "Test edge cases and failure modes",
+            "description": "Systematically test: client disconnection during edit, server restart with pending changes, network partition scenarios, message reordering, duplicate message delivery, and client reconnection with stale state. Document which scenarios cause data loss."
+          },
+          {
+            "step": 7,
+            "action": "Validate data persistence and recovery",
+            "description": "Verify that: changes are persisted before acknowledgment, recovery mechanisms restore correct state after failures, and transaction boundaries are properly defined. Check database consistency and whether write-ahead logging or similar mechanisms are in place."
+          }
+        ],
+        "findings": "The divide and conquer approach reveals that the issue likely stems from multiple interconnected problems: (1) Lack of guaranteed message delivery with acknowledgments, (2) Missing or incomplete conflict resolution for concurrent edits, (3) Insufficient client-side buffering of pending operations during network instability, (4) No proper state reconciliation mechanism when clients reconnect, and (5) Potential race conditions in the order of applying remote vs local changes. The network layer appears to be the primary failure point, but the application lacks resilience patterns to handle these failures gracefully.",
+        "resolution": "Implement a multi-layered solution: (1) Add message acknowledgment protocol with retry logic and exponential backoff, (2) Implement operation queuing on client-side with persistent storage (IndexedDB/localStorage), (3) Add sequence numbers or vector clocks to all operations for ordering, (4) Implement proper conflict resolution using Operational Transformation or CRDTs, (5) Add state reconciliation protocol for reconnection scenarios, (6) Implement idempotent operation handling on server, and (7) Add comprehensive monitoring and alerting for message delivery failures."
+      }
+    },
+    {
+      "name": "clear-thought-server-programmingparadigm",
+      "arguments": {
+        "paradigmName": "Event-Driven Programming",
+        "problem": "Building a real-time collaborative application that must handle asynchronous network events, user interactions, and state synchronization across multiple clients while gracefully managing network failures and maintaining data consistency",
+        "approach": [
+          "Model the system as a series of events: user edits, network messages, connection state changes, acknowledgments, and conflicts",
+          "Implement event emitters/listeners pattern to decouple components and allow flexible reaction to network conditions",
+          "Use event queues to buffer operations during network instability, ensuring no data loss",
+          "Leverage event sourcing to maintain a complete history of operations for conflict resolution and state reconstruction",
+          "Implement state machines for connection management (connected, disconnected, reconnecting, syncing)",
+          "Use reactive streams to handle backpressure when network cannot keep up with user input rate"
+        ],
+        "benefits": [
+          "Natural fit for asynchronous network communication and user interactions",
+          "Decouples components making it easier to add retry logic, buffering, and error handling",
+          "Event queues provide built-in resilience against temporary network failures",
+          "Easy to implement optimistic UI updates with rollback on failure events",
+          "Simplifies handling of multiple concurrent event sources (multiple users, network, local changes)",
+          "Event sourcing provides audit trail and enables time-travel debugging",
+          "State machines make connection lifecycle management explicit and testable"
+        ],
+        "limitations": [
+          "Can lead to complex event chains that are hard to debug without proper tooling",
+          "Event ordering and causality must be carefully managed to avoid race conditions",
+          "Memory management of event queues requires attention to prevent leaks",
+          "Testing event-driven systems requires mocking complex event sequences",
+          "Can be harder to reason about control flow compared to synchronous code"
+        ]
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('B')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_B" value="B" onchange="saveChoice('B')">
+                <label for="choice_B" class="candidate-label">[B]</label>
+                <span class="model-name">(claude-sonnet-4)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "clear-thought-server-debuggingapproach",
+      "arguments": {
+        "approachName": "Divide and Conquer",
+        "issue": "Real-time collaborative web application experiencing delayed or lost user changes, especially during unstable network connections, affecting data consistency across multiple clients",
+        "steps": [
+          "Isolate the problem domain by testing different network conditions (stable vs unstable) to confirm network dependency",
+          "Separate client-side vs server-side issues by implementing comprehensive logging on both ends with timestamps and sequence numbers",
+          "Divide the data flow into segments: Client input capture \u2192 Local state update \u2192 Network transmission \u2192 Server processing \u2192 Broadcast to other clients \u2192 Remote client updates",
+          "Test each segment independently using network simulation tools (like Chrome DevTools network throttling, tc on Linux, or dedicated tools like Clumsy)",
+          "Implement heartbeat/ping mechanisms to distinguish between network latency and actual message loss",
+          "Create controlled test scenarios with multiple clients performing simultaneous edits to reproduce race conditions",
+          "Monitor WebSocket connection states, reconnection attempts, and message queuing behavior",
+          "Analyze server-side message ordering, conflict resolution logic, and broadcast mechanisms",
+          "Test operational transform algorithms (if implemented) for correctness under various edit scenarios",
+          "Examine client-side buffering, retry logic, and local state synchronization with server state"
+        ],
+        "findings": "The divide and conquer approach revealed multiple potential failure points: 1) WebSocket connections dropping during network instability without proper reconnection handling, 2) Missing message acknowledgment system leading to uncertainty about delivery, 3) Lack of proper queuing for offline operations, 4) Race conditions in concurrent edit handling, 5) Insufficient conflict resolution mechanisms, 6) Client-side state becoming desynchronized from server state during network interruptions",
+        "resolution": "Implement a multi-layered solution combining: reliable message delivery with acknowledgments and retries, robust WebSocket reconnection logic, offline-capable operation queuing, proper operational transforms for conflict resolution, and client-server state synchronization mechanisms"
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('C')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_C" value="C" onchange="saveChoice('C')">
+                <label for="choice_C" class="candidate-label">[C]</label>
+                <span class="model-name">(claude-3.5-sonnet)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "clear-thought-server-debuggingapproach",
+      "arguments": {
+        "approachName": "Divide and Conquer",
+        "issue": "Real-time collaborative document editing experiencing delayed/lost changes during network instability",
+        "steps": [
+          "Isolate the problem domain (client-side vs server-side vs network)",
+          "Monitor network connection status during edit operations",
+          "Track message delivery and acknowledgment between clients and server",
+          "Analyze timing of lost changes relative to network events",
+          "Test with artificial network delays and disconnections",
+          "Verify data consistency across multiple clients after reconnection",
+          "Check server-side conflict resolution mechanisms"
+        ],
+        "findings": "Investigation reveals multiple potential failure points: lack of proper message queuing during network interruptions, missing acknowledgment handling, and inadequate conflict resolution strategy when changes arrive out of order.",
+        "resolution": "Need to implement robust message queuing, acknowledgment system, and conflict resolution mechanism with eventual consistency model."
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('D')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_D" value="D" onchange="saveChoice('D')">
+                <label for="choice_D" class="candidate-label">[D]</label>
+                <span class="model-name">(gemini-2.5-flash-lite)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "clear-thought-server-debuggingapproach",
+      "arguments": {
+        "approachName": "Divide and Conquer",
+        "issue": "Occasional delay or loss of user changes in a real-time collaborative web application, exacerbated by unstable network conditions.",
+        "steps": [
+          "Isolate the data flow from client input to server processing. Test each component individually.",
+          "Analyze client-side event listeners and local state management for immediate feedback loops.",
+          "Examine the network layer (e.g., WebSocket connections, message serialization/deserialization) for data integrity and latency.",
+          "Investigate server-side message queuing, processing, and persistence mechanisms.",
+          "Evaluate the synchronization logic for broadcasting updates to other clients and their state reconciliation.",
+          "Simulate network instability (e.g., packet loss, high latency) using browser developer tools or network simulation tools to reproduce the issue under controlled conditions.",
+          "Log detailed timestamps and state changes at each stage of the data pipeline to identify where delays or data discrepancies occur."
+        ]
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+
+            <div class="confidence-section">
+                <h4>How confident are you in your choice?</h4>
+                <div class="confidence-buttons">
+                    <button class="confidence-btn" onclick="saveConfidence(1)">1 - Very Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(2)">2 - Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(3)">3 - Neutral</button>
+                    <button class="confidence-btn" onclick="saveConfidence(4)">4 - Confident</button>
+                    <button class="confidence-btn" onclick="saveConfidence(5)">5 - Very Confident</button>
+                </div>
+            </div>
+
+            <div class="notes-section">
+                <h4>Notes (optional)</h4>
+                <textarea id="notes" placeholder="Any additional comments..." onchange="saveNotes()"></textarea>
+            </div>
+
+            <div id="save-status" class="save-status unsaved">Not saved yet</div>
+
+            <div class="skip-reason" id="skip-reason-section">
+                <h4>Reason for skipping:</h4>
+                <select id="skip-reason" onchange="saveSkipReason()">
+                    <option value="">-- Select a reason --</option>
+                    <option value="all_equally_wrong">All options are equally wrong/incorrect</option>
+                    <option value="all_equally_similar">All options are equally similar (can't decide)</option>
+                    <option value="ground_truth_unclear">Ground truth is unclear or ambiguous</option>
+                    <option value="too_complex">Too complex to evaluate</option>
+                    <option value="other">Other (add note below)</option>
+                </select>
+            </div>
+
+            <div class="confirm-section">
+                <button class="confirm-btn" id="confirm-btn" onclick="confirmAndNext()">Confirm & Next</button>
+                <button class="skip-btn" id="skip-btn" onclick="toggleSkip()">Skip</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const sampleId = "0c30c024-29ca-5a67-8b48-2ec1b1b8ee5b";
+        const itemId = "rank_0257";
+
+        function getAnnotations() {
+            const saved = localStorage.getItem('best_match_annotations');
+            return saved ? JSON.parse(saved) : {};
+        }
+
+        function saveAnnotations(annotations) {
+            localStorage.setItem('best_match_annotations', JSON.stringify(annotations));
+        }
+
+        function selectCandidate(label) {
+            document.getElementById('choice_' + label).checked = true;
+            saveChoice(label);
+        }
+
+        function saveChoice(label) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].choice = label;
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveConfidence(level) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].confidence = level;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveNotes() {
+            const notes = document.getElementById('notes').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].notes = notes;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function toggleSkip() {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+
+            if (annotations[itemId].skipped) {
+                // Un-skip
+                annotations[itemId].skipped = false;
+                annotations[itemId].skipReason = null;
+            } else {
+                // Skip - clear any choice
+                annotations[itemId].skipped = true;
+                annotations[itemId].choice = null;
+                annotations[itemId].confirmed = false;
+            }
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveSkipReason() {
+            const reason = document.getElementById('skip-reason').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].skipReason = reason;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function skipAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.skipReason) {
+                alert('Please select a reason for skipping.');
+                return;
+            }
+
+            // Mark as confirmed skip
+            ann.skipped = true;
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Navigate to next
+            setTimeout(() => {
+                window.location.href = 'rank_0258.html';
+            }, 300);
+        }
+
+        function updateUI() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // Update skip state
+            const skipBtn = document.getElementById('skip-btn');
+            const skipReasonSection = document.getElementById('skip-reason-section');
+            const confirmBtn = document.getElementById('confirm-btn');
+
+            if (ann.skipped) {
+                skipBtn.textContent = 'Undo Skip';
+                skipBtn.classList.add('skipped');
+                skipReasonSection.classList.add('visible');
+                confirmBtn.textContent = 'Confirm Skip & Next';
+                confirmBtn.onclick = skipAndNext;
+
+                // Disable candidate selection when skipped
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '0.5';
+                    el.style.pointerEvents = 'none';
+                });
+            } else {
+                skipBtn.textContent = 'Skip';
+                skipBtn.classList.remove('skipped');
+                skipReasonSection.classList.remove('visible');
+                confirmBtn.textContent = 'Confirm & Next';
+                confirmBtn.onclick = confirmAndNext;
+
+                // Enable candidate selection
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '1';
+                    el.style.pointerEvents = 'auto';
+                });
+            }
+
+            // Update skip reason dropdown
+            if (ann.skipReason) {
+                document.getElementById('skip-reason').value = ann.skipReason;
+            }
+
+            // Update candidate selection
+            document.querySelectorAll('.candidate').forEach(el => el.classList.remove('selected'));
+            if (ann.choice) {
+                const radio = document.getElementById('choice_' + ann.choice);
+                if (radio) {
+                    radio.checked = true;
+                    radio.closest('.candidate').classList.add('selected');
+                }
+            }
+
+            // Update confidence buttons
+            document.querySelectorAll('.confidence-btn').forEach((btn, idx) => {
+                btn.classList.toggle('selected', ann.confidence === idx + 1);
+            });
+
+            // Update notes
+            if (ann.notes) {
+                document.getElementById('notes').value = ann.notes;
+            }
+
+            // Update save status
+            const status = document.getElementById('save-status');
+            if (ann.skipped) {
+                status.textContent = 'Marked as SKIP' + (ann.skipReason ? ' - ' + ann.skipReason : '');
+                status.className = 'save-status saved';
+            } else if (ann.choice) {
+                status.textContent = 'Saved: Choice ' + ann.choice + (ann.confidence ? ', Confidence ' + ann.confidence : '');
+                status.className = 'save-status saved';
+            } else {
+                status.textContent = 'Not saved yet - please select a response or skip';
+                status.className = 'save-status unsaved';
+            }
+        }
+
+        function confirmBeforeNav(event) {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // If a choice is made, confirm it before navigating
+            if (ann.choice && !ann.confirmed) {
+                ann.confirmed = true;
+                ann.confirmedAt = new Date().toISOString();
+                annotations[itemId] = ann;
+                saveAnnotations(annotations);
+            }
+            // Allow navigation to proceed
+        }
+
+        function confirmAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.choice) {
+                alert('Please select a response before confirming.');
+                return;
+            }
+
+            // Mark as confirmed
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Update button state
+            const btn = document.getElementById('confirm-btn');
+            btn.textContent = 'Confirmed!';
+            btn.classList.add('confirmed');
+
+            // Navigate to next after brief delay
+            setTimeout(() => {
+                window.location.href = 'rank_0258.html';
+            }, 500);
+        }
+
+        // Load saved state on page load
+        window.onload = function() {
+            updateUI();
+            // Update confirm button if already confirmed
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+            if (ann.confirmed) {
+                const btn = document.getElementById('confirm-btn');
+                btn.textContent = 'Confirmed';
+                btn.classList.add('confirmed');
+            }
+        };
+    </script>
+</body>
+</html>

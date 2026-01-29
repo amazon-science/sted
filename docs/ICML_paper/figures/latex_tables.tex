@@ -1,0 +1,183 @@
+% Auto-generated LaTeX tables for STED consistency analysis
+% Requires: \usepackage{booktabs}
+
+% ============================================================
+% Main Paper Tables
+% ============================================================
+
+
+% Table: Overall Consistency Scores by Model
+\begin{table}[h]
+\centering
+\caption{Overall STED Consistency Scores by Model (averaged across temperatures 0.1-0.9)}
+\label{tab:overall_consistency}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Model} & \textbf{Consistency Score} & \textbf{Validity Rate} \\
+\midrule
+Claude-Opus-4.5 & 0.670 $\pm$ 0.306 & 96.3% \\
+Claude-3.7-Sonnet & 0.632 $\pm$ 0.304 & 100.0% \\
+Claude-3.5-Sonnet & 0.629 $\pm$ 0.346 & 100.0% \\
+Claude-Opus-4 & 0.613 $\pm$ 0.341 & 97.7% \\
+Claude-3.5-Haiku & 0.610 $\pm$ 0.356 & 99.1% \\
+Claude-Haiku-4.5 & 0.603 $\pm$ 0.325 & 100.0% \\
+Claude-Sonnet-4.5 & 0.572 $\pm$ 0.304 & 89.5% \\
+Qwen3-235B-A22B & 0.513 $\pm$ 0.354 & 100.0% \\
+Qwen3-32B & 0.480 $\pm$ 0.349 & 96.8% \\
+Llama-3.3-70B & 0.478 $\pm$ 0.351 & 98.3% \\
+Grok-4.1-Fast & 0.446 $\pm$ 0.352 & 97.1% \\
+Nova-Pro & 0.445 $\pm$ 0.340 & 98.2% \\
+Claude-Sonnet-4 & 0.440 $\pm$ 0.313 & 71.8% \\
+Pixtral Large (25.02) & 0.418 $\pm$ 0.354 & 85.2% \\
+us.amazon.nova-lite-v1 & 0.414 $\pm$ 0.353 & 98.5% \\
+Mimo-V2-Flash:free & 0.342 $\pm$ 0.352 & 74.4% \\
+Mistral-Large-3-675B & 0.325 $\pm$ 0.299 & 57.6% \\
+Minimax-M2 & 0.315 $\pm$ 0.330 & 98.2% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+% Table: Temperature Sensitivity (T=0.1 vs T=0.9)
+\begin{table}[h]
+\centering
+\caption{STED Consistency Score at Low (T=0.1) vs High (T=0.9) Temperature}
+\label{tab:temp_sensitivity}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Model} & \textbf{T=0.1} & \textbf{T=0.9} & \textbf{$\Delta$} \\
+\midrule
+Claude-3.5-Haiku & 0.731 & 0.449 & +0.282 \\
+Claude-3.5-Sonnet & 0.674 & 0.559 & +0.115 \\
+Claude-3.7-Sonnet & 0.693 & 0.570 & +0.123 \\
+Claude-Haiku-4.5 & 0.684 & 0.516 & +0.168 \\
+Claude-Opus-4 & 0.717 & 0.525 & +0.192 \\
+Claude-Opus-4.5 & 0.766 & 0.595 & +0.171 \\
+Claude-Sonnet-4 & 0.491 & 0.410 & +0.081 \\
+Claude-Sonnet-4.5 & 0.628 & 0.501 & +0.127 \\
+Grok-4.1-Fast & 0.447 & 0.438 & +0.009 \\
+Llama-3.3-70B & 0.602 & 0.397 & +0.205 \\
+Mimo-V2-Flash:free & 0.376 & 0.291 & +0.085 \\
+Minimax-M2 & 0.399 & 0.185 & +0.214 \\
+Mistral-Large-3-675B & nan & nan & +nan \\
+Nova-Pro & 0.518 & 0.406 & +0.112 \\
+Pixtral Large (25.02) & 0.566 & 0.338 & +0.228 \\
+Qwen3-235B-A22B & 0.569 & 0.481 & +0.088 \\
+Qwen3-32B & 0.609 & 0.360 & +0.249 \\
+us.amazon.nova-lite-v1 & 0.505 & 0.351 & +0.154 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+% Table: Semantic vs Structural Consistency
+\begin{table}[h]
+\centering
+\caption{Comparison of Semantic vs Structural Consistency (averaged across temperatures)}
+\label{tab:semantic_vs_structural}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Model} & \textbf{Semantic} & \textbf{Structural} & \textbf{Overall} \\
+\midrule
+Claude-3.5-Haiku & 0.416 & 0.735 & 0.610 \\
+Claude-3.5-Sonnet & 0.413 & 0.762 & 0.629 \\
+Claude-3.7-Sonnet & 0.407 & 0.782 & 0.632 \\
+Claude-Haiku-4.5 & 0.455 & 0.692 & 0.603 \\
+Claude-Opus-4 & 0.479 & 0.725 & 0.613 \\
+Claude-Opus-4.5 & 0.504 & 0.774 & 0.670 \\
+Claude-Sonnet-4 & 0.308 & 0.528 & 0.440 \\
+Claude-Sonnet-4.5 & 0.452 & 0.658 & 0.572 \\
+Grok-4.1-Fast & 0.268 & 0.567 & 0.446 \\
+Llama-3.3-70B & 0.250 & 0.652 & 0.478 \\
+Mimo-V2-Flash:free & 0.190 & 0.440 & 0.342 \\
+Minimax-M2 & 0.159 & 0.420 & 0.315 \\
+Mistral-Large-3-675B & 0.246 & 0.379 & 0.325 \\
+Nova-Pro & 0.250 & 0.604 & 0.445 \\
+Pixtral Large (25.02) & 0.244 & 0.502 & 0.418 \\
+Qwen3-235B-A22B & 0.354 & 0.631 & 0.513 \\
+Qwen3-32B & 0.264 & 0.632 & 0.480 \\
+us.amazon.nova-lite-v1 & 0.226 & 0.536 & 0.414 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================
+% Appendix Tables: Dataset Details
+% ============================================================
+
+
+% Appendix Table A1: Dataset Summary
+\begin{table}[h]
+\centering
+\caption{Dataset Summary for ShareGPT Structured Output Evaluation}
+\label{tab:dataset_summary}
+\begin{tabular}{ll}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Models Evaluated & 18 \\
+Temperature Settings & 11 (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0) \\
+Unique Prompts per Model & 240 \\
+Runs per Sample & 10 \\
+Total Model-Temperature Combinations & 198 \\
+Total Consistency Evaluations & 15,040 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+% Appendix Table A2: Model Coverage and Validity Rates
+\begin{table}[h]
+\centering
+\caption{Model Coverage Details and Validity Rates}
+\label{tab:model_coverage}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model} & \textbf{Samples} & \textbf{Temps} & \textbf{Validity Rate} & \textbf{Range} \\
+\midrule
+Claude-3.5-Sonnet & 880 & 11 & 100.0% $\pm$ 0.3% & [90%, 100%] \\
+Claude-3.7-Sonnet & 880 & 11 & 100.0% $\pm$ 0.3% & [90%, 100%] \\
+Claude-Haiku-4.5 & 880 & 11 & 100.0% $\pm$ 0.3% & [90%, 100%] \\
+Qwen3-235B-A22B & 880 & 11 & 100.0% $\pm$ 0.5% & [90%, 100%] \\
+Claude-3.5-Haiku & 880 & 11 & 99.1% $\pm$ 4.7% & [20%, 100%] \\
+us.amazon.nova-lite-v1 & 880 & 11 & 98.5% $\pm$ 7.9% & [20%, 100%] \\
+Llama-3.3-70B & 880 & 11 & 98.3% $\pm$ 8.9% & [20%, 100%] \\
+Minimax-M2 & 880 & 11 & 98.2% $\pm$ 8.3% & [10%, 100%] \\
+Nova-Pro & 880 & 11 & 98.2% $\pm$ 7.2% & [10%, 100%] \\
+Claude-Opus-4 & 880 & 11 & 97.7% $\pm$ 13.0% & [0%, 100%] \\
+Grok-4.1-Fast & 880 & 11 & 97.1% $\pm$ 13.0% & [0%, 100%] \\
+Qwen3-32B & 880 & 11 & 96.8% $\pm$ 16.8% & [0%, 100%] \\
+Claude-Opus-4.5 & 880 & 11 & 96.3% $\pm$ 14.9% & [0%, 100%] \\
+Claude-Sonnet-4.5 & 880 & 11 & 89.5% $\pm$ 19.1% & [0%, 100%] \\
+Pixtral Large (25.02) & 880 & 11 & 85.2% $\pm$ 26.9% & [0%, 100%] \\
+Mimo-V2-Flash:free & 880 & 11 & 74.4% $\pm$ 42.4% & [0%, 100%] \\
+Claude-Sonnet-4 & 880 & 11 & 71.8% $\pm$ 32.3% & [0%, 100%] \\
+Mistral-Large-3-675B & 80 & 1 & 57.6% $\pm$ 33.9% & [0%, 100%] \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+% Appendix Table A3: Temperature Distribution
+\begin{table}[h]
+\centering
+\caption{Sample Distribution Across Temperatures}
+\label{tab:temp_distribution}
+\begin{tabular}{ccc}
+\toprule
+\textbf{Temperature} & \textbf{Models} & \textbf{Total Samples} \\
+\midrule
+0.0 & 18 & 1440 \\
+0.1 & 17 & 1360 \\
+0.2 & 17 & 1360 \\
+0.3 & 17 & 1360 \\
+0.4 & 17 & 1360 \\
+0.5 & 17 & 1360 \\
+0.6 & 17 & 1360 \\
+0.7 & 17 & 1360 \\
+0.8 & 17 & 1360 \\
+0.9 & 17 & 1360 \\
+1.0 & 17 & 1360 \\
+\bottomrule
+\end{tabular}
+\end{table}

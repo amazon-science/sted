@@ -178,6 +178,7 @@ data/processed/
 *.pkl
 *.pickle
 *.pdf
+!docs/STED_and_Consistency_Scoring.pdf
 
 # Results and outputs
 results/
@@ -269,3 +270,14 @@ research/experiments/*.zip
 research/experiments/*/llm_gen_results/
 research/notebooks/.ipynb_checkpoints/
 
+research/
+benchmarks/
+
+# Experimental modules
+sted/gnn.py
+sted/pdc_metric.py
+sted/probabilistic_consistency.py
+
+# Experimental scripts
+scripts/experiments/
+scripts/analysis/

@@ -19,6 +19,7 @@ import json
 from datetime import datetime
 import copy
 import ast
+import re
 
 user_prompt = """The original JSON data is as follows:
 {original_data}
@@ -91,18 +92,32 @@ print_field_expression_variants_tool = [
 
 class ExperimentDatasetGenerator:
     """Generate 4 dataset categories with 10 datasets each at different variation ratios (0.1-1.0) for STED evaluation experiments."""
-    
-    def __init__(self, base_dataset_dir, model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0", region_name="us-west-2"):
-        # Load base templates from ShareGPT data
-        self.base_templates = self._load_sharegpt_samples(base_dataset_dir)
-        
+
+    def __init__(self, base_dataset_dir, model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0", region_name="us-west-2", data_source="sharegpt"):
+        """
+        Initialize dataset generator.
+
+        Args:
+            base_dataset_dir: Directory containing base data
+            model_id: Bedrock model ID for LLM-based variations
+            region_name: AWS region
+            data_source: "sharegpt" or "toucan" - determines base data format
+        """
+        self.data_source = data_source
+
+        # Load base templates based on data source
+        if data_source == "toucan":
+            self.base_templates = self._load_toucan_samples(base_dataset_dir)
+        else:
+            self.base_templates = self._load_sharegpt_samples(base_dataset_dir)
+
         # Initialize Bedrock client for Claude 3.5 Sonnet with Converse API
         self.bedrock_region = os.getenv('BEDROCK_REGION', region_name)
-        
+
         try:
             self.bedrock_client = boto3.client('bedrock-runtime', region_name=self.bedrock_region)
             self.claude_model_id = model_id
-            
+
             # Test the connection with a simple converse call
             test_response = self.bedrock_client.converse(
                 modelId=self.claude_model_id,
@@ -112,6 +127,53 @@ class ExperimentDatasetGenerator:
             print(f"✓ Bedrock Converse API initialized and tested for {self.claude_model_id}")
         except Exception as e:
             raise RuntimeError(f"Could not initialize Bedrock client: {e}. Please check AWS credentials and Bedrock access.")
+
+    def _load_toucan_samples(self, base_dataset_dir) -> List[Dict]:
+        """Load tool call samples from Toucan dataset."""
+        samples = []
+
+        # Look for Toucan JSON files
+        toucan_files = []
+        for root, dirs, files in os.walk(base_dataset_dir):
+            for f in files:
+                if f.endswith('.json') and 'toucan' in f.lower():
+                    toucan_files.append(os.path.join(root, f))
+
+        # Also check for toucan_data directory
+        toucan_data_path = os.path.join(os.path.dirname(base_dataset_dir), "toucan_data")
+        if os.path.exists(toucan_data_path):
+            for f in os.listdir(toucan_data_path):
+                if f.endswith('.json'):
+                    toucan_files.append(os.path.join(toucan_data_path, f))
+
+        for filepath in toucan_files:
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                if isinstance(data, list):
+                    for item in data:
+                        if 'tool_calls' in item and item['tool_calls']:
+                            # Convert tool calls to a structured format for variations
+                            tool_call_json = {
+                                "tool_calls": item['tool_calls'],
+                                "_meta": {
+                                    "id": item.get('id'),
+                                    "question": item.get('question', '')[:200],  # Truncate for readability
+                                    "target_tools": item.get('target_tools', ''),
+                                }
+                            }
+                            samples.append(tool_call_json)
+
+            except Exception as e:
+                print(f"Warning: Could not load {filepath}: {e}")
+                continue
+
+        if len(samples) < 5:
+            raise RuntimeError(f"Could not load sufficient Toucan samples from {base_dataset_dir}. Found {len(samples)} samples.")
+
+        print(f"Loaded {len(samples)} tool call samples from Toucan data")
+        return samples
         
     def _load_sharegpt_samples(self, base_dataset_dir) -> List[Dict]:
         """Load all available complex JSON samples from ShareGPT data."""
@@ -273,6 +335,23 @@ class ExperimentDatasetGenerator:
             json.dump(all_samples, f, indent=4)
         
         return all_samples
+    
+    def _parse_python_list_string(self, variants: str) -> list:
+        """Parse a Python list string with mixed quotes into a list."""
+        # Replace newlines with space
+        variants = variants.replace('\n', ' ')
+        # Normalize curly quotes
+        variants = re.sub(r'[""]', '"', variants)
+        variants = re.sub(r"['']", "'", variants)
+        # Unescape single quotes (valid in Python, invalid in JSON)
+        variants = variants.replace("\\'", "'")
+        # Convert single-quoted strings to double-quoted: ', ' or '] or ['
+        variants = re.sub(r"', '", '", "', variants)
+        variants = re.sub(r"'\]", '"]', variants)
+        variants = re.sub(r"\['", '["', variants)
+        variants = re.sub(r"', \"", '", "', variants)
+        variants = re.sub(r"\", '", '", "', variants)
+        return json.loads(variants)
         
     def _flatten_structure(self, sample: Dict) -> Dict:
         """Flatten nested structure based on ratio"""
@@ -521,8 +600,7 @@ class ExperimentDatasetGenerator:
                         variants = get_json(response, "print_field_variants")['string_list']
                         if isinstance(variants, str):
                             print(f"variants: {variants}")
-                            #variants = json.loads(variants)
-                            variants = ast.literal_eval(variants)
+                            variants = self._parse_python_list_string(variants)
                         break
                     except Exception as e:
                         import traceback
@@ -582,25 +660,189 @@ class ExperimentDatasetGenerator:
         
         return samples
 
+    def generate_tool_call_variation_dataset(self, num_samples: int = 80, output_dir="synthetic_dataset") -> List[Dict]:
+        """
+        Generate Dataset for Tool Call Variations (Toucan-specific).
+        Creates variations on tool call parameters for human validation.
+
+        Variation types:
+        1. Parameter value variations (semantic equivalents)
+        2. Tool call ordering variations
+        3. Parameter format variations (e.g., date formats, number formats)
+        """
+        if self.data_source != "toucan":
+            print("Warning: Tool call variations work best with Toucan data source")
+
+        all_samples = []
+        variation_types = ["param_value", "param_format", "tool_order"]
+
+        for variation_type in variation_types:
+            for idx in tqdm(range(min(num_samples, len(self.base_templates))), desc=f"Generating {variation_type} variations"):
+                sample = self.base_templates[idx]
+                tool_calls = sample.get("tool_calls", [])
+
+                if not tool_calls:
+                    continue
+
+                synthetic_sample = {
+                    "base_sample": sample,
+                    "sample_id": f"tool_call_{variation_type}_{idx:03d}",
+                    "variation_type": variation_type,
+                    "variants": []
+                }
+
+                if variation_type == "param_value":
+                    # Generate parameter value variations using LLM
+                    all_param_values = []
+                    param_paths = []
+
+                    for tc_idx, tc in enumerate(tool_calls):
+                        args = tc.get("arguments", {})
+                        for param_name, param_value in args.items():
+                            if isinstance(param_value, str) and len(param_value) > 2:
+                                all_param_values.append(param_value)
+                                param_paths.append((tc_idx, param_name))
+
+                    if not all_param_values:
+                        continue
+
+                    # Generate variants using LLM
+                    variants = []
+                    for attempt in range(3):
+                        try:
+                            if idx > 0:
+                                time.sleep(1)
+                            message = build_message(texts=[user_prompt_fields.format(string_list=all_param_values)])
+                            response = inference_with_converse_api(
+                                self.bedrock_client, self.claude_model_id, [message],
+                                system_prompts=system_prompt_expression_by_field, max_tokens=8000,
+                                temperature=0.1, tools=print_field_expression_variants_tool
+                            )
+                            result = get_json(response, "print_field_variants")
+                            if result and 'string_list' in result:
+                                variants = result['string_list']
+                                if isinstance(variants, str):
+                                    variants = self._parse_python_list_string(variants)
+                                break
+                        except Exception as e:
+                            print(f"Error generating param variants (attempt {attempt+1}): {e}")
+                            if attempt == 2:
+                                variants = [f"{v}_modified" for v in all_param_values]
+
+                    if not variants:
+                        variants = [f"{v}_modified" for v in all_param_values]
+
+                    # Create incremental variations
+                    num_params = len(param_paths)
+                    current_variant = copy.deepcopy(sample)
+
+                    for i in range(10):
+                        variation_ratio = round(0.1 + i * 0.1, 1)
+                        num_to_change = max(1, int(num_params * variation_ratio))
+
+                        for j in range(min(num_to_change, len(variants))):
+                            tc_idx, param_name = param_paths[j]
+                            if tc_idx < len(current_variant["tool_calls"]):
+                                current_variant["tool_calls"][tc_idx]["arguments"][param_name] = variants[j]
+
+                        synthetic_sample["variants"].append({
+                            "variation_ratio": variation_ratio,
+                            "variation": copy.deepcopy(current_variant),
+                            "num_params_changed": min(num_to_change, len(variants)),
+                        })
+
+                elif variation_type == "tool_order":
+                    # Reorder tool calls (for multi-tool scenarios)
+                    if len(tool_calls) < 2:
+                        continue
+
+                    # Create variations by shuffling tool call order
+                    for i in range(10):
+                        variation_ratio = round(0.1 + i * 0.1, 1)
+                        variant = copy.deepcopy(sample)
+
+                        # Progressively shuffle more tool calls
+                        n_to_shuffle = max(2, int(len(tool_calls) * variation_ratio))
+                        shuffled_calls = variant["tool_calls"][:n_to_shuffle]
+                        random.shuffle(shuffled_calls)
+                        variant["tool_calls"] = shuffled_calls + variant["tool_calls"][n_to_shuffle:]
+
+                        synthetic_sample["variants"].append({
+                            "variation_ratio": variation_ratio,
+                            "variation": variant,
+                            "tools_shuffled": n_to_shuffle,
+                        })
+
+                elif variation_type == "param_format":
+                    # Change parameter formats (numbers, dates, etc.)
+                    current_variant = copy.deepcopy(sample)
+
+                    for i in range(10):
+                        variation_ratio = round(0.1 + i * 0.1, 1)
+
+                        for tc in current_variant["tool_calls"]:
+                            args = tc.get("arguments", {})
+                            for param_name, param_value in list(args.items()):
+                                # Format variations for different types
+                                if isinstance(param_value, (int, float)):
+                                    # Number format variations
+                                    if random.random() < variation_ratio:
+                                        if isinstance(param_value, int):
+                                            args[param_name] = str(param_value)  # int -> string
+                                        else:
+                                            args[param_name] = round(param_value, 2)  # precision change
+
+                        synthetic_sample["variants"].append({
+                            "variation_ratio": variation_ratio,
+                            "variation": copy.deepcopy(current_variant),
+                        })
+
+                if synthetic_sample["variants"]:
+                    all_samples.append(synthetic_sample)
+
+        # Save samples
+        current_time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, f"tool_call_variation_dataset_{current_time_str}.json")
+        with open(output_path, "w") as f:
+            json.dump(all_samples, f, indent=4)
+
+        print(f"Saved {len(all_samples)} tool call variation samples to {output_path}")
+        return all_samples
+
+
 def main():
     """Main function to generate all experimental datasets."""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="Generate STED experiment datasets with variable ratios")
-    parser.add_argument("--output-dir", default="synthetic_dataset", 
+    parser.add_argument("--output-dir", default="synthetic_dataset",
                        help="Output directory for datasets")
     parser.add_argument("--num-samples", type=int, default=80,
                        help="Number of samples per dataset")
     parser.add_argument("--base-dataset-dir", default="sharegpt_data",
                        help="Base dataset directory")
+    parser.add_argument("--data-source", choices=["sharegpt", "toucan"], default="sharegpt",
+                       help="Data source: 'sharegpt' for structured output, 'toucan' for tool calls")
+    parser.add_argument("--toucan-only", action="store_true",
+                       help="Generate only tool call variations (requires --data-source toucan)")
 
-    
+
     args = parser.parse_args()
-    
-    generator = ExperimentDatasetGenerator(base_dataset_dir=args.base_dataset_dir)
-    generator.generate_schema_variation_dataset(num_samples=args.num_samples, output_dir=args.output_dir)
-    generator.generate_semantic_variation_dataset(num_samples=args.num_samples, output_dir=args.output_dir)
-    generator.generate_expression_variation_dataset(num_samples=args.num_samples, output_dir=args.output_dir)
+
+    generator = ExperimentDatasetGenerator(
+        base_dataset_dir=args.base_dataset_dir,
+        data_source=args.data_source
+    )
+
+    if args.data_source == "toucan" or args.toucan_only:
+        # Generate tool call variations for Toucan
+        generator.generate_tool_call_variation_dataset(num_samples=args.num_samples, output_dir=args.output_dir)
+    else:
+        # Generate standard variations for ShareGPT
+        generator.generate_schema_variation_dataset(num_samples=args.num_samples, output_dir=args.output_dir)
+        generator.generate_semantic_variation_dataset(num_samples=args.num_samples, output_dir=args.output_dir)
+        generator.generate_expression_variation_dataset(num_samples=args.num_samples, output_dir=args.output_dir)
 
 if __name__ == "__main__":
     main()

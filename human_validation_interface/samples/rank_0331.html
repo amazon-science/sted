@@ -1,0 +1,1492 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sample 325 / 343</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            line-height: 1.5;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header h2 { margin: 0 0 10px 0; color: #333; }
+        .progress { color: #666; }
+        .nav-buttons { margin-top: 15px; }
+        .nav-buttons a {
+            display: inline-block;
+            padding: 8px 16px;
+            margin-right: 10px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .nav-buttons a:hover { background: #0056b3; }
+        .nav-buttons a.disabled {
+            background: #ccc;
+            pointer-events: none;
+        }
+
+        .task-description {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2196f3;
+        }
+        .task-description h3 { margin: 0 0 10px 0; color: #1565c0; }
+
+        .ground-truth {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #4caf50;
+        }
+        .ground-truth h3 { margin: 0 0 15px 0; color: #2e7d32; }
+
+        .candidates-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .candidates-section h3 { margin: 0 0 15px 0; color: #333; }
+
+        .candidate {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .candidate:hover { background: #f0f0f0; border-color: #ddd; }
+        .candidate.selected {
+            background: #e8f5e9;
+            border-color: #4caf50;
+        }
+        .candidate-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .candidate-label {
+            font-size: 18px;
+            font-weight: bold;
+            margin-left: 10px;
+            color: #333;
+        }
+        .model-name {
+            margin-left: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 13px;
+            margin: 0;
+        }
+        .ground-truth pre {
+            background: #1b5e20;
+            color: #c5e1a5;
+        }
+        .response-json { background: #37474f; }
+
+        .confidence-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff3e0;
+            border-radius: 8px;
+        }
+        .confidence-section h4 { margin: 0 0 10px 0; }
+        .confidence-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .confidence-btn {
+            padding: 8px 16px;
+            border: 1px solid #ccc;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .confidence-btn:hover { background: #f5f5f5; }
+        .confidence-btn.selected {
+            background: #ff9800;
+            color: white;
+            border-color: #ff9800;
+        }
+
+        .notes-section {
+            margin-top: 15px;
+        }
+        .notes-section textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            min-height: 60px;
+            font-family: inherit;
+        }
+
+        .save-status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .save-status.saved { background: #e8f5e9; color: #2e7d32; }
+        .save-status.unsaved { background: #ffebee; color: #c62828; }
+
+        .confirm-section {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .confirm-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .confirm-btn:hover { background: #388e3c; transform: scale(1.02); }
+        .confirm-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .confirm-btn.confirmed {
+            background: #2196f3;
+        }
+        .skip-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #9e9e9e;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 20px;
+        }
+        .skip-btn:hover { background: #757575; }
+        .skip-btn.skipped {
+            background: #ff9800;
+        }
+        .skip-reason {
+            margin-top: 15px;
+            display: none;
+        }
+        .skip-reason.visible {
+            display: block;
+        }
+        .skip-reason select {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 100%;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Sample 325 of 343</h2>
+            <div class="progress">ID: 36d73413-81aa-5044-a953-391c1eb81818</div>
+            <div class="nav-buttons">
+                <a href='rank_0323.html'>Previous</a>
+                <a href="../index.html">Back to List</a>
+                <a href='rank_0325.html' onclick='confirmBeforeNav(event)'>Next</a>
+            </div>
+        </div>
+
+        <div class="task-description">
+            <h3>Task: Select the Most Similar Response</h3>
+            <p>Compare the responses below to the Ground Truth and select the one that is <strong>MOST SIMILAR</strong>.</p>
+            <p>Consider: same tool names, same parameters, same structure, functional equivalence.</p>
+        </div>
+
+        <div class="ground-truth">
+            <h3>Ground Truth (Reference)</h3>
+            <pre>{
+  "tool_calls": [
+    {
+      "name": "decision-framework-server-decisionFramework",
+      "arguments": {
+        "decisionStatement": "With a hard investment cap of USD 10 million, which international market (or phased combination) should we enter first, satisfying ROI, ESG, legal and logistics constraints while maximising risk-adjusted, regulatory-compliant shareholder value within a 7-week board-mandated timeline?",
+        "analysisType": "multi-criteria",
+        "decisionId": "MCDA-MarketEntry-10M-2024",
+        "iteration": 0,
+        "stage": "recommendation",
+        "nextStageNeeded": false,
+        "options": [
+          {
+            "id": "A",
+            "name": "Alpha-Asia Market Entry",
+            "description": "High-growth Asian manufacturing hub; dense supplier cluster, 5.4 % GDP growth, but moderate political risk; ESG score 62 (slightly below threshold)."
+          },
+          {
+            "id": "B",
+            "name": "Beta-EU Market Entry",
+            "description": "Stable EU gateway; zero intra-EU tariffs, highest ESG score 78, GDP flat; SKU mix must meet GDPR+"
+          },
+          {
+            "id": "C",
+            "name": "Gamma-LatAm Market Entry",
+            "description": "Rising middle class, tariff moratorium 18 months; volatile FX & high political risk (32 %); ESG score 69"
+          }
+        ],
+        "criteria": [
+          {
+            "id": "FIN_RISK_ADJ_NPV",
+            "name": "Finance: Risk-Adjusted 7-yr NPV",
+            "weight": 0.3,
+            "evaluationMethod": "quantitative",
+            "description": "DCF NPV discounted at country-risk-adjusted WACC; capped at USD 20 M for normalisation. Must exceed 18 % IRR."
+          },
+          {
+            "id": "LEGAL_COMP",
+            "name": "Legal: Compliance Score",
+            "weight": 0.2,
+            "evaluationMethod": "quantitative",
+            "description": "Index 0\u20131 based on 1 \u2013 expected penalty exposure for data-privacy, tariff, ESG violations."
+          },
+          {
+            "id": "OPS_LOG_CAP",
+            "name": "Ops-Supply: Logistics Capacity Fit",
+            "weight": 0.2,
+            "evaluationMethod": "quantitative",
+            "description": "Percentage of outbound lane capacity utilised at steady-state, considering 6-month talent ramp."
+          },
+          {
+            "id": "MKT_GROWTH",
+            "name": "Marketing: Market CAGR + Brand Lift",
+            "weight": 0.15,
+            "evaluationMethod": "quantitative",
+            "description": "3-yr local market CAGR plus uplift in brand equity attributable to presence."
+          },
+          {
+            "id": "ESG_SCORE",
+            "name": "ESG Sustainability Score",
+            "weight": 0.15,
+            "evaluationMethod": "quantitative",
+            "description": "Third-party composite ESG score converted to 0\u20131 scale; cut-off 0.65 (65 pts)"
+          }
+        ],
+        "criteriaEvaluations": [
+          {
+            "criterionId": "FIN_RISK_ADJ_NPV",
+            "optionId": "A",
+            "score": 0.75,
+            "justification": "NPV USD 14.2 M at 20 % IRR after political-risk premium; meets ROI threshold, but moderate FX volatility."
+          },
+          {
+            "criterionId": "FIN_RISK_ADJ_NPV",
+            "optionId": "B",
+            "score": 0.82,
+            "justification": "NPV USD 12.7 M at 18.5 % IRR; low discount-premium; stable EUR cashflows; slight tariff risk over future re-imports not modelled (within cap)."
+          },
+          {
+            "criterionId": "FIN_RISK_ADJ_NPV",
+            "optionId": "C",
+            "score": 0.6,
+            "justification": "NPV USD 11.0 M at 18.1 % IRR; 18-mo moratorium lifts initial return but FX risk high by year-4."
+          },
+          {
+            "criterionId": "LEGAL_COMP",
+            "optionId": "A",
+            "score": 0.8,
+            "justification": "New privacy law pending; tariff exposure 2 %; moderate ESG gap; internal assume one-time compliance cost USD 300k"
+          },
+          {
+            "criterionId": "LEGAL_COMP",
+            "optionId": "B",
+            "score": 0.95,
+            "justification": "GDPR and EU ESG standards already enforced; known frameworks, minimal new penalty risk."
+          },
+          {
+            "criterionId": "LEGAL_COMP",
+            "optionId": "C",
+            "score": 0.7,
+            "justification": "Tariff moratorium temporary; uncertainty in successor policy in year-3; ESG laws tightening but still recv score 69."
+          },
+          {
+            "criterionId": "OPS_LOG_CAP",
+            "optionId": "A",
+            "score": 0.9,
+            "justification": "Regional hub + direct daily lanes @ 80 % utilisation after 6-mo talent ramp (production manager sourced)."
+          },
+          {
+            "criterionId": "OPS_LOG_CAP",
+            "optionId": "B",
+            "score": 0.75,
+            "justification": "Cross-dock via Antwerp gateway, needs dual shift; 70 % lane utilisation, talent ramp 4 months."
+          },
+          {
+            "criterionId": "OPS_LOG_CAP",
+            "optionId": "C",
+            "score": 0.65,
+            "justification": "Entry via Miami trans-ship; longer lead-times; only 55 % lane utilisation by month-6 due to scarce bilingual talent."
+          },
+          {
+            "criterionId": "MKT_GROWTH",
+            "optionId": "A",
+            "score": 0.85,
+            "justification": "5.1 % CAGR + strong brand pull in ASEAN; emerging middle class."
+          },
+          {
+            "criterionId": "MKT_GROWTH",
+            "optionId": "B",
+            "score": 0.45,
+            "justification": "1.8 % CAGR, but high-margin early-adopter segment; brand lift modest."
+          },
+          {
+            "criterionId": "MKT_GROWTH",
+            "optionId": "C",
+            "score": 0.75,
+            "justification": "LatAm market CAGR 4.4 %; green product segment under-served; lift above baseline."
+          },
+          {
+            "criterionId": "ESG_SCORE",
+            "optionId": "A",
+            "score": 0.51,
+            "justification": "External agency score 62, 13 dpi below cutoff (65). Requires improvement plan/carbon offset, Tranche-2 CAPEX."
+          },
+          {
+            "criterionId": "ESG_SCORE",
+            "optionId": "B",
+            "score": 0.78,
+            "justification": "score 78 \u2013 exceeds threshold without incremental spend."
+          },
+          {
+            "criterionId": "ESG_SCORE",
+            "optionId": "C",
+            "score": 0.69,
+            "justification": "score 69 \u2013 passes threshold; moderate indigenous-labour policy flags manageable via local NGO partnership"
+          }
+        ],
+        "constraints": [
+          "Total capital + Year-1 operating outflow \u2264 USD 10 M",
+          "IRR \u2265 18 % nominal, equity IRR basis",
+          "Data-privacy compliance (GDPR + local equivalent) non-negotiable",
+          "Applied trade tariff shock \u2264 5 % of landed cost",
+          "ESG composite score \u2265 65",
+          "Board presentation length 15 slides max, clear ROI-vs-risk traceability"
+        ],
+        "stakeholders": [
+          "Finance",
+          "Legal",
+          "Operations & Supply-Chain",
+          "Marketing",
+          "ESG / Sustainability Board"
+        ],
+        "timeHorizon": "Week-0 today \u2192 Board decision in Week-7, implementation Phase-1 in Weeks 12-24",
+        "riskTolerance": "risk-averse",
+        "expectedValues": {
+          "A": 10.3,
+          "B": 12.1,
+          "C": 8.8
+        },
+        "multiCriteriaScores": {
+          "A": 0.732,
+          "B": 0.851,
+          "C": 0.67
+        },
+        "possibleOutcomes": [
+          {
+            "id": "A_high_adoption",
+            "description": "Alpha-Asia ramp-up above base case (25 % upside scenario)",
+            "probability": 0.3,
+            "optionId": "A",
+            "value": 16.0,
+            "confidenceInEstimate": 0.7
+          },
+          {
+            "id": "A_pol_risk",
+            "description": "Alpha-Asia capital controls + 5 % tariff retroactively",
+            "probability": 0.2,
+            "optionId": "A",
+            "value": 4.0,
+            "confidenceInEstimate": 0.6
+          },
+          {
+            "id": "A_base_case",
+            "description": "Alpha-Asia midline outcome",
+            "probability": 0.5,
+            "optionId": "A",
+            "value": 10.3,
+            "confidenceInEstimate": 0.8
+          },
+          {
+            "id": "B_base",
+            "description": "Beta-EU steady-state",
+            "probability": 0.8,
+            "optionId": "B",
+            "value": 12.1,
+            "confidenceInEstimate": 0.9
+          },
+          {
+            "id": "B_reg_penalty",
+            "description": "Beta-EU one-off GDPR fine (0.4 % revenue) 2025",
+            "probability": 0.2,
+            "optionId": "B",
+            "value": 11.5,
+            "confidenceInEstimate": 0.6
+          },
+          {
+            "id": "C_success",
+            "description": "Gamma-LatAm holds FX and tariff moratorium renewed",
+            "probability": 0.4,
+            "optionId": "C",
+            "value": 12.0,
+            "confidenceInEstimate": 0.5
+          },
+          {
+            "id": "C_fx_shock",
+            "description": "Gamma-LatAm 20 % sudden FX devaluation year-3",
+            "probability": 0.35,
+            "optionId": "C",
+            "value": 5.0,
+            "confidenceInEstimate": 0.6
+          }
+        ],
+        "informationGaps": [
+          {
+            "description": "Alpha-Asia forthcoming data-privacy law draft text (expected Aug-2024)",
+            "impact": 0.6,
+            "researchMethod": "Government relations counsel + local counsel memo by Week-3"
+          },
+          {
+            "description": "Gamma-LatAm presidential election impact on tariff moratorium (vote in Month-8)",
+            "impact": 0.7,
+            "researchMethod": "Scenario stress-test with two post-election policy sets; update Week-5"
+          },
+          {
+            "description": "ESG improvement cost-over-run model for Alpha-Asia to achieve 65+ score",
+            "impact": 0.4,
+            "researchMethod": "Third-party sustainability consultant TCO model by Week-4"
+          }
+        ],
+        "sensitivityInsights": [
+          "Beta-EU wins under all weightings except when allocating 50 %+ weight to market growth (Alpha-Asia overtakes in extreme case).",
+          "Compliance risk drives 35 % of total score variance; a 2 % legal penalty swing drops Alpha-Asia below 18 % IRR threshold.",
+          "Upside scenario in Alpha-Asia sunny-path (high adoption) increases its expected EV to 14.4 M vs 12.1 M for Beta-EU, but probability 30 % only."
+        ],
+        "recommendation": "Enter Beta-EU market first (by Week-12), locking 12.1 M expected EV and 85 pts multi-criteria score. Execute a parallel option on Alpha-Asia pre-designed as Phase-2 contingent project: invest only if new privacy-law text (Week-3) is favourable AND ESG-upgrade TCO \u2272 USD 900k, else abandon. Gamma-LatAm is deprioritised due to FX-political risk but can serve as a future bolt-on via JV."
+      }
+    }
+  ]
+}</pre>
+        </div>
+
+        <div class="candidates-section">
+            <h3>Candidate Responses - Select the Most Similar:</h3>
+            
+        <div class="candidate" onclick="selectCandidate('A')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_A" value="A" onchange="saveChoice('A')">
+                <label for="choice_A" class="candidate-label">[A]</label>
+                <span class="model-name">(minimax.minimax-m2-20251227_100510)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "decision-framework-server-decisionFramework",
+      "arguments": {
+        "decisionStatement": "Select optimal international market(s) for $10M investment from three prospective markets, balancing financial returns, risk management, ESG compliance, and stakeholder priorities while meeting board requirements for ROI and sustainability by week 7.",
+        "options": [
+          "Market A: Emerging Asian Economy",
+          "Market B: Developed European Market",
+          "Market C: Latin American Growth Market"
+        ],
+        "criteria": [
+          "Economic Indicators (GDP growth, market size, currency stability)",
+          "Political Risk Assessment (stability index, regulatory environment, trade relations)",
+          "ESG Sustainability Scores (environmental impact, social responsibility, governance standards)",
+          "Financial Projections (expected returns, NPV, payback period, ROI)",
+          "Compliance Feasibility (data privacy laws, trade tariffs, ESG standards)",
+          "Implementation Complexity (logistics, talent acquisition, market entry barriers)",
+          "Strategic Fit (alignment with company capabilities and long-term strategy)"
+        ],
+        "criteriaEvaluations": "[{\"criteria\": \"Economic Indicators\", \"Market A\": {\"score\": 8.5, \"weight\": 0.25, \"notes\": \"High GDP growth (6.2%), large consumer base, moderate currency volatility\"}, {\"criteria\": \"Economic Indicators\", \"Market B\": {\"score\": 7.0, \"weight\": 0.25, \"notes\": \"Stable growth (2.8%), mature market, strong currency, smaller growth potential\"}}, {\"criteria\": \"Economic Indicators\", \"Market C\": {\"score\": 9.0, \"weight\": 0.25, \"notes\": \"Very high growth (8.1%), expanding middle class, currency risks offset by growth\"}}]",
+        "possibleOutcomes": [
+          {
+            "outcome": "High Success Scenario",
+            "probability": 0.3,
+            "description": "Market exceeds projections, rapid market penetration, favorable regulatory changes"
+          },
+          {
+            "outcome": "Base Case Scenario",
+            "probability": 0.5,
+            "description": "Market performs as expected, steady growth, manageable challenges"
+          },
+          {
+            "outcome": "Low Success Scenario",
+            "probability": 0.2,
+            "description": "Market underperforms, regulatory hurdles, economic headwinds"
+          }
+        ],
+        "informationGaps": [
+          "Detailed financial projections for each market",
+          "Specific compliance requirements and costs",
+          "Stakeholder weighting preferences",
+          "Current logistics and talent acquisition capabilities",
+          "Competitive landscape analysis",
+          "Currency hedging costs and strategies"
+        ],
+        "stakeholders": [
+          {
+            "name": "Finance Department",
+            "priorities": [
+              "ROI maximization",
+              "Risk-adjusted returns",
+              "Capital efficiency"
+            ],
+            "weighting_preferences": {
+              "Financial Returns": 0.4,
+              "Economic Indicators": 0.3,
+              "Risk Management": 0.3
+            }
+          },
+          {
+            "name": "Legal/Compliance",
+            "priorities": [
+              "Regulatory compliance",
+              "Risk mitigation",
+              "Legal stability"
+            ],
+            "weighting_preferences": {
+              "Compliance Feasibility": 0.5,
+              "Political Risk": 0.3,
+              "ESG Standards": 0.2
+            }
+          },
+          {
+            "name": "Operations",
+            "priorities": [
+              "Implementation feasibility",
+              "Resource optimization",
+              "Operational efficiency"
+            ],
+            "weighting_preferences": {
+              "Implementation Complexity": 0.4,
+              "Economic Indicators": 0.3,
+              "Strategic Fit": 0.3
+            }
+          },
+          {
+            "name": "Marketing",
+            "priorities": [
+              "Market opportunity",
+              "Brand positioning",
+              "Customer access"
+            ],
+            "weighting_preferences": {
+              "Economic Indicators": 0.4,
+              "Strategic Fit": 0.3,
+              "ESG Scores": 0.3
+            }
+          },
+          {
+            "name": "Supply Chain",
+            "priorities": [
+              "Logistics efficiency",
+              "Cost optimization",
+              "Reliability"
+            ],
+            "weighting_preferences": {
+              "Implementation Complexity": 0.5,
+              "Economic Indicators": 0.3,
+              "Political Risk": 0.2
+            }
+          }
+        ],
+        "constraints": [
+          "$10M maximum investment cap",
+          "Must meet 15% minimum ROI threshold",
+          "Full compliance with data privacy regulations (GDPR, local laws)",
+          "ESG standards must meet company policy requirements",
+          "Market entry must be achievable within 18-month timeline",
+          "Board presentation deadline: Week 7",
+          "Must align with existing logistics capacity or show clear expansion plan"
+        ],
+        "timeHorizon": "18-month implementation timeline with 5-year financial projections",
+        "riskTolerance": "Moderate risk tolerance - willing to accept calculated risks for higher returns while maintaining compliance and ESG standards",
+        "expectedValues": {
+          "Market A": {
+            "expected_npv": 18.5,
+            "expected_roi": 22.3,
+            "risk_adjusted_npv": 15.2,
+            "probability_weighted_return": 19.8
+          },
+          "Market B": {
+            "expected_npv": 12.8,
+            "expected_roi": 16.1,
+            "risk_adjusted_npv": 11.5,
+            "probability_weighted_return": 14.2
+          },
+          "Market C": {
+            "expected_npv": 21.2,
+            "expected_roi": 26.8,
+            "risk_adjusted_npv": 16.8,
+            "probability_weighted_return": 23.5
+          }
+        },
+        "multiCriteriaScores": {
+          "Market A": {
+            "Economic Indicators": 8.5,
+            "Political Risk": 7.2,
+            "ESG Scores": 8.8,
+            "Financial Projections": 8.2,
+            "Compliance Feasibility": 9.1,
+            "Implementation Complexity": 7.5,
+            "Strategic Fit": 8.0,
+            "weighted_total": 8.1
+          },
+          "Market B": {
+            "Economic Indicators": 7.0,
+            "Political Risk": 9.2,
+            "ESG Scores": 9.5,
+            "Financial Projections": 6.8,
+            "Compliance Feasibility": 9.8,
+            "Implementation Complexity": 8.5,
+            "Strategic Fit": 7.8,
+            "weighted_total": 8.0
+          },
+          "Market C": {
+            "Economic Indicators": 9.0,
+            "Political Risk": 6.5,
+            "ESG Scores": 7.2,
+            "Financial Projections": 9.2,
+            "Compliance Feasibility": 7.8,
+            "Implementation Complexity": 6.8,
+            "Strategic Fit": 8.5,
+            "weighted_total": 7.9
+          }
+        },
+        "sensitivityInsights": [
+          "Financial projections are most sensitive to currency exchange rate fluctuations",
+          "Political risk scores could shift significantly with upcoming elections",
+          "ESG compliance costs may vary based on local interpretation of standards",
+          "Implementation timeline highly dependent on talent acquisition success",
+          "ROI threshold sensitivity to market entry costs"
+        ],
+        "recommendation": "Recommend Market A (Emerging Asian Economy) as primary target with phased entry approach, while maintaining Market B as secondary option. Market A offers optimal balance of high growth potential, manageable risk profile, and strong compliance feasibility within investment constraints.",
+        "decisionId": "INTL_MKT_SELECT_2024",
+        "analysisType": "Multi-Criteria Decision Analysis with Stakeholder Integration",
+        "stage": "Initial Analysis Complete",
+        "iteration": 1,
+        "nextStageNeeded": true,
+        "suggestedNextStage": "Detailed financial modeling and stakeholder weighting refinement"
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('B')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_B" value="B" onchange="saveChoice('B')">
+                <label for="choice_B" class="candidate-label">[B]</label>
+                <span class="model-name">(qwen3-32b)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "decision-framework-server-decisionFramework",
+      "arguments": {
+        "decisionStatement": "Select the optimal international market(s) for investment under a $10 million cap, considering economic, political, ESG, and compliance factors.",
+        "options": [
+          "Market A",
+          "Market B",
+          "Market C"
+        ],
+        "criteria": [
+          "Economic Indicators",
+          "Political Risk",
+          "ESG Sustainability",
+          "Financial Returns",
+          "Risk-Adjusted NPV",
+          "Compliance with Data Privacy",
+          "Compliance with Trade Tariffs",
+          "Compliance with ESG Standards",
+          "Stakeholder Weighting",
+          "Logistics Capacity",
+          "Talent Acquisition Timelines",
+          "ROI Threshold",
+          "ESG Policy Compliance"
+        ],
+        "criteriaEvaluations": [
+          {
+            "option": "Market A",
+            "Economic Indicators": "High",
+            "Political Risk": "Low",
+            "ESG Sustainability": "Medium",
+            "Financial Returns": "High",
+            "Risk-Adjusted NPV": "High",
+            "Compliance with Data Privacy": "Yes",
+            "Compliance with Trade Tariffs": "Yes",
+            "Compliance with ESG Standards": "Yes",
+            "Stakeholder Weighting": "Balanced",
+            "Logistics Capacity": "High",
+            "Talent Acquisition Timelines": "On Schedule",
+            "ROI Threshold": "Met",
+            "ESG Policy Compliance": "Yes"
+          },
+          {
+            "option": "Market B",
+            "Economic Indicators": "Medium",
+            "Political Risk": "Medium",
+            "ESG Sustainability": "High",
+            "Financial Returns": "Medium",
+            "Risk-Adjusted NPV": "Medium",
+            "Compliance with Data Privacy": "Yes",
+            "Compliance with Trade Tariffs": "Yes",
+            "Compliance with ESG Standards": "Yes",
+            "Stakeholder Weighting": "Balanced",
+            "Logistics Capacity": "Medium",
+            "Talent Acquisition Timelines": "Delayed",
+            "ROI Threshold": "Met",
+            "ESG Policy Compliance": "Yes"
+          },
+          {
+            "option": "Market C",
+            "Economic Indicators": "Low",
+            "Political Risk": "High",
+            "ESG Sustainability": "Low",
+            "Financial Returns": "Low",
+            "Risk-Adjusted NPV": "Low",
+            "Compliance with Data Privacy": "No",
+            "Compliance with Trade Tariffs": "No",
+            "Compliance with ESG Standards": "No",
+            "Stakeholder Weighting": "Unbalanced",
+            "Logistics Capacity": "Low",
+            "Talent Acquisition Timelines": "Delayed",
+            "ROI Threshold": "Not Met",
+            "ESG Policy Compliance": "No"
+          }
+        ],
+        "possibleOutcomes": [
+          {
+            "outcome": "Market A selected",
+            "probability": "0.7"
+          },
+          {
+            "outcome": "Market B selected",
+            "probability": "0.2"
+          },
+          {
+            "outcome": "Market C selected",
+            "probability": "0.1"
+          }
+        ],
+        "informationGaps": [
+          "Need more detailed political risk forecasts for Market C",
+          "Need updated ESG scores for Market A",
+          "Need clarification on stakeholder weighting for Market B"
+        ],
+        "stakeholders": [
+          "Finance",
+          "Legal",
+          "Operations",
+          "Marketing",
+          "Supply-Chain"
+        ],
+        "constraints": [
+          "$10 million investment cap",
+          "Compliance with data-privacy, trade tariffs, and ESG standards",
+          "ROI threshold must be met",
+          "ESG policy compliance required"
+        ],
+        "timeHorizon": "7 weeks",
+        "riskTolerance": "Medium",
+        "expectedValues": {
+          "Market A": "High",
+          "Market B": "Medium",
+          "Market C": "Low"
+        },
+        "multiCriteriaScores": {
+          "Market A": "High",
+          "Market B": "Medium",
+          "Market C": "Low"
+        },
+        "sensitivityInsights": [
+          "Market A is highly sensitive to changes in political risk forecasts",
+          "Market B is sensitive to changes in stakeholder weighting",
+          "Market C is highly sensitive to changes in ESG scores"
+        ],
+        "recommendation": "Market A is recommended for investment due to its high economic indicators, low political risk, medium ESG sustainability, high financial returns, high risk-adjusted NPV, and compliance with all mandatory standards. It also aligns well with logistics capacity and talent acquisition timelines, and meets the ROI threshold and ESG policy compliance. Market B is a secondary option if stakeholder weighting and talent acquisition timelines improve. Market C is not recommended due to its low economic indicators, high political risk, low ESG sustainability, low financial returns, low risk-adjusted NPV, and non-compliance with mandatory standards.",
+        "decisionId": "DF-001",
+        "analysisType": "Multi-Criteria Decision Analysis",
+        "stage": "Final Evaluation",
+        "iteration": 3,
+        "nextStageNeeded": false,
+        "suggestedNextStage": "Prepare decision package for board presentation"
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('C')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_C" value="C" onchange="saveChoice('C')">
+                <label for="choice_C" class="candidate-label">[C]</label>
+                <span class="model-name">(claude-3.5-sonnet)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "decision-framework-server-decisionFramework",
+      "arguments": {
+        "decisionStatement": "Select optimal international market(s) for expansion under $10M investment cap, considering economic, risk, and ESG factors while meeting stakeholder requirements and compliance standards",
+        "options": [
+          "Market A",
+          "Market B",
+          "Market C"
+        ],
+        "criteria": [
+          "Economic Indicators",
+          "Political Risk Score",
+          "ESG Sustainability Score",
+          "Expected Financial Returns",
+          "Risk-adjusted NPV",
+          "Data Privacy Compliance",
+          "Trade Tariff Impact",
+          "ESG Compliance",
+          "Logistics Feasibility",
+          "Talent Acquisition Potential"
+        ],
+        "criteriaEvaluations": [
+          {
+            "option": "Market A",
+            "criterion": "Economic Indicators",
+            "score": 0
+          },
+          {
+            "option": "Market B",
+            "criterion": "Economic Indicators",
+            "score": 0
+          },
+          {
+            "option": "Market C",
+            "criterion": "Economic Indicators",
+            "score": 0
+          }
+        ],
+        "stakeholders": [
+          "Finance Department",
+          "Legal Department",
+          "Operations Team",
+          "Marketing Department",
+          "Supply Chain Team",
+          "Board of Directors",
+          "Investors"
+        ],
+        "constraints": [
+          "Investment cap of $10 million",
+          "Mandatory data privacy compliance",
+          "Trade tariff regulations",
+          "ESG standards compliance",
+          "Minimum ROI threshold",
+          "Week 7 decision deadline",
+          "Logistics capacity limits",
+          "Talent acquisition timeline"
+        ],
+        "possibleOutcomes": [
+          {
+            "outcome": "Successful market entry",
+            "probability": 0.0
+          },
+          {
+            "outcome": "Delayed market entry",
+            "probability": 0.0
+          },
+          {
+            "outcome": "Regulatory barriers",
+            "probability": 0.0
+          },
+          {
+            "outcome": "Resource constraints",
+            "probability": 0.0
+          }
+        ],
+        "timeHorizon": "7 weeks for decision, phased implementation schedule thereafter",
+        "riskTolerance": "Moderate - balanced against ROI requirements and compliance needs",
+        "informationGaps": [
+          "Specific ROI threshold from investors",
+          "Detailed ESG policy requirements",
+          "Actual market-specific economic data",
+          "Precise political risk probabilities",
+          "Detailed compliance requirements per market",
+          "Exact logistics capacity constraints",
+          "Specific talent acquisition timelines"
+        ],
+        "expectedValues": {
+          "Market A": 0,
+          "Market B": 0,
+          "Market C": 0
+        },
+        "multiCriteriaScores": {
+          "Market A": 0,
+          "Market B": 0,
+          "Market C": 0
+        },
+        "sensitivityInsights": [
+          "Stakeholder weight variations impact",
+          "Political risk probability sensitivity",
+          "ROI threshold effects",
+          "ESG compliance threshold impact",
+          "Resource constraint criticality"
+        ],
+        "recommendation": "Initial framework established - requires data input for final recommendation",
+        "decisionId": "IntlMarketExpansion2024",
+        "analysisType": "Multi-criteria decision analysis with stakeholder weighting",
+        "stage": "Framework Setup",
+        "iteration": 1,
+        "nextStageNeeded": true,
+        "suggestedNextStage": "Data Collection and Stakeholder Input"
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('D')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_D" value="D" onchange="saveChoice('D')">
+                <label for="choice_D" class="candidate-label">[D]</label>
+                <span class="model-name">(qwen3-235b-a22b)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "decision-framework-server-decisionFramework",
+      "arguments": {
+        "decisionId": "DF-2023-001",
+        "analysisType": "Multi-Criteria Decision Analysis with Risk-Adjusted Valuation and Stakeholder Weighting",
+        "stage": "Comprehensive Evaluation and Recommendation",
+        "iteration": 1,
+        "decisionStatement": "Select the optimal international market(s) for entry under a $10 million investment cap, balancing financial returns, political risk, ESG compliance, stakeholder priorities, and operational feasibility, with a decision package ready for board presentation by week 7.",
+        "options": [
+          "Market A: Southeast Asia (Vietnam)",
+          "Market B: Eastern Europe (Romania)",
+          "Market C: Latin America (Colombia)"
+        ],
+        "criteria": [
+          {
+            "criterion": "Expected Financial Return (5-year NPV)",
+            "weight": 0.25,
+            "measurement": "Million USD, risk-adjusted"
+          },
+          {
+            "criterion": "Political and Regulatory Risk",
+            "weight": 0.2,
+            "measurement": "Probability-weighted risk score (0-10, lower is better)"
+          },
+          {
+            "criterion": "ESG Sustainability Score",
+            "weight": 0.15,
+            "measurement": "Third-party ESG rating (0-100, higher is better)"
+          },
+          {
+            "criterion": "Market Growth Potential",
+            "weight": 0.1,
+            "measurement": "CAGR of target sector (% per year)"
+          },
+          {
+            "criterion": "Operational Feasibility",
+            "weight": 0.1,
+            "measurement": "Logistics, talent availability, infrastructure readiness (0-10)"
+          },
+          {
+            "criterion": "Compliance Readiness",
+            "weight": 0.1,
+            "measurement": "Binary: Meets all data-privacy, tariff, and ESG mandates"
+          },
+          {
+            "criterion": "Stakeholder Alignment",
+            "weight": 0.1,
+            "measurement": "Weighted satisfaction across departments"
+          }
+        ],
+        "criteriaEvaluations": [
+          {
+            "option": "Market A: Southeast Asia (Vietnam)",
+            "evaluations": {
+              "Expected Financial Return (5-year NPV)": 12.3,
+              "Political and Regulatory Risk": 6.8,
+              "ESG Sustainability Score": 72,
+              "Market Growth Potential": 8.5,
+              "Operational Feasibility": 7.5,
+              "Compliance Readiness": true,
+              "Stakeholder Alignment": 0.78
+            }
+          },
+          {
+            "option": "Market B: Eastern Europe (Romania)",
+            "evaluations": {
+              "Expected Financial Return (5-year NPV)": 9.1,
+              "Political and Regulatory Risk": 4.2,
+              "ESG Sustainability Score": 85,
+              "Market Growth Potential": 5.2,
+              "Operational Feasibility": 8.7,
+              "Compliance Readiness": true,
+              "Stakeholder Alignment": 0.85
+            }
+          },
+          {
+            "option": "Market C: Latin America (Colombia)",
+            "evaluations": {
+              "Expected Financial Return (5-year NPV)": 14.6,
+              "Political and Regulatory Risk": 7.9,
+              "ESG Sustainability Score": 64,
+              "Market Growth Potential": 9.1,
+              "Operational Feasibility": 6.3,
+              "Compliance Readiness": false,
+              "Stakeholder Alignment": 0.62
+            }
+          }
+        ],
+        "possibleOutcomes": [
+          {
+            "option": "Market A: Southeast Asia (Vietnam)",
+            "outcomes": [
+              {
+                "outcome": "High growth, stable regulation",
+                "probability": 0.55,
+                "financialImpact": 14.1,
+                "riskImpact": "Low"
+              },
+              {
+                "outcome": "Moderate growth, regulatory tightening",
+                "probability": 0.3,
+                "financialImpact": 9.8,
+                "riskImpact": "Medium"
+              },
+              {
+                "outcome": "Supply chain disruption",
+                "probability": 0.15,
+                "financialImpact": 4.2,
+                "riskImpact": "High"
+              }
+            ]
+          },
+          {
+            "option": "Market B: Eastern Europe (Romania)",
+            "outcomes": [
+              {
+                "outcome": "Stable growth, EU alignment",
+                "probability": 0.65,
+                "financialImpact": 10.3,
+                "riskImpact": "Low"
+              },
+              {
+                "outcome": "Geopolitical spillover",
+                "probability": 0.25,
+                "financialImpact": 6.1,
+                "riskImpact": "Medium-High"
+              },
+              {
+                "outcome": "Talent shortage bottleneck",
+                "probability": 0.1,
+                "financialImpact": 3.4,
+                "riskImpact": "Medium"
+              }
+            ]
+          },
+          {
+            "option": "Market C: Latin America (Colombia)",
+            "outcomes": [
+              {
+                "outcome": "Rapid expansion, policy support",
+                "probability": 0.5,
+                "financialImpact": 18.2,
+                "riskImpact": "Medium"
+              },
+              {
+                "outcome": "Political instability, ESG violations",
+                "probability": 0.35,
+                "financialImpact": 5.7,
+                "riskImpact": "High"
+              },
+              {
+                "outcome": "Trade barrier escalation",
+                "probability": 0.15,
+                "financialImpact": 1.9,
+                "riskImpact": "Very High"
+              }
+            ]
+          }
+        ],
+        "informationGaps": [
+          "Precise timeline for data-localization law enforcement in Vietnam",
+          "Long-term stability of Romania\u2019s tech labor supply",
+          "Colombia\u2019s ability to meet ESG compliance despite current score"
+        ],
+        "stakeholders": [
+          {
+            "name": "Finance",
+            "interests": "Maximize ROI, meet 15% IRR threshold",
+            "weightingPreference": {
+              "Expected Financial Return (5-year NPV)": 0.4,
+              "Political and Regulatory Risk": 0.3,
+              "ESG Sustainability Score": 0.05,
+              "Market Growth Potential": 0.15,
+              "Operational Feasibility": 0.05,
+              "Compliance Readiness": 0.05
+            }
+          },
+          {
+            "name": "Legal",
+            "interests": "Ensure full compliance with GDPR-like laws, trade regulations",
+            "weightingPreference": {
+              "Expected Financial Return (5-year NPV)": 0.1,
+              "Political and Regulatory Risk": 0.35,
+              "ESG Sustainability Score": 0.2,
+              "Market Growth Potential": 0.05,
+              "Operational Feasibility": 0.1,
+              "Compliance Readiness": 0.2
+            }
+          },
+          {
+            "name": "Operations",
+            "interests": "Smooth logistics, scalable infrastructure",
+            "weightingPreference": {
+              "Expected Financial Return (5-year NPV)": 0.15,
+              "Political and Regulatory Risk": 0.2,
+              "ESG Sustainability Score": 0.1,
+              "Market Growth Potential": 0.1,
+              "Operational Feasibility": 0.35,
+              "Compliance Readiness": 0.1
+            }
+          },
+          {
+            "name": "Marketing",
+            "interests": "Brand alignment, consumer receptivity",
+            "weightingPreference": {
+              "Expected Financial Return (5-year NPV)": 0.2,
+              "Political and Regulatory Risk": 0.15,
+              "ESG Sustainability Score": 0.25,
+              "Market Growth Potential": 0.25,
+              "Operational Feasibility": 0.1,
+              "Compliance Readiness": 0.05
+            }
+          },
+          {
+            "name": "Supply Chain",
+            "interests": "Resilient sourcing, tariff stability",
+            "weightingPreference": {
+              "Expected Financial Return (5-year NPV)": 0.1,
+              "Political and Regulatory Risk": 0.3,
+              "ESG Sustainability Score": 0.15,
+              "Market Growth Potential": 0.1,
+              "Operational Feasibility": 0.2,
+              "Compliance Readiness": 0.15
+            }
+          }
+        ],
+        "constraints": [
+          "Total investment \u2264 $10 million",
+          "Must meet data-privacy regulations (e.g., equivalent to GDPR)",
+          "Tariff exposure < 15% on key imports/exports",
+          "ESG score \u2265 70 or remediation plan in place",
+          "Entry timeline must align with talent acquisition (6\u20139 months)",
+          "Board presentation deadline: Week 7"
+        ],
+        "timeHorizon": "5 years",
+        "riskTolerance": "Moderate",
+        "expectedValues": {}
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+
+            <div class="confidence-section">
+                <h4>How confident are you in your choice?</h4>
+                <div class="confidence-buttons">
+                    <button class="confidence-btn" onclick="saveConfidence(1)">1 - Very Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(2)">2 - Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(3)">3 - Neutral</button>
+                    <button class="confidence-btn" onclick="saveConfidence(4)">4 - Confident</button>
+                    <button class="confidence-btn" onclick="saveConfidence(5)">5 - Very Confident</button>
+                </div>
+            </div>
+
+            <div class="notes-section">
+                <h4>Notes (optional)</h4>
+                <textarea id="notes" placeholder="Any additional comments..." onchange="saveNotes()"></textarea>
+            </div>
+
+            <div id="save-status" class="save-status unsaved">Not saved yet</div>
+
+            <div class="skip-reason" id="skip-reason-section">
+                <h4>Reason for skipping:</h4>
+                <select id="skip-reason" onchange="saveSkipReason()">
+                    <option value="">-- Select a reason --</option>
+                    <option value="all_equally_wrong">All options are equally wrong/incorrect</option>
+                    <option value="all_equally_similar">All options are equally similar (can't decide)</option>
+                    <option value="ground_truth_unclear">Ground truth is unclear or ambiguous</option>
+                    <option value="too_complex">Too complex to evaluate</option>
+                    <option value="other">Other (add note below)</option>
+                </select>
+            </div>
+
+            <div class="confirm-section">
+                <button class="confirm-btn" id="confirm-btn" onclick="confirmAndNext()">Confirm & Next</button>
+                <button class="skip-btn" id="skip-btn" onclick="toggleSkip()">Skip</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const sampleId = "36d73413-81aa-5044-a953-391c1eb81818";
+        const itemId = "rank_0324";
+
+        function getAnnotations() {
+            const saved = localStorage.getItem('best_match_annotations');
+            return saved ? JSON.parse(saved) : {};
+        }
+
+        function saveAnnotations(annotations) {
+            localStorage.setItem('best_match_annotations', JSON.stringify(annotations));
+        }
+
+        function selectCandidate(label) {
+            document.getElementById('choice_' + label).checked = true;
+            saveChoice(label);
+        }
+
+        function saveChoice(label) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].choice = label;
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveConfidence(level) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].confidence = level;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveNotes() {
+            const notes = document.getElementById('notes').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].notes = notes;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function toggleSkip() {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+
+            if (annotations[itemId].skipped) {
+                // Un-skip
+                annotations[itemId].skipped = false;
+                annotations[itemId].skipReason = null;
+            } else {
+                // Skip - clear any choice
+                annotations[itemId].skipped = true;
+                annotations[itemId].choice = null;
+                annotations[itemId].confirmed = false;
+            }
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveSkipReason() {
+            const reason = document.getElementById('skip-reason').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].skipReason = reason;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function skipAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.skipReason) {
+                alert('Please select a reason for skipping.');
+                return;
+            }
+
+            // Mark as confirmed skip
+            ann.skipped = true;
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Navigate to next
+            setTimeout(() => {
+                window.location.href = 'rank_0325.html';
+            }, 300);
+        }
+
+        function updateUI() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // Update skip state
+            const skipBtn = document.getElementById('skip-btn');
+            const skipReasonSection = document.getElementById('skip-reason-section');
+            const confirmBtn = document.getElementById('confirm-btn');
+
+            if (ann.skipped) {
+                skipBtn.textContent = 'Undo Skip';
+                skipBtn.classList.add('skipped');
+                skipReasonSection.classList.add('visible');
+                confirmBtn.textContent = 'Confirm Skip & Next';
+                confirmBtn.onclick = skipAndNext;
+
+                // Disable candidate selection when skipped
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '0.5';
+                    el.style.pointerEvents = 'none';
+                });
+            } else {
+                skipBtn.textContent = 'Skip';
+                skipBtn.classList.remove('skipped');
+                skipReasonSection.classList.remove('visible');
+                confirmBtn.textContent = 'Confirm & Next';
+                confirmBtn.onclick = confirmAndNext;
+
+                // Enable candidate selection
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '1';
+                    el.style.pointerEvents = 'auto';
+                });
+            }
+
+            // Update skip reason dropdown
+            if (ann.skipReason) {
+                document.getElementById('skip-reason').value = ann.skipReason;
+            }
+
+            // Update candidate selection
+            document.querySelectorAll('.candidate').forEach(el => el.classList.remove('selected'));
+            if (ann.choice) {
+                const radio = document.getElementById('choice_' + ann.choice);
+                if (radio) {
+                    radio.checked = true;
+                    radio.closest('.candidate').classList.add('selected');
+                }
+            }
+
+            // Update confidence buttons
+            document.querySelectorAll('.confidence-btn').forEach((btn, idx) => {
+                btn.classList.toggle('selected', ann.confidence === idx + 1);
+            });
+
+            // Update notes
+            if (ann.notes) {
+                document.getElementById('notes').value = ann.notes;
+            }
+
+            // Update save status
+            const status = document.getElementById('save-status');
+            if (ann.skipped) {
+                status.textContent = 'Marked as SKIP' + (ann.skipReason ? ' - ' + ann.skipReason : '');
+                status.className = 'save-status saved';
+            } else if (ann.choice) {
+                status.textContent = 'Saved: Choice ' + ann.choice + (ann.confidence ? ', Confidence ' + ann.confidence : '');
+                status.className = 'save-status saved';
+            } else {
+                status.textContent = 'Not saved yet - please select a response or skip';
+                status.className = 'save-status unsaved';
+            }
+        }
+
+        function confirmBeforeNav(event) {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // If a choice is made, confirm it before navigating
+            if (ann.choice && !ann.confirmed) {
+                ann.confirmed = true;
+                ann.confirmedAt = new Date().toISOString();
+                annotations[itemId] = ann;
+                saveAnnotations(annotations);
+            }
+            // Allow navigation to proceed
+        }
+
+        function confirmAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.choice) {
+                alert('Please select a response before confirming.');
+                return;
+            }
+
+            // Mark as confirmed
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Update button state
+            const btn = document.getElementById('confirm-btn');
+            btn.textContent = 'Confirmed!';
+            btn.classList.add('confirmed');
+
+            // Navigate to next after brief delay
+            setTimeout(() => {
+                window.location.href = 'rank_0325.html';
+            }, 500);
+        }
+
+        // Load saved state on page load
+        window.onload = function() {
+            updateUI();
+            // Update confirm button if already confirmed
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+            if (ann.confirmed) {
+                const btn = document.getElementById('confirm-btn');
+                btn.textContent = 'Confirmed';
+                btn.classList.add('confirmed');
+            }
+        };
+    </script>
+</body>
+</html>

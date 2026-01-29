@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sample 27 / 343</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            line-height: 1.5;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header h2 { margin: 0 0 10px 0; color: #333; }
+        .progress { color: #666; }
+        .nav-buttons { margin-top: 15px; }
+        .nav-buttons a {
+            display: inline-block;
+            padding: 8px 16px;
+            margin-right: 10px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .nav-buttons a:hover { background: #0056b3; }
+        .nav-buttons a.disabled {
+            background: #ccc;
+            pointer-events: none;
+        }
+
+        .task-description {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2196f3;
+        }
+        .task-description h3 { margin: 0 0 10px 0; color: #1565c0; }
+
+        .ground-truth {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #4caf50;
+        }
+        .ground-truth h3 { margin: 0 0 15px 0; color: #2e7d32; }
+
+        .candidates-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .candidates-section h3 { margin: 0 0 15px 0; color: #333; }
+
+        .candidate {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .candidate:hover { background: #f0f0f0; border-color: #ddd; }
+        .candidate.selected {
+            background: #e8f5e9;
+            border-color: #4caf50;
+        }
+        .candidate-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .candidate-label {
+            font-size: 18px;
+            font-weight: bold;
+            margin-left: 10px;
+            color: #333;
+        }
+        .model-name {
+            margin-left: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 13px;
+            margin: 0;
+        }
+        .ground-truth pre {
+            background: #1b5e20;
+            color: #c5e1a5;
+        }
+        .response-json { background: #37474f; }
+
+        .confidence-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff3e0;
+            border-radius: 8px;
+        }
+        .confidence-section h4 { margin: 0 0 10px 0; }
+        .confidence-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .confidence-btn {
+            padding: 8px 16px;
+            border: 1px solid #ccc;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .confidence-btn:hover { background: #f5f5f5; }
+        .confidence-btn.selected {
+            background: #ff9800;
+            color: white;
+            border-color: #ff9800;
+        }
+
+        .notes-section {
+            margin-top: 15px;
+        }
+        .notes-section textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            min-height: 60px;
+            font-family: inherit;
+        }
+
+        .save-status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .save-status.saved { background: #e8f5e9; color: #2e7d32; }
+        .save-status.unsaved { background: #ffebee; color: #c62828; }
+
+        .confirm-section {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .confirm-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .confirm-btn:hover { background: #388e3c; transform: scale(1.02); }
+        .confirm-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .confirm-btn.confirmed {
+            background: #2196f3;
+        }
+        .skip-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #9e9e9e;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 20px;
+        }
+        .skip-btn:hover { background: #757575; }
+        .skip-btn.skipped {
+            background: #ff9800;
+        }
+        .skip-reason {
+            margin-top: 15px;
+            display: none;
+        }
+        .skip-reason.visible {
+            display: block;
+        }
+        .skip-reason select {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 100%;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Sample 27 of 343</h2>
+            <div class="progress">ID: f454d555-46c7-53d3-8a77-df4d667248c5</div>
+            <div class="nav-buttons">
+                <a href='rank_0025.html'>Previous</a>
+                <a href="../index.html">Back to List</a>
+                <a href='rank_0027.html' onclick='confirmBeforeNav(event)'>Next</a>
+            </div>
+        </div>
+
+        <div class="task-description">
+            <h3>Task: Select the Most Similar Response</h3>
+            <p>Compare the responses below to the Ground Truth and select the one that is <strong>MOST SIMILAR</strong>.</p>
+            <p>Consider: same tool names, same parameters, same structure, functional equivalence.</p>
+        </div>
+
+        <div class="ground-truth">
+            <h3>Ground Truth (Reference)</h3>
+            <pre>{
+  "tool_calls": [
+    {
+      "name": "powershell-exec-server-generate_intune_script_pair",
+      "arguments": {
+        "description": "Enterprise Google Chrome version compliance ensuring version 120.0.0.0 or higher with LegacyAppX conflict detection bandwidth management and regulatory reporting",
+        "detection_logic": "try {\n    # Set execution timeout protection (slightly under 90s limit)\n    $timeout = 85\n    $timer = [System.Diagnostics.Stopwatch]::StartNew()\n    \n    # Initialize compliance tracking\n    $complianceStatus = @{}\n    $chromeVersion = $null\n    $legacyConflict = $false\n    $compliant = $false\n    \n    # Check for LegacyAppX conflict (registry-based detection)\n    $legacyPaths = @(\n        \"HKLM:\\SOFTWARE\\Classes\\AppX*\",\n        \"HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Appx\\*\"\n    )\n    \n    $legacyApps = @()\n    foreach ($path in $legacyPaths) {\n        if ($timer.Elapsed.TotalSeconds -gt ($timeout - 10)) {\n            break\n        }\n        try {\n            $apps = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like \"*LegacyAppX*\" }\n            if ($apps) { $legacyApps += $apps }\n        } catch {}\n    }\n    \n    $legacyConflict = $legacyApps.Count -gt 0\n    \n    # Check Chrome version\n    try {\n        $chromeRegPaths = @(\n            \"HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe\",\n            \"HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe\"\n        )\n        \n        foreach ($regPath in $chromeRegPaths) {\n            if ($timer.Elapsed.TotalSeconds -gt ($timeout - 5)) {\n                break\n            }\n            \n            $chromeExe = Get-ItemProperty -Path $regPath -Name \"(Default)\" -ErrorAction SilentlyContinue\n            if ($chromeExe -and (Test-Path $chromeExe.'(Default)')) {\n                $chromeVersion = (Get-Item $chromeExe.'(Default)').VersionInfo.FileVersion\n                break\n            }\n        }\n    } catch {}\n    \n    # Determine compliance\n    $minVersion = [version]\"120.0.0.0\"\n    $currentVersion = if ($chromeVersion) { [version]$chromeVersion } else { [version]\"0.0.0.0\" }\n    $compliant = ($currentVersion -ge $minVersion) -and (-not $legacyConflict)\n    \n    # Build JSON payload for SIEM\n    $payload = @{\n        Timestamp = (Get-Date).ToUniversalTime().ToString(\"yyyy-MM-ddTHH:mm:ssZ\")\n        DeviceName = $env:COMPUTERNAME\n        UserName = $env:USERNAME\n        ComplianceStatus = if ($compliant) { \"COMPLIANT\" } else { \"NON_COMPLIANT\" }\n        ChromeVersion = $chromeVersion\n        MinimumVersion = \"120.0.0.0\"\n        LegacyAppXConflict = $legacyConflict\n        LegacyAppXApps = ($legacyApps | Select-Object DisplayName, Version, Publisher)\n        ConflictCount = $legacyApps.Count\n        ExecutionTimeMs = $timer.Elapsed.TotalMilliseconds\n        ScriptType = \"Detection\"\n        ExitCode = if ($compliant) { 0 } else { 1 }\n    }\n    \n    # Write to SIEM via Windows Event Log in JSON format\n    $eventPayload = $payload | ConvertTo-Json -Depth 3 -Compress\n    Write-EventLog -LogName \"Application\" -Source \"IntuneChromeCompliance\" -EventId 1001 -EntryType Information -Message $eventPayload\n    \n    # Also output JSON to stdout for Intune\n    $payload | ConvertTo-Json -Depth 3\n    \n    Complete-Detection -Compliant $compliant -Message \"Chrome version: $chromeVersion, LegacyAppX conflict: $legacyConflict, Compliance: $($compliant ? 'COMPLIANT' : 'NON-COMPLIANT')\"\n    \n} catch {\n    $errorPayload = @{\n        Timestamp = (Get-Date).ToUniversalTime().ToString(\"yyyy-MM-ddTHH:mm:ssZ\")\n        DeviceName = $env:COMPUTERNAME\n        UserName = $env:USERNAME\n        ComplianceStatus = \"ERROR\"\n        ErrorMessage = $_.Exception.Message\n        ScriptType = \"Detection\"\n        ExitCode = 2\n    }\n    \n    Write-EventLog -LogName \"Application\" -Source \"IntuneChromeCompliance\" -EventId 1002 -EntryType Error -Message ($errorPayload | ConvertTo-Json -Compress)\n    Complete-Detection -Compliant $false -Message \"Detection failed: $($_.Exception.Message)\"\n}",
+        "remediation_logic": "try {\n    # Initialize compliance and bandwidth tracking\n    $bandwidthLimitMB = 150 * 1024  # 150GB in MB\n    $tempStorageLimitMB = 50\n    $downloadedBytes = 0\n    \n    $timer = [System.Diagnostics.Stopwatch]::StartNew()\n    \n    # Ensure logs directory exists\n    $logDir = \"$env:ProgramData\\Microsoft\\Intune\\ChromeCompliance\"\n    if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force }\n    \n    # Initialize bandwidth tracking\n    $bandwidthLog = \"$logDir\\bandwidth_usage.log\"\n    if (Test-Path $bandwidthLog) {\n        $existingBandwidth = (Get-Content $bandwidthLog | Where-Object { $_ -match \"^\\d+$\" } | Measure-Object -Sum).Sum\n    } else {\n        $existingBandwidth = 0\n    }\n    \n    Write-IntuneLog \"Starting Chrome remediation. Existing bandwidth usage: $existingBandwidth MB\"\n    \n    # Check LegacyAppX conflict (same logic as detection)\n    $legacyConflict = $false\n    $regPaths = @(\"HKLM:\\SOFTWARE\\Classes\\AppX*\", \"HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Appx\\*\")\n    foreach ($regPath in $regPaths) {\n        try {\n            $apps = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like \"*LegacyAppX*\" }\n            if ($apps) { $legacyConflict = $true; break }\n        } catch {}\n    }\n    \n    # Create system restore point only if conflict detected\n    if ($legacyConflict) {\n        Write-IntuneLog \"LegacyAppX conflict detected, creating system restore point...\"\n        try {\n            Checkpoint-Computer -Description \"Intune Chrome Compliance Before Chrome Update\" -RestorePointType \"MODIFY_SETTINGS\"\n            Write-IntuneLog \"System restore point created successfully\"\n        } catch {\n            Write-IntuneLog \"Failed to create restore point: $($_.Exception.Message)\" -Level \"Warning\"\n        }\n    } else {\n        Write-IntuneLog \"No LegacyAppX conflict detected, skipping restore point\"\n    }\n    \n    # Check available temporary storage\n    $tempDrive = (Get-Item $env:TEMP).PSDrive.Name\n    $tempDriveInfo = Get-PSDrive -Name $tempDrive\n    $availableSpaceMB = [math]::Round($tempDriveInfo.Free / 1MB)\n    \n    if ($availableSpaceMB -lt $tempStorageLimitMB) {\n        throw \"Insufficient temporary storage. Available: $availableSpaceMB MB, Required: $tempStorageLimitMB MB\"\n    }\n    \n    # Calculate projected bandwidth usage\n    $chromeInstallerUri = \"https://dl.google.com/chrome/install/latest/chrome_installer.exe\"\n    $projectedSizeMB = 90  # Chrome installer typically ~90MB\n    $totalBandwidth = $existingBandwidth + $projectedSizeMB\n    \n    Write-IntuneLog \"Projected bandwidth usage: $totalBandwidth MB (Limit: $bandwidthLimitMB MB)\"\n    \n    if ($totalBandwidth -gt $bandwidthLimitMB) {\n        throw \"Bandwidth limit exceeded. Total would be $totalBandwidth MB, limit is $bandwidthLimitMB MB\"\n    }\n    \n    # Force TLS 1.2 for security compliance\n    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12\n    \n    # Download Chrome installer\n    $installerPath = \"$env:TEMP\\chrome_installer.exe\"\n    Write-IntuneLog \"Downloading Chrome installer to: $installerPath\"\n    \n    try {\n        $webClient = New-Object System.Net.WebClient\n        $webClient.DownloadFile($chromeInstallerUri, $installerPath)\n        $downloadedBytes = (Get-Item $installerPath).Length\n        $downloadedMB = [math]::Round($downloadedBytes / 1MB, 2)\n        \n        # Update bandwidth usage\n        $downloadedMB | Out-File -FilePath $bandwidthLog -Append\n        Write-IntuneLog \"Download completed: $downloadedMB MB downloaded\"\n        \n        # Verify file size\n        if ((Get-Item $installerPath).Length / 1MB -lt 10) {\n            throw \"Downloaded file appears corrupted (too small)\"\n        }\n        \n    } catch {\n        if (Test-Path $installerPath) { Remove-Item $installerPath -Force }\n        throw \"Download failed: $($_.Exception.Message)\"\n    }\n    \n    # Silent installation\n    Write-IntuneLog \"Starting silent Chrome installation...\"\n    $installArgs = \"/silent /install\"\n    $installProcess = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru -WindowStyle Hidden\n    \n    if ($installProcess.ExitCode -ne 0) {\n        throw \"Chrome installation failed with exit code $($installProcess.ExitCode)\"\n    }\n    \n    Write-IntuneLog \"Chrome installation completed successfully\"\n    \n    # Verify installation\n    try {\n        $chromeRegPath = \"HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe\"\n        $chromeExe = Get-ItemProperty -Path $chromeRegPath -Name \"(Default)\" -ErrorAction Stop\n        if (Test-Path $chromeExe.'(Default)') {\n            $installedVersion = [version](Get-Item $chromeExe.'(Default)').VersionInfo.FileVersion\n            $minVersion = [version]\"120.0.0.0\"\n            \n            if ($installedVersion -lt $minVersion) {\n                throw \"Installed version $installedVersion is below required $minVersion\"\n            }\n            \n            Write-IntuneLog \"Chrome version verified: $installedVersion\"\n        }\n    } catch {\n        Write-IntuneLog \"Version verification failed: $($_.Exception.Message)\" -Level \"Warning\"\n    }\n    \n    # Cleanup installer\n    Write-IntuneLog \"Cleaning up installer file...\"\n    Remove-Item $installerPath -Force -ErrorAction SilentlyContinue\n    \n    # Write to shared CSV for regulatory reporting\n    $csvPath = \"$logDir\\regulatory_report.csv\"\n    $csvData = @{\n        Timestamp = (Get-Date).ToUniversalTime().ToString(\"yyyy-MM-ddTHH:mm:ssZ\")\n        ComputerName = $env:COMPUTERNAME\n        UserName = $env:USERNAME\n        Action = \"ChromeRemediation\"\n        Status = \"SUCCESS\"\n        ChromeVersion = $installedVersion.ToString()\n        LegacyAppXConflict = $legacyConflict\n        BandwidthUsedMB = $downloadedMB\n        ExecutionTimeMs = $timer.Elapsed.TotalMilliseconds\n    }\n    \n    if (-not (Test-Path $csvPath)) {\n        $csvHeader = \"Timestamp,ComputerName,UserName,Action,Status,ChromeVersion,LegacyAppXConflict,BandwidthUsedMB,ExecutionTimeMs\"\n        $csvHeader | Out-File -FilePath $csvPath\n    }\n    \n    $csvLine = \"$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$env:COMPUTERNAME,$env:USERNAME,ChromeRemediation,SUCCESS,$installedVersion,$legacyConflict,$downloadedMB,$($timer.Elapsed.TotalMilliseconds)\"\n    $csvLine | Out-File -FilePath $csvPath -Append\n    Write-IntuneLog \"Regulatory report updated: $csvPath\"\n    \n    # Final JSON status report\n    $finalReport = @{\n        Timestamp = (Get-Date).ToUniversalTime().ToString(\"yyyy-MM-ddTHH:mm:ssZ\")\n        DeviceName = $env:COMPUTERNAME\n        Status = \"SUCCESS\"\n        ChromeVersion = $installedVersion.ToString()\n        BandwidthUsedMB = $downloadedMB\n        LegacyAppXConflict = $legacyConflict\n        HasRestorePoint = $legacyConflict\n        ExecutionTimeMs = $timer.Elapsed.TotalMilliseconds\n    } | ConvertTo-Json -Compress\n    \n    Write-EventLog -LogName \"Application\" -Source \"IntuneChromeCompliance\" -EventId 2001 -EntryType Information -Message $finalReport\n    \n    Complete-Remediation -Success $true -Message \"Chrome successfully updated to version $installedVersion. Bandwidth used: $downloadedMB MB\"\n    \n} catch {\n    $errorDetails = $_.Exception.Message\n    Write-IntuneLog \"Remediation failed: $errorDetails\"\n    \n    # Write error to regulatory CSV\n    $csvPath = \"$env:ProgramData\\Microsoft\\Intune\\ChromeCompliance\\regulatory_report.csv\"\n    if (Test-Path (Split-Path $csvPath)) {\n        $csvLine = \"$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$env:COMPUTERNAME,$env:USERNAME,ChromeRemediation,FAILURE,$null,$false,0,$null\"\n        $csvLine | Out-File -FilePath $csvPath -Append\n    }\n    \n    # Cleanup on failure\n    $installerPath = \"$env:TEMP\\chrome_installer.exe\"\n    if (Test-Path $installerPath) {\n        Remove-Item $installerPath -Force\n    }\n    \n    Complete-Remediation -Success $false -Message \"Remediation failed: $errorDetails\"\n}",
+        "output_dir": "chrome_intune_compliance_scripts",
+        "timeout": 120
+      }
+    }
+  ]
+}</pre>
+        </div>
+
+        <div class="candidates-section">
+            <h3>Candidate Responses - Select the Most Similar:</h3>
+            
+        <div class="candidate" onclick="selectCandidate('A')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_A" value="A" onchange="saveChoice('A')">
+                <label for="choice_A" class="candidate-label">[A]</label>
+                <span class="model-name">(claude-sonnet-4)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "powershell-exec-server-generate_intune_script_pair",
+      "arguments": {
+        "description": "Enterprise Chrome version compliance management with regulatory reporting, bandwidth monitoring, and LegacyAppX conflict detection for Windows 10 workstations"
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('B')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_B" value="B" onchange="saveChoice('B')">
+                <label for="choice_B" class="candidate-label">[B]</label>
+                <span class="model-name">(mimo-v2-flash)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "powershell-exec-server-generate_intune_script_pair",
+      "arguments": {
+        "description": "Ensure Google Chrome version 120.0.0.0 or newer is installed on Windows 10 workstations, checking for LegacyAppX conflicts, bandwidth limits, and regulatory compliance",
+        "detection_logic": "try {\n    # Set execution timeout protection\n    $startTime = Get-Date\n    $maxExecutionTime = [TimeSpan]::FromSeconds(85)  # Leave 5 seconds buffer\n    \n    # Initialize compliance tracking\n    $complianceStatus = @{\n        ChromeInstalled = $false\n        ChromeVersion = $null\n        ChromeCompliant = $false\n        LegacyAppXConflict = $false\n        OverallCompliant = $false\n        Timestamp = (Get-Date).ToString(\"yyyy-MM-ddTHH:mm:ss.fffZ\")\n        DeviceId = (Get-CimInstance -ClassName Win32_ComputerSystem).Name\n        UserName = $env:USERNAME\n    }\n    \n    # Check for Chrome installation\n    try {\n        $chromePath = (Get-ItemProperty \"HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe\" -ErrorAction Stop).'(Default)'\n        if (Test-Path $chromePath) {\n            $complianceStatus.ChromeInstalled = $true\n            $chromeVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($chromePath).FileVersion\n            $complianceStatus.ChromeVersion = $chromeVersion\n            \n            # Check if version meets requirement (120.0.0.0 or higher)\n            $requiredVersion = [version]\"120.0.0.0\"\n            $currentVersion = [version]$chromeVersion\n            $complianceStatus.ChromeCompliant = $currentVersion -ge $requiredVersion\n        }\n    } catch {\n        # Chrome not found - will be non-compliant\n        Write-IntuneLog \"Chrome not detected or inaccessible\"\n    }\n    \n    # Check for LegacyAppX conflict (simulated - adjust registry path as needed)\n    try {\n        $legacyAppXPaths = @(\n            \"HKLM:\\SOFTWARE\\Classes\\AppX*\\LegacyAppX\",\n            \"HKLM:\\SOFTWARE\\WOW6432Node\\AppX*\\LegacyAppX\"\n        )\n        \n        foreach ($path in $legacyAppXPaths) {\n            if (Test-Path $path) {\n                $complianceStatus.LegacyAppXConflict = $true\n                break\n            }\n        }\n        \n        # Additional check for LegacyAppX processes\n        $legacyProcesses = Get-Process -Name \"*LegacyAppX*\" -ErrorAction SilentlyContinue\n        if ($legacyProcesses) {\n            $complianceStatus.LegacyAppXConflict = $true\n        }\n    } catch {\n        Write-IntuneLog \"LegacyAppX check encountered error: $($_.Exception.Message)\"\n    }\n    \n    # Determine overall compliance\n    $complianceStatus.OverallCompliant = $complianceStatus.ChromeInstalled -and $complianceStatus.ChromeCompliant -and -not $complianceStatus.LegacyAppXConflict\n    \n    # Check execution time\n    $elapsed = (Get-Date) - $startTime\n    if ($elapsed -gt $maxExecutionTime) {\n        Write-IntuneLog \"Detection script exceeded time limit: $($elapsed.TotalSeconds)s\"\n        Complete-Detection -Compliant $false -Message \"Detection timeout - unable to complete full assessment\"\n        return\n    }\n    \n    # Create SIEM-compatible JSON payload\n    $siemPayload = @{\n        EventID = \"INTUNE_CHROME_COMPLIANCE\"\n        EventType = \"ComplianceCheck\"\n        Status = if ($complianceStatus.OverallCompliant) { \"COMPLIANT\" } else { \"NON_COMPLIANT\" }\n        Details = $complianceStatus\n        ExecutionTime = $elapsed.TotalSeconds\n    } | ConvertTo-Json -Depth 5\n    \n    # Write to Event Log for SIEM integration\n    $eventSource = \"IntuneChromeCompliance\"\n    if (-not [System.Diagnostics.EventLog]::SourceExists($eventSource)) {\n        New-EventLog -LogName Application -Source $eventSource\n    }\n    \n    Write-EventLog -LogName Application -Source $eventSource -EventId 1001 -EntryType Information -Message $siemPayload\n    \n    # Log to file for additional SIEM ingestion\n    $logPath = \"$env:ProgramData\\IntuneCompliance\\ChromeCompliance.json\"\n    if (-not (Test-Path (Split-Path $logPath))) {\n        New-Item -ItemType Directory -Path (Split-Path $logPath) -Force | Out-Null\n    }\n    $siemPayload | Out-File -FilePath $logPath -Encoding UTF8\n    \n    # Return compliance status\n    Complete-Detection -Compliant $complianceStatus.OverallCompliant -Message \"Chrome: $($complianceStatus.ChromeVersion), AppX Conflict: $($complianceStatus.LegacyAppXConflict)\"\n    \n} catch {\n    Write-IntuneLog \"Detection script error: $($_.Exception.Message)\"\n    Complete-Detection -Compliant $false -Message \"Error during compliance detection\"\n}",
+        "remediation_logic": "try {\n    # Set execution parameters\n    $startTime = Get-Date\n    $maxExecutionTime = [TimeSpan]::FromSeconds(175)  # Leave buffer for 90s limit\n    $maxBandwidthGB = 150\n    $maxTempStorageMB = 50\n    $tempDir = \"$env:TEMP\\IntuneChromeUpdate\"\n    \n    # Initialize logging and tracking\n    $bandwidthUsed = 0\n    $restorePointCreated = $false\n    $installerPath = \"$tempDir\\ChromeInstaller.exe\"\n    $csvReportPath = \"$env:ProgramData\\IntuneCompliance\\ChromeUpgradeReport.csv\"\n    \n    # Create temp directory with size limit check\n    if (Test-Path $tempDir) {\n        Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue\n    }\n    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null\n    \n    # Function to check temp storage usage\n    function Test-TempStorageLimit {\n        $tempSize = (Get-ChildItem $tempDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum\n        $tempSizeMB = [math]::Round($tempSize / 1MB, 2)\n        if ($tempSizeMB -gt $maxTempStorageMB) {\n            throw \"Temp storage limit exceeded: ${tempSizeMB}MB (max: ${maxTempStorageMB}MB)\"\n        }\n        return $tempSizeMB\n    }\n    \n    # Check for LegacyAppX conflict (same as detection)\n    $legacyAppXConflict = $false\n    try {\n        $legacyAppXPaths = @(\n            \"HKLM:\\SOFTWARE\\Classes\\AppX*\\LegacyAppX\",\n            \"HKLM:\\SOFTWARE\\WOW6432Node\\AppX*\\LegacyAppX\"\n        )\n        \n        foreach ($path in $legacyAppXPaths) {\n            if (Test-Path $path) {\n                $legacyAppXConflict = $true\n                break\n            }\n        }\n        \n        $legacyProcesses = Get-Process -Name \"*LegacyAppX*\" -ErrorAction SilentlyContinue\n        if ($legacyProcesses) {\n            $legacyAppXConflict = $true\n        }\n    } catch {\n        Write-IntuneLog \"LegacyAppX conflict check error: $($_.Exception.Message)\"\n    }\n    \n    # Create System Restore point only if conflict detected\n    if ($legacyAppXConflict) {\n        Write-IntuneLog \"LegacyAppX conflict detected - creating System Restore point\"\n        try {\n            Checkpoint-Computer -Description \"Intune Chrome Update - LegacyAppX Conflict\" -RestorePointType \"MODIFY_SETTINGS\"\n            $restorePointCreated = $true\n            Write-IntuneLog \"System Restore point created successfully\"\n        } catch {\n            Write-IntuneLog \"Failed to create System Restore point: $($_.Exception.Message)\"\n            # Continue with remediation as restore point is not critical\n        }\n    }\n    \n    # Check current bandwidth usage from previous Chrome updates\n    $bandwidthLogPath = \"$env:ProgramData\\IntuneCompliance\\ChromeBandwidth.log\"\n    if (Test-Path $bandwidthLogPath) {\n        $previousBandwidth = Get-Content $bandwidthLogPath | ForEach-Object { [double]$_ } | Measure-Object -Sum\n        $bandwidthUsed = $previousBandwidth.Sum\n    }\n    \n    # Estimate download size (Chrome installer is typically ~80MB)\n    $estimatedDownloadMB = 85\n    $estimatedDownloadGB = $estimatedDownloadMB / 1024\n    \n    # Check if bandwidth limit would be exceeded\n    if (($bandwidthUsed + $estimatedDownloadGB) -gt $maxBandwidthGB) {\n        $totalProjected = $bandwidthUsed + $estimatedDownloadGB\n        Write-IntuneLog \"Bandwidth limit would be exceeded: ${totalProjected}GB (max: ${maxBandwidthGB}GB)\"\n        Complete-Remediation -Success $false -Message \"Bandwidth limit exceeded - aborting upgrade\"\n        return\n    }\n    \n    # Verify TLS 1.2 is enabled\n    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12\n    \n    # Download Chrome installer with progress tracking\n    Write-IntuneLog \"Starting Chrome download with TLS 1.2\"\n    $downloadUrl = \"https://dl.google.com/chrome/install/latest/chrome_installer.exe\"\n    \n    try {\n        $webClient = New-Object System.Net.WebClient\n        $webClient.DownloadFile($downloadUrl, $installerPath)\n        \n        # Calculate actual bandwidth used\n        $downloadedSize = (Get-Item $installerPath).Length\n        $downloadedSizeGB = $downloadedSize / 1GB\n        $bandwidthUsed += $downloadedSizeGB\n        \n        # Update bandwidth log\n        $bandwidthUsed | Out-File -FilePath $bandwidthLogPath -Encoding UTF8\n        \n        # Check temp storage limit\n        Test-TempStorageLimit\n        \n        Write-IntuneLog \"Download completed: $([math]::Round($downloadedSizeMB, 2))MB\"\n        \n    } catch {\n        Write-IntuneLog \"Download failed: $($_.Exception.Message)\"\n        Complete-Remediation -Success $false -Message \"Failed to download Chrome installer\"\n        return\n    }\n    \n    # Verify installer integrity\n    if (-not (Test-Path $installerPath)) {\n        Write-IntuneLog \"Installer file not found after download\"\n        Complete-Remediation -Success $false -Message \"Installer file missing\"\n        return\n    }\n    \n    # Silent installation\n    Write-IntuneLog \"Starting silent Chrome installation\"\n    try {\n        $installProcess = Start-Process -FilePath $installerPath -Args \"/silent /install\" -Wait -PassThru\n        \n        if ($installProcess.ExitCode -eq 0) {\n            Write-IntuneLog \"Chrome installation completed successfully\"\n        } else {\n            Write-IntuneLog \"Chrome installation failed with exit code: $($installProcess.ExitCode)\"\n            Complete-Remediation -Success $false -Message \"Installation failed with exit code $($installProcess.ExitCode)\"\n            return\n        }\n    } catch {\n        Write-IntuneLog \"Installation process error: $($_.Exception.Message)\"\n        Complete-Remediation -Success $false -Message \"Installation process failed\"\n        return\n    }\n    \n    # Verify installation\n    try {\n        $chromePath = (Get-ItemProperty \"HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe\" -ErrorAction Stop).'(Default)'\n        if (Test-Path $chromePath) {\n            $installedVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($chromePath).FileVersion\n            Write-IntuneLog \"Chrome installed successfully: Version $installedVersion\"\n        } else {\n            Write-IntuneLog \"Chrome installation verification failed\"\n            Complete-Remediation -Success $false -Message \"Installation verification failed\"\n            return\n        }\n    } catch {\n        Write-IntuneLog \"Chrome verification error: $($_.Exception.Message)\"\n        Complete-Remediation -Success $false -Message \"Installation verification failed\"\n        return\n    }\n    \n    # Cleanup installer\n    try {\n        Remove-Item $installerPath -Force -ErrorAction SilentlyContinue\n        Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue\n        Write-IntuneLog \"Temporary files cleaned up\"\n    } catch {\n        Write-IntuneLog \"Cleanup warning: $($_.Exception.Message)\"\n    }\n    \n    # Write to regulator CSV report\n    $csvData = @{\n        Timestamp = (Get-Date).ToString(\"yyyy-MM-dd HH:mm:ss\")\n        DeviceName = $env:COMPUTERNAME\n        UserName = $env:USERNAME\n        Action = \"Chrome Upgrade\"\n        Version = $installedVersion\n        BandwidthUsedGB = [math]::Round($downloadedSizeGB, 3)\n        RestorePointCreated = $restorePointCreated\n        LegacyAppXConflict = $legacyAppXConflict\n        Status = \"SUCCESS\"\n    }\n    \n    # Create CSV if it doesn't exist\n    if (-not (Test-Path $csvReportPath)) {\n        \"Timestamp,DeviceName,UserName,Action,Version,BandwidthUsedGB,RestorePointCreated,LegacyAppXConflict,Status\" | Out-File -FilePath $csvReportPath -Encoding UTF8\n    }\n    \n    # Append CSV entry\n    $csvLine = \"$($csvData.Timestamp),$($csvData.DeviceName),$($csvData.UserName),$($csvData.Action),$($csvData.Version),$($csvData.BandwidthUsedGB),$($csvData.RestorePointCreated),$($csvData.LegacyAppXConflict),$($csvData.Status)\"\n    $csvLine | Out-File -FilePath $csvReportPath -Encoding UTF8 -Append\n    \n    Write-IntuneLog \"Regulator CSV report updated successfully\"\n    \n    # Check execution time\n    $elapsed = (Get-Date) - $startTime\n    if ($elapsed -gt $maxExecutionTime) {\n        Write-IntuneLog \"Remediation script exceeded time limit: $($elapsed.TotalSeconds)s\"\n        Complete-Remediation -Success $false -Message \"Remediation timeout - partial completion\"\n        return\n    }\n    \n    # Final success\n    Write-IntuneLog \"Chrome remediation completed successfully\"\n    Complete-Remediation -Success $true -Message \"Chrome upgraded to version $installedVersion\"\n    \n} catch {\n    Write-IntuneLog \"Remediation script error: $($_.Exception.Message)\"\n    Complete-Remediation -Success $false -Message \"Error during remediation: $($_.Exception.Message)\"\n}",
+        "output_dir": "IntuneChromeComplianceScripts",
+        "timeout": "300"
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('C')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_C" value="C" onchange="saveChoice('C')">
+                <label for="choice_C" class="candidate-label">[C]</label>
+                <span class="model-name">(gpt-4.1-mini-20251225_020845)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "powershell-exec-server-generate_intune_script_pair",
+      "arguments": {
+        "description": "Ensure Google Chrome version 120.0.0.0 or newer is installed on Windows 10 workstations, check for conflict with LegacyAppX, report compliance status to Intune and SIEM in JSON, respect 90-second execution limit, and handle remediation with bandwidth and logging constraints.",
+        "detection_logic": "try {\n    $startTime = Get-Date\n    $maxExecutionSeconds = 90\n\n    # Check Chrome version\n    $chromePath = (Get-ItemProperty \"HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe\" -ErrorAction Stop).'(Default)'\n    $chromeVersion = (Get-Item $chromePath).VersionInfo.FileVersion\n    $versionCompliant = [version]$chromeVersion -ge [version]\"120.0.0.0\"\n\n    # Check for LegacyAppX conflict\n    $legacyAppXInstalled = Get-Process -Name \"LegacyAppX\" -ErrorAction SilentlyContinue | Where-Object { $_ } | Measure-Object | Select-Object -ExpandProperty Count\n    $conflict = $legacyAppXInstalled -gt 0\n\n    # Prepare JSON payload for Intune and SIEM\n    $payload = [PSCustomObject]@{\n        Timestamp = (Get-Date).ToString(\"o\")\n        ChromeVersion = $chromeVersion\n        VersionCompliant = $versionCompliant\n        LegacyAppXConflict = $conflict\n        ComplianceStatus = if ($versionCompliant -and -not $conflict) { \"Compliant\" } else { \"NonCompliant\" }\n    } | ConvertTo-Json -Depth 3\n\n    # Output JSON payload for SIEM ingestion\n    Write-Output $payload\n\n    # Set exit code for Intune\n    if ($versionCompliant -and -not $conflict) {\n        Complete-Detection -Compliant $true -Message \"Chrome version $chromeVersion is compliant, no LegacyAppX conflict.\"\n    } else {\n        Complete-Detection -Compliant $false -Message \"Chrome version $chromeVersion is not compliant or LegacyAppX conflict detected.\"\n    }\n} catch {\n    Complete-Detection -Compliant $false -Message \"Error during detection: $($_.Exception.Message)\"\n}",
+        "remediation_logic": "try {\n    $maxBandwidthGB = 150\n    $tempStorageLimitMB = 50\n    $installerUrl = \"https://dl.google.com/chrome/install/latest/chrome_installer.exe\"\n    $installerPath = \"$env:TEMP\\chrome_installer.exe\"\n    $bandwidthUsedBytes = 0\n\n    # Check LegacyAppX conflict\n    $legacyAppXRunning = Get-Process -Name \"LegacyAppX\" -ErrorAction SilentlyContinue | Where-Object { $_ } | Measure-Object | Select-Object -ExpandProperty Count\n    $conflict = $legacyAppXRunning -gt 0\n\n    # Create System Restore Point if conflict detected\n    if ($conflict) {\n        Write-IntuneLog \"LegacyAppX conflict detected, creating System Restore Point...\"\n        Checkpoint-Computer -Description \"Pre-ChromeUpgrade_LegacyAppXConflict\" -RestorePointType \"Modify_Settings\" | Out-Null\n    }\n\n    # Download Chrome installer with TLS 1.2 enforced\n    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12\n\n    # Use Invoke-WebRequest with progress and bandwidth tracking\n    $webClient = New-Object System.Net.WebClient\n    $webClient.Proxy.Credentials = [System.Net.CredentialCache]::DefaultCredentials\n\n    $downloadProgress = 0\n    $webClient.DownloadProgressChanged += {\n        param($sender, $e)\n        $downloadProgress = $e.BytesReceived\n        $bandwidthUsedBytes = $downloadProgress\n        $bandwidthUsedGB = $bandwidthUsedBytes / 1GB\n        Write-IntuneLog \"Download progress: $($e.ProgressPercentage)% - Bandwidth used: {0:N2} GB\" -f $bandwidthUsedGB\n\n        if ($bandwidthUsedGB -gt $maxBandwidthGB) {\n            Write-IntuneLog \"Bandwidth limit exceeded ($bandwidthUsedGB GB), aborting download.\"\n            $webClient.CancelAsync()\n        }\n    }\n\n    $downloadCompleted = $false\n    $webClient.DownloadFileCompleted += {\n        $downloadCompleted = $true\n    }\n\n    $webClient.DownloadFileAsync([Uri]$installerUrl, $installerPath)\n\n    $waitTime = 0\n    while (-not $downloadCompleted -and $waitTime -lt 600) { Start-Sleep -Seconds 1; $waitTime++ }\n\n    if (-not $downloadCompleted) {\n        Write-IntuneLog \"Download did not complete within timeout.\"\n        Complete-Remediation -Success $false -Message \"Download timeout or aborted due to bandwidth limit.\"\n        return\n    }\n\n    # Check installer size limit\n    $installerSizeMB = (Get-Item $installerPath).Length / 1MB\n    if ($installerSizeMB -gt $tempStorageLimitMB) {\n        Write-IntuneLog \"Installer size $installerSizeMB MB exceeds temporary storage limit of $tempStorageLimitMB MB.\"\n        Remove-Item $installerPath -Force\n        Complete-Remediation -Success $false -Message \"Installer size exceeds temporary storage limit.\"\n        return\n    }\n\n    # Silent install Chrome\n    Write-IntuneLog \"Starting silent Chrome installation...\"\n    $process = Start-Process -FilePath $installerPath -ArgumentList \"/silent /install\" -Wait -PassThru\n    Write-IntuneLog \"Chrome installation exit code: $($process.ExitCode)\"\n\n    # Remove installer\n    Remove-Item $installerPath -Force\n\n    # Write to shared CSV for regulator reporting\n    $csvPath = \"\\\\shared\\regulator_reports\\chrome_install_log.csv\"\n    $logEntry = [PSCustomObject]@{\n        Timestamp = (Get-Date).ToString(\"o\")\n        ComputerName = $env:COMPUTERNAME\n        ChromeVersionInstalled = \"120.0.0.0 or newer\"\n        LegacyAppXConflict = $conflict\n        BandwidthUsedGB = [math]::Round($bandwidthUsedBytes / 1GB, 2)\n        InstallationResult = if ($process.ExitCode -eq 0) { \"Success\" } else { \"Failure\" }\n    }\n\n    # Append log entry to CSV\n    if (-Not (Test-Path $csvPath)) {\n        $logEntry | Export-Csv -Path $csvPath -NoTypeInformation\n    } else {\n        $logEntry | Export-Csv -Path $csvPath -NoTypeInformation -Append\n    }\n\n    if ($process.ExitCode -eq 0) {\n        Complete-Remediation -Success $true -Message \"Chrome installation completed successfully.\"\n    } else {\n        Complete-Remediation -Success $false -Message \"Chrome installation failed with exit code $($process.ExitCode).\"\n    }\n} catch {\n    Complete-Remediation -Success $false -Message \"Error during remediation: $($_.Exception.Message)\"\n}",
+        "output_dir": "",
+        "timeout": "120"
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+
+            <div class="confidence-section">
+                <h4>How confident are you in your choice?</h4>
+                <div class="confidence-buttons">
+                    <button class="confidence-btn" onclick="saveConfidence(1)">1 - Very Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(2)">2 - Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(3)">3 - Neutral</button>
+                    <button class="confidence-btn" onclick="saveConfidence(4)">4 - Confident</button>
+                    <button class="confidence-btn" onclick="saveConfidence(5)">5 - Very Confident</button>
+                </div>
+            </div>
+
+            <div class="notes-section">
+                <h4>Notes (optional)</h4>
+                <textarea id="notes" placeholder="Any additional comments..." onchange="saveNotes()"></textarea>
+            </div>
+
+            <div id="save-status" class="save-status unsaved">Not saved yet</div>
+
+            <div class="skip-reason" id="skip-reason-section">
+                <h4>Reason for skipping:</h4>
+                <select id="skip-reason" onchange="saveSkipReason()">
+                    <option value="">-- Select a reason --</option>
+                    <option value="all_equally_wrong">All options are equally wrong/incorrect</option>
+                    <option value="all_equally_similar">All options are equally similar (can't decide)</option>
+                    <option value="ground_truth_unclear">Ground truth is unclear or ambiguous</option>
+                    <option value="too_complex">Too complex to evaluate</option>
+                    <option value="other">Other (add note below)</option>
+                </select>
+            </div>
+
+            <div class="confirm-section">
+                <button class="confirm-btn" id="confirm-btn" onclick="confirmAndNext()">Confirm & Next</button>
+                <button class="skip-btn" id="skip-btn" onclick="toggleSkip()">Skip</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const sampleId = "f454d555-46c7-53d3-8a77-df4d667248c5";
+        const itemId = "rank_0026";
+
+        function getAnnotations() {
+            const saved = localStorage.getItem('best_match_annotations');
+            return saved ? JSON.parse(saved) : {};
+        }
+
+        function saveAnnotations(annotations) {
+            localStorage.setItem('best_match_annotations', JSON.stringify(annotations));
+        }
+
+        function selectCandidate(label) {
+            document.getElementById('choice_' + label).checked = true;
+            saveChoice(label);
+        }
+
+        function saveChoice(label) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].choice = label;
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveConfidence(level) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].confidence = level;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveNotes() {
+            const notes = document.getElementById('notes').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].notes = notes;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function toggleSkip() {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+
+            if (annotations[itemId].skipped) {
+                // Un-skip
+                annotations[itemId].skipped = false;
+                annotations[itemId].skipReason = null;
+            } else {
+                // Skip - clear any choice
+                annotations[itemId].skipped = true;
+                annotations[itemId].choice = null;
+                annotations[itemId].confirmed = false;
+            }
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveSkipReason() {
+            const reason = document.getElementById('skip-reason').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].skipReason = reason;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function skipAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.skipReason) {
+                alert('Please select a reason for skipping.');
+                return;
+            }
+
+            // Mark as confirmed skip
+            ann.skipped = true;
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Navigate to next
+            setTimeout(() => {
+                window.location.href = 'rank_0027.html';
+            }, 300);
+        }
+
+        function updateUI() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // Update skip state
+            const skipBtn = document.getElementById('skip-btn');
+            const skipReasonSection = document.getElementById('skip-reason-section');
+            const confirmBtn = document.getElementById('confirm-btn');
+
+            if (ann.skipped) {
+                skipBtn.textContent = 'Undo Skip';
+                skipBtn.classList.add('skipped');
+                skipReasonSection.classList.add('visible');
+                confirmBtn.textContent = 'Confirm Skip & Next';
+                confirmBtn.onclick = skipAndNext;
+
+                // Disable candidate selection when skipped
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '0.5';
+                    el.style.pointerEvents = 'none';
+                });
+            } else {
+                skipBtn.textContent = 'Skip';
+                skipBtn.classList.remove('skipped');
+                skipReasonSection.classList.remove('visible');
+                confirmBtn.textContent = 'Confirm & Next';
+                confirmBtn.onclick = confirmAndNext;
+
+                // Enable candidate selection
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '1';
+                    el.style.pointerEvents = 'auto';
+                });
+            }
+
+            // Update skip reason dropdown
+            if (ann.skipReason) {
+                document.getElementById('skip-reason').value = ann.skipReason;
+            }
+
+            // Update candidate selection
+            document.querySelectorAll('.candidate').forEach(el => el.classList.remove('selected'));
+            if (ann.choice) {
+                const radio = document.getElementById('choice_' + ann.choice);
+                if (radio) {
+                    radio.checked = true;
+                    radio.closest('.candidate').classList.add('selected');
+                }
+            }
+
+            // Update confidence buttons
+            document.querySelectorAll('.confidence-btn').forEach((btn, idx) => {
+                btn.classList.toggle('selected', ann.confidence === idx + 1);
+            });
+
+            // Update notes
+            if (ann.notes) {
+                document.getElementById('notes').value = ann.notes;
+            }
+
+            // Update save status
+            const status = document.getElementById('save-status');
+            if (ann.skipped) {
+                status.textContent = 'Marked as SKIP' + (ann.skipReason ? ' - ' + ann.skipReason : '');
+                status.className = 'save-status saved';
+            } else if (ann.choice) {
+                status.textContent = 'Saved: Choice ' + ann.choice + (ann.confidence ? ', Confidence ' + ann.confidence : '');
+                status.className = 'save-status saved';
+            } else {
+                status.textContent = 'Not saved yet - please select a response or skip';
+                status.className = 'save-status unsaved';
+            }
+        }
+
+        function confirmBeforeNav(event) {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // If a choice is made, confirm it before navigating
+            if (ann.choice && !ann.confirmed) {
+                ann.confirmed = true;
+                ann.confirmedAt = new Date().toISOString();
+                annotations[itemId] = ann;
+                saveAnnotations(annotations);
+            }
+            // Allow navigation to proceed
+        }
+
+        function confirmAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.choice) {
+                alert('Please select a response before confirming.');
+                return;
+            }
+
+            // Mark as confirmed
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Update button state
+            const btn = document.getElementById('confirm-btn');
+            btn.textContent = 'Confirmed!';
+            btn.classList.add('confirmed');
+
+            // Navigate to next after brief delay
+            setTimeout(() => {
+                window.location.href = 'rank_0027.html';
+            }, 500);
+        }
+
+        // Load saved state on page load
+        window.onload = function() {
+            updateUI();
+            // Update confirm button if already confirmed
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+            if (ann.confirmed) {
+                const btn = document.getElementById('confirm-btn');
+                btn.textContent = 'Confirmed';
+                btn.classList.add('confirmed');
+            }
+        };
+    </script>
+</body>
+</html>

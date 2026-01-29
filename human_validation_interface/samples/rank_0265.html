@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sample 259 / 343</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            line-height: 1.5;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header h2 { margin: 0 0 10px 0; color: #333; }
+        .progress { color: #666; }
+        .nav-buttons { margin-top: 15px; }
+        .nav-buttons a {
+            display: inline-block;
+            padding: 8px 16px;
+            margin-right: 10px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .nav-buttons a:hover { background: #0056b3; }
+        .nav-buttons a.disabled {
+            background: #ccc;
+            pointer-events: none;
+        }
+
+        .task-description {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2196f3;
+        }
+        .task-description h3 { margin: 0 0 10px 0; color: #1565c0; }
+
+        .ground-truth {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #4caf50;
+        }
+        .ground-truth h3 { margin: 0 0 15px 0; color: #2e7d32; }
+
+        .candidates-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .candidates-section h3 { margin: 0 0 15px 0; color: #333; }
+
+        .candidate {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .candidate:hover { background: #f0f0f0; border-color: #ddd; }
+        .candidate.selected {
+            background: #e8f5e9;
+            border-color: #4caf50;
+        }
+        .candidate-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .candidate-label {
+            font-size: 18px;
+            font-weight: bold;
+            margin-left: 10px;
+            color: #333;
+        }
+        .model-name {
+            margin-left: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 13px;
+            margin: 0;
+        }
+        .ground-truth pre {
+            background: #1b5e20;
+            color: #c5e1a5;
+        }
+        .response-json { background: #37474f; }
+
+        .confidence-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff3e0;
+            border-radius: 8px;
+        }
+        .confidence-section h4 { margin: 0 0 10px 0; }
+        .confidence-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .confidence-btn {
+            padding: 8px 16px;
+            border: 1px solid #ccc;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .confidence-btn:hover { background: #f5f5f5; }
+        .confidence-btn.selected {
+            background: #ff9800;
+            color: white;
+            border-color: #ff9800;
+        }
+
+        .notes-section {
+            margin-top: 15px;
+        }
+        .notes-section textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            min-height: 60px;
+            font-family: inherit;
+        }
+
+        .save-status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .save-status.saved { background: #e8f5e9; color: #2e7d32; }
+        .save-status.unsaved { background: #ffebee; color: #c62828; }
+
+        .confirm-section {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .confirm-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .confirm-btn:hover { background: #388e3c; transform: scale(1.02); }
+        .confirm-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .confirm-btn.confirmed {
+            background: #2196f3;
+        }
+        .skip-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #9e9e9e;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 20px;
+        }
+        .skip-btn:hover { background: #757575; }
+        .skip-btn.skipped {
+            background: #ff9800;
+        }
+        .skip-reason {
+            margin-top: 15px;
+            display: none;
+        }
+        .skip-reason.visible {
+            display: block;
+        }
+        .skip-reason select {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 100%;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Sample 259 of 343</h2>
+            <div class="progress">ID: e718da06-3cfb-5059-bf37-5474102087e7</div>
+            <div class="nav-buttons">
+                <a href='rank_0257.html'>Previous</a>
+                <a href="../index.html">Back to List</a>
+                <a href='rank_0259.html' onclick='confirmBeforeNav(event)'>Next</a>
+            </div>
+        </div>
+
+        <div class="task-description">
+            <h3>Task: Select the Most Similar Response</h3>
+            <p>Compare the responses below to the Ground Truth and select the one that is <strong>MOST SIMILAR</strong>.</p>
+            <p>Consider: same tool names, same parameters, same structure, functional equivalence.</p>
+        </div>
+
+        <div class="ground-truth">
+            <h3>Ground Truth (Reference)</h3>
+            <pre>{
+  "tool_calls": [
+    {
+      "name": "clear-thought-server-decisionframework",
+      "arguments": {
+        "decisionStatement": "Choose the optimal architectural approach for a real-time analytics data processing service with 10,000+ concurrent users, high availability, fault tolerance, horizontal scaling, batch/streaming processing, data consistency, cost minimization, 8-week MVP timeline, and startup budget constraints",
+        "analysisType": "weighted-criteria",
+        "stage": "problem-definition",
+        "decisionId": "startup-analytics-architecture-2024",
+        "iteration": 0,
+        "nextStageNeeded": true,
+        "stakeholders": [
+          "Technical team",
+          "Business stakeholders",
+          "End users",
+          "Budget holders",
+          "Future investors"
+        ],
+        "constraints": [
+          "8-week MVP timeline",
+          "Startup budget constraints",
+          "10,000+ concurrent users capacity",
+          "High availability requirements",
+          "Horizontal scaling capability",
+          "Data consistency needs",
+          "Both batch and streaming support",
+          "Fault tolerance required"
+        ],
+        "timeHorizon": "8-week MVP with 12-month scaling consideration",
+        "riskTolerance": "risk-neutral",
+        "options": [
+          {
+            "id": "microservices",
+            "name": "Microservices Architecture",
+            "description": "Decompose system into small, independent services with separate databases and scalability"
+          },
+          {
+            "id": "serverless",
+            "name": "Serverless Functions Approach",
+            "description": "Use AWS Lambda, Azure Functions, or GCP Cloud Functions with managed services for automatic scaling"
+          },
+          {
+            "id": "monolithic-caching",
+            "name": "Monolith with Caching Layers",
+            "description": "Single deployable application with strategic caching (Redis, in-memory) and async processing"
+          },
+          {
+            "id": "hybrid-modular",
+            "name": "Hybrid Modular Monolith",
+            "description": "Monolith with well-defined module boundaries to allow future extraction to services"
+          }
+        ],
+        "criteria": [
+          {
+            "id": "time-to-mvp",
+            "name": "Time to MVP (8 weeks)",
+            "description": "Speed of initial development and deployment",
+            "weight": 0.25
+          },
+          {
+            "id": "scalability",
+            "name": "Horizontal Scaling Capability",
+            "description": "Ability to handle 10,000+ concurrent users and future growth",
+            "weight": 0.2
+          },
+          {
+            "id": "cost-efficiency",
+            "name": "Cost for Startup Budget",
+            "description": "Infrastructure and operational costs within startup budget",
+            "weight": 0.2
+          },
+          {
+            "id": "fault-tolerance",
+            "name": "High Availability & Fault Tolerance",
+            "description": "System resilience and uptime requirements",
+            "weight": 0.15
+          },
+          {
+            "id": "data-consistency",
+            "name": "Data Consistency Requirements",
+            "description": "Maintaining consistency across batch and streaming processing",
+            "weight": 0.12
+          },
+          {
+            "id": "future-flexibility",
+            "name": "Future Architecture Flexibility",
+            "description": "Ability to evolve architecture without major rewrites",
+            "weight": 0.08
+          }
+        ]
+      }
+    }
+  ]
+}</pre>
+        </div>
+
+        <div class="candidates-section">
+            <h3>Candidate Responses - Select the Most Similar:</h3>
+            
+        <div class="candidate" onclick="selectCandidate('A')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_A" value="A" onchange="saveChoice('A')">
+                <label for="choice_A" class="candidate-label">[A]</label>
+                <span class="model-name">(minimax.minimax-m2-20251227_100510)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "clear-thought-server-decisionframework",
+      "arguments": {
+        "decisionStatement": "Choose the optimal architecture for a data processing service handling 10,000+ concurrent users with real-time analytics, balancing MVP speed (8 weeks), startup budget constraints, and future scaling needs",
+        "options": [
+          "Microservices Architecture",
+          "Serverless Functions (FaaS)",
+          "Monolithic with Caching Layers"
+        ],
+        "criteria": [
+          {
+            "name": "Time to Market",
+            "weight": 0.25,
+            "description": "Ability to deliver MVP within 8 weeks"
+          },
+          {
+            "name": "Cost Efficiency",
+            "weight": 0.2,
+            "description": "Infrastructure and operational costs for startup budget"
+          },
+          {
+            "name": "Scalability",
+            "weight": 0.2,
+            "description": "Ability to handle 10,000+ concurrent users and scale horizontally"
+          },
+          {
+            "name": "Technical Complexity",
+            "weight": 0.15,
+            "description": "Implementation and maintenance complexity"
+          },
+          {
+            "name": "Fault Tolerance",
+            "weight": 0.1,
+            "description": "System resilience and high availability"
+          },
+          {
+            "name": "Data Consistency",
+            "weight": 0.1,
+            "description": "Maintaining data consistency across batch/streaming"
+          }
+        ],
+        "analysisType": "Multi-criteria Decision Analysis",
+        "stage": "Initial Evaluation",
+        "stakeholders": [
+          "Engineering Team",
+          "Product Team",
+          "Business Leadership",
+          "DevOps Team"
+        ],
+        "constraints": [
+          "8-week MVP deadline",
+          "Startup budget limitations",
+          "10,000+ concurrent user requirement",
+          "Real-time processing capability",
+          "Both batch and streaming data support"
+        ],
+        "timeHorizon": "6-12 months (MVP to initial scale-up)",
+        "riskTolerance": "Medium - willing to accept some technical debt for speed, but need solid foundation for scaling",
+        "possibleOutcomes": [
+          "Successful MVP launch with clear scaling path",
+          "Delayed launch due to over-engineering",
+          "Cost overruns from premature optimization",
+          "Technical debt limiting future growth"
+        ],
+        "recommendation": "",
+        "rationale": "",
+        "decisionId": "architecture_decision_001",
+        "iteration": 1,
+        "nextStageNeeded": true
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('B')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_B" value="B" onchange="saveChoice('B')">
+                <label for="choice_B" class="candidate-label">[B]</label>
+                <span class="model-name">(claude-sonnet-4)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "clear-thought-server-decisionframework",
+      "arguments": {
+        "decisionStatement": "Choose the optimal architecture for a real-time analytics data processing service that needs to handle 10,000+ concurrent users, with requirements for high availability, fault tolerance, horizontal scaling, batch and streaming data processing, data consistency, cost optimization, and rapid MVP delivery within 8 weeks",
+        "options": [
+          {
+            "name": "Microservices Architecture",
+            "description": "Decompose the system into independent services for data ingestion, processing, storage, and analytics",
+            "pros": [
+              "Independent scaling",
+              "Technology diversity",
+              "Fault isolation",
+              "Team autonomy"
+            ],
+            "cons": [
+              "Complex deployment",
+              "Network overhead",
+              "Distributed system challenges",
+              "Higher initial development cost"
+            ]
+          },
+          {
+            "name": "Serverless Functions",
+            "description": "Use cloud functions for data processing with managed services for storage and queuing",
+            "pros": [
+              "Auto-scaling",
+              "Pay-per-use",
+              "No infrastructure management",
+              "Fast development"
+            ],
+            "cons": [
+              "Vendor lock-in",
+              "Cold start latency",
+              "Limited execution time",
+              "Debugging complexity"
+            ]
+          },
+          {
+            "name": "Monolithic with Caching",
+            "description": "Single application with strategic caching layers and horizontal scaling",
+            "pros": [
+              "Simple deployment",
+              "Easier debugging",
+              "Lower network overhead",
+              "Faster initial development"
+            ],
+            "cons": [
+              "Scaling limitations",
+              "Technology lock-in",
+              "Single point of failure",
+              "Harder to maintain at scale"
+            ]
+          },
+          {
+            "name": "Hybrid Approach",
+            "description": "Start with monolith for core logic, use serverless for data processing, migrate to microservices gradually",
+            "pros": [
+              "Balanced complexity",
+              "Evolutionary architecture",
+              "Risk mitigation",
+              "Cost optimization"
+            ],
+            "cons": [
+              "Integration complexity",
+              "Multiple deployment models",
+              "Requires careful planning"
+            ]
+          }
+        ],
+        "criteria": [
+          {
+            "name": "Time to Market",
+            "weight": 0.25,
+            "description": "Ability to deliver MVP within 8 weeks"
+          },
+          {
+            "name": "Scalability",
+            "weight": 0.2,
+            "description": "Handle 10,000+ concurrent users and horizontal scaling"
+          },
+          {
+            "name": "Cost Efficiency",
+            "weight": 0.2,
+            "description": "Minimize infrastructure costs for startup budget"
+          },
+          {
+            "name": "Fault Tolerance",
+            "weight": 0.15,
+            "description": "High availability and system resilience"
+          },
+          {
+            "name": "Future Flexibility",
+            "weight": 0.1,
+            "description": "Ability to evolve architecture as requirements change"
+          },
+          {
+            "name": "Development Complexity",
+            "weight": 0.1,
+            "description": "Ease of development and maintenance"
+          }
+        ],
+        "analysisType": "Multi-Criteria Decision Analysis",
+        "stage": "Option Evaluation",
+        "stakeholders": [
+          "Development Team",
+          "Product Management",
+          "Operations",
+          "Finance",
+          "End Users"
+        ],
+        "constraints": [
+          "8-week MVP deadline",
+          "Startup budget limitations",
+          "10,000+ concurrent users",
+          "Real-time processing requirements",
+          "Data consistency needs"
+        ],
+        "timeHorizon": "Short-term (MVP) with long-term scaling considerations",
+        "riskTolerance": "Moderate - willing to accept some technical debt for speed but need scalability",
+        "possibleOutcomes": [
+          "Successful MVP launch with clear scaling path",
+          "Technical debt requiring major refactoring",
+          "Performance bottlenecks at scale",
+          "Cost overruns",
+          "Delayed launch due to complexity"
+        ],
+        "recommendation": "Based on the criteria weights and constraints, I recommend a Hybrid Approach starting with a strategic monolith for core business logic, serverless functions for data processing pipelines, and managed cloud services for storage and queuing. This provides the fastest path to MVP while maintaining future flexibility.",
+        "rationale": "The hybrid approach balances the need for rapid MVP delivery (8 weeks) with future scalability requirements. It leverages serverless for the computationally intensive data processing (which naturally handles the 10,000+ concurrent users through auto-scaling) while keeping core business logic in a manageable monolith. This approach minimizes initial complexity and costs while providing clear migration paths to full microservices as the system grows.",
+        "decisionId": "analytics-architecture-2024",
+        "iteration": 1,
+        "nextStageNeeded": true
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('C')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_C" value="C" onchange="saveChoice('C')">
+                <label for="choice_C" class="candidate-label">[C]</label>
+                <span class="model-name">(qwen3-32b)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "clear-thought-server-sequentialthinking",
+      "arguments": {
+        "thought": "To determine the best architectural approach for the data processing service, I need to consider the requirements for high availability, fault tolerance, scalability, and the ability to handle both batch and streaming data. I should also evaluate the startup budget constraints and the need to launch an MVP in 8 weeks. I'll start by analyzing the pros and cons of each architectural approach (microservices, serverless functions, and monolithic with caching layers) in the context of these requirements.",
+        "thoughtNumber": 1,
+        "totalThoughts": 5,
+        "nextThoughtNeeded": true,
+        "isRevision": false,
+        "revisesThought": 0,
+        "branchFromThought": 0,
+        "branchId": "initial_analysis",
+        "needsMoreThoughts": true
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('D')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_D" value="D" onchange="saveChoice('D')">
+                <label for="choice_D" class="candidate-label">[D]</label>
+                <span class="model-name">(mimo-v2-flash)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "clear-thought-server-decisionframework",
+      "arguments": {
+        "decisionStatement": "Choose the optimal architectural approach for a data processing service handling 10,000+ concurrent users with real-time analytics, batch processing, high availability, fault tolerance, and horizontal scaling capabilities, while meeting startup budget constraints and 8-week MVP timeline",
+        "options": [
+          {
+            "name": "Microservices Architecture",
+            "description": "Decompose system into independent services (API gateway, data ingestion, processing, storage, analytics) with separate databases and deployment units"
+          },
+          {
+            "name": "Serverless Functions",
+            "description": "Use AWS Lambda/Google Cloud Functions with managed services (Kinesis, DynamoDB, Pub/Sub) for auto-scaling and pay-per-use model"
+          },
+          {
+            "name": "Monolithic with Caching",
+            "description": "Single deployable application with Redis/Memcached caching, message queues for async processing, and horizontal scaling via load balancers"
+          },
+          {
+            "name": "Hybrid Approach",
+            "description": "Start with modular monolith that can evolve to microservices, using serverless for specific workloads (image processing, ML inference)"
+          }
+        ],
+        "criteria": [
+          "Time to MVP (8 weeks)",
+          "Cost efficiency (startup budget)",
+          "Scalability to 10K+ concurrent users",
+          "Fault tolerance & high availability",
+          "Data consistency requirements",
+          "Team expertise & learning curve",
+          "Operational complexity",
+          "Future scaling flexibility",
+          "Infrastructure costs (monthly)",
+          "Development velocity"
+        ],
+        "analysisType": "Multi-criteria Decision Analysis",
+        "stage": "initial",
+        "stakeholders": [
+          "Technical team",
+          "Business stakeholders",
+          "End users",
+          "Investors"
+        ],
+        "constraints": [
+          "8-week MVP timeline",
+          "Startup budget constraints",
+          "Must handle 10K+ concurrent users",
+          "Need horizontal scaling capability",
+          "Real-time + batch processing",
+          "Data consistency requirements",
+          "High availability & fault tolerance"
+        ],
+        "timeHorizon": "8 weeks (MVP) + 12-18 months (growth phase)",
+        "riskTolerance": "Moderate - willing to accept some technical debt for speed, but not architectural dead-ends",
+        "possibleOutcomes": [
+          {
+            "outcome": "Microservices chosen",
+            "probability": 0.25,
+            "impact": "High complexity but maximum scalability"
+          },
+          {
+            "outcome": "Serverless chosen",
+            "probability": 0.3,
+            "impact": "Fastest MVP, cost-effective at scale, but vendor lock-in risk"
+          },
+          {
+            "outcome": "Monolith chosen",
+            "probability": 0.2,
+            "impact": "Fastest development, lowest initial cost, but scaling challenges"
+          },
+          {
+            "outcome": "Hybrid chosen",
+            "probability": 0.25,
+            "impact": "Balanced approach, evolution-friendly, moderate complexity"
+          }
+        ],
+        "recommendation": "",
+        "rationale": "",
+        "decisionId": "arch-decision-001",
+        "iteration": 1,
+        "nextStageNeeded": true
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+
+            <div class="confidence-section">
+                <h4>How confident are you in your choice?</h4>
+                <div class="confidence-buttons">
+                    <button class="confidence-btn" onclick="saveConfidence(1)">1 - Very Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(2)">2 - Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(3)">3 - Neutral</button>
+                    <button class="confidence-btn" onclick="saveConfidence(4)">4 - Confident</button>
+                    <button class="confidence-btn" onclick="saveConfidence(5)">5 - Very Confident</button>
+                </div>
+            </div>
+
+            <div class="notes-section">
+                <h4>Notes (optional)</h4>
+                <textarea id="notes" placeholder="Any additional comments..." onchange="saveNotes()"></textarea>
+            </div>
+
+            <div id="save-status" class="save-status unsaved">Not saved yet</div>
+
+            <div class="skip-reason" id="skip-reason-section">
+                <h4>Reason for skipping:</h4>
+                <select id="skip-reason" onchange="saveSkipReason()">
+                    <option value="">-- Select a reason --</option>
+                    <option value="all_equally_wrong">All options are equally wrong/incorrect</option>
+                    <option value="all_equally_similar">All options are equally similar (can't decide)</option>
+                    <option value="ground_truth_unclear">Ground truth is unclear or ambiguous</option>
+                    <option value="too_complex">Too complex to evaluate</option>
+                    <option value="other">Other (add note below)</option>
+                </select>
+            </div>
+
+            <div class="confirm-section">
+                <button class="confirm-btn" id="confirm-btn" onclick="confirmAndNext()">Confirm & Next</button>
+                <button class="skip-btn" id="skip-btn" onclick="toggleSkip()">Skip</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const sampleId = "e718da06-3cfb-5059-bf37-5474102087e7";
+        const itemId = "rank_0258";
+
+        function getAnnotations() {
+            const saved = localStorage.getItem('best_match_annotations');
+            return saved ? JSON.parse(saved) : {};
+        }
+
+        function saveAnnotations(annotations) {
+            localStorage.setItem('best_match_annotations', JSON.stringify(annotations));
+        }
+
+        function selectCandidate(label) {
+            document.getElementById('choice_' + label).checked = true;
+            saveChoice(label);
+        }
+
+        function saveChoice(label) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].choice = label;
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveConfidence(level) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].confidence = level;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveNotes() {
+            const notes = document.getElementById('notes').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].notes = notes;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function toggleSkip() {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+
+            if (annotations[itemId].skipped) {
+                // Un-skip
+                annotations[itemId].skipped = false;
+                annotations[itemId].skipReason = null;
+            } else {
+                // Skip - clear any choice
+                annotations[itemId].skipped = true;
+                annotations[itemId].choice = null;
+                annotations[itemId].confirmed = false;
+            }
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveSkipReason() {
+            const reason = document.getElementById('skip-reason').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].skipReason = reason;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function skipAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.skipReason) {
+                alert('Please select a reason for skipping.');
+                return;
+            }
+
+            // Mark as confirmed skip
+            ann.skipped = true;
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Navigate to next
+            setTimeout(() => {
+                window.location.href = 'rank_0259.html';
+            }, 300);
+        }
+
+        function updateUI() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // Update skip state
+            const skipBtn = document.getElementById('skip-btn');
+            const skipReasonSection = document.getElementById('skip-reason-section');
+            const confirmBtn = document.getElementById('confirm-btn');
+
+            if (ann.skipped) {
+                skipBtn.textContent = 'Undo Skip';
+                skipBtn.classList.add('skipped');
+                skipReasonSection.classList.add('visible');
+                confirmBtn.textContent = 'Confirm Skip & Next';
+                confirmBtn.onclick = skipAndNext;
+
+                // Disable candidate selection when skipped
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '0.5';
+                    el.style.pointerEvents = 'none';
+                });
+            } else {
+                skipBtn.textContent = 'Skip';
+                skipBtn.classList.remove('skipped');
+                skipReasonSection.classList.remove('visible');
+                confirmBtn.textContent = 'Confirm & Next';
+                confirmBtn.onclick = confirmAndNext;
+
+                // Enable candidate selection
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '1';
+                    el.style.pointerEvents = 'auto';
+                });
+            }
+
+            // Update skip reason dropdown
+            if (ann.skipReason) {
+                document.getElementById('skip-reason').value = ann.skipReason;
+            }
+
+            // Update candidate selection
+            document.querySelectorAll('.candidate').forEach(el => el.classList.remove('selected'));
+            if (ann.choice) {
+                const radio = document.getElementById('choice_' + ann.choice);
+                if (radio) {
+                    radio.checked = true;
+                    radio.closest('.candidate').classList.add('selected');
+                }
+            }
+
+            // Update confidence buttons
+            document.querySelectorAll('.confidence-btn').forEach((btn, idx) => {
+                btn.classList.toggle('selected', ann.confidence === idx + 1);
+            });
+
+            // Update notes
+            if (ann.notes) {
+                document.getElementById('notes').value = ann.notes;
+            }
+
+            // Update save status
+            const status = document.getElementById('save-status');
+            if (ann.skipped) {
+                status.textContent = 'Marked as SKIP' + (ann.skipReason ? ' - ' + ann.skipReason : '');
+                status.className = 'save-status saved';
+            } else if (ann.choice) {
+                status.textContent = 'Saved: Choice ' + ann.choice + (ann.confidence ? ', Confidence ' + ann.confidence : '');
+                status.className = 'save-status saved';
+            } else {
+                status.textContent = 'Not saved yet - please select a response or skip';
+                status.className = 'save-status unsaved';
+            }
+        }
+
+        function confirmBeforeNav(event) {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // If a choice is made, confirm it before navigating
+            if (ann.choice && !ann.confirmed) {
+                ann.confirmed = true;
+                ann.confirmedAt = new Date().toISOString();
+                annotations[itemId] = ann;
+                saveAnnotations(annotations);
+            }
+            // Allow navigation to proceed
+        }
+
+        function confirmAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.choice) {
+                alert('Please select a response before confirming.');
+                return;
+            }
+
+            // Mark as confirmed
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Update button state
+            const btn = document.getElementById('confirm-btn');
+            btn.textContent = 'Confirmed!';
+            btn.classList.add('confirmed');
+
+            // Navigate to next after brief delay
+            setTimeout(() => {
+                window.location.href = 'rank_0259.html';
+            }, 500);
+        }
+
+        // Load saved state on page load
+        window.onload = function() {
+            updateUI();
+            // Update confirm button if already confirmed
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+            if (ann.confirmed) {
+                const btn = document.getElementById('confirm-btn');
+                btn.textContent = 'Confirmed';
+                btn.classList.add('confirmed');
+            }
+        };
+    </script>
+</body>
+</html>

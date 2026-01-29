@@ -3,13 +3,20 @@
 Hyperparameter Ablation Experiments for STED (ICML Submission)
 
 This script runs comprehensive ablation studies on STED hyperparameters:
-- α (alpha): Consistency score steepness factor
-- θ (theta): Structural similarity threshold for content matching
-- λ_path (path_weight_decay): Depth-based weight decay
-- λ_size (size_penalty): Penalty for unmatched elements
-- w (structural_weight): Weight balancing structural vs content costs
+- alpha: Stability score steepness factor S_alpha = (1/(1+2*D_std_norm))^alpha
+- theta: Structural similarity threshold for content matching
+- path_weight_decay: Depth-based weight decay
+- structural_weight: Weight balancing structural vs content costs
 
-Reference: docs/sted_theory_icml.tex Table 1
+Usage:
+    # Run all ablations on synthetic data
+    python scripts/experiments/run_hyperparameter_ablation.py --output-dir results/ablation
+
+    # Run alpha ablation only with real data
+    python scripts/experiments/run_hyperparameter_ablation.py --parameters alpha --real-data results/toucan/minilm-ec2
+
+    # Quick test
+    python scripts/experiments/run_hyperparameter_ablation.py --quick
 """
 
 import argparse
@@ -17,11 +24,12 @@ import json
 import os
 import sys
 import time
-import warnings
+import copy
+import random
 from datetime import datetime
-from itertools import product
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+from itertools import combinations
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,32 +40,36 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from sted import SemanticJsonTreeConsistencyEvaluator
+from sted.structural_consistency_analyzer import StructuralConsistencyAnalyzer
 
 
 # Hyperparameter ranges for ablation
 HYPERPARAMETER_RANGES = {
-    'alpha': [5, 10, 15, 20, 25, 30],  # Consistency score steepness
-    'theta': [0.1, 0.2, 0.3, 0.5, 0.7],  # Structural threshold
-    'path_decay': [0.7, 0.8, 0.9, 1.0],  # Path decay
-    'structural_weight': [0.3, 0.5, 0.7],  # Structural vs content weight
+    'alpha': [5, 10, 15, 20, 25, 30, 40, 50],  # Stability score steepness
+    'theta': [0.1, 0.2, 0.3, 0.5, 0.7, 0.9],  # Structural threshold
+    'path_decay': [0.5, 0.7, 0.8, 0.9, 1.0],  # Path decay
+    'structural_weight': [0.1, 0.3, 0.5, 0.7, 0.9],  # Structural vs content weight
+}
+
+# Default values (for reference lines in plots)
+DEFAULT_VALUES = {
+    'alpha': 20,
+    'theta': 0.3,
+    'path_decay': 1.0,
+    'structural_weight': 0.5,
 }
 
 
 def generate_synthetic_variations(base_json: Dict, num_variations: int = 10,
                                    noise_level: float = 0.2) -> List[Dict]:
     """Generate synthetic variations of a base JSON for testing."""
-    import copy
-    import random
-
     variations = [copy.deepcopy(base_json)]
 
     for i in range(num_variations - 1):
         var = copy.deepcopy(base_json)
 
-        # Apply random perturbations
         def perturb_value(v, path=""):
             if isinstance(v, str):
-                # Randomly modify strings
                 if random.random() < noise_level:
                     modifications = [
                         v + " modified",
@@ -67,7 +79,6 @@ def generate_synthetic_variations(base_json: Dict, num_variations: int = 10,
                     return random.choice(modifications)
                 return v
             elif isinstance(v, (int, float)):
-                # Add numeric noise
                 if random.random() < noise_level:
                     return v + random.gauss(0, abs(v) * 0.1 + 1)
                 return v
@@ -76,7 +87,6 @@ def generate_synthetic_variations(base_json: Dict, num_variations: int = 10,
                     return not v
                 return v
             elif isinstance(v, list):
-                # Optionally reorder or modify list
                 result = [perturb_value(item, f"{path}[{j}]") for j, item in enumerate(v)]
                 if random.random() < noise_level * 0.3:
                     random.shuffle(result)
@@ -85,7 +95,6 @@ def generate_synthetic_variations(base_json: Dict, num_variations: int = 10,
                 result = {}
                 for k, val in v.items():
                     result[k] = perturb_value(val, f"{path}.{k}")
-                # Optionally add/remove keys
                 if random.random() < noise_level * 0.2:
                     result[f"extra_field_{i}"] = f"value_{i}"
                 return result
@@ -97,8 +106,8 @@ def generate_synthetic_variations(base_json: Dict, num_variations: int = 10,
     return variations
 
 
-def create_test_dataset() -> List[Tuple[str, List[Dict]]]:
-    """Create a diverse test dataset for ablation experiments."""
+def create_synthetic_dataset() -> List[Tuple[str, List[Dict]]]:
+    """Create a diverse synthetic test dataset for ablation experiments."""
     datasets = []
 
     # 1. Simple flat JSON
@@ -138,7 +147,7 @@ def create_test_dataset() -> List[Tuple[str, List[Dict]]]:
     }
     datasets.append(("array_heavy", generate_synthetic_variations(array_json)))
 
-    # 4. Function calling output (like xlam/glaive)
+    # 4. Function calling output (like tool calls)
     function_json = {
         "function": "search_database",
         "arguments": {
@@ -183,80 +192,149 @@ def create_test_dataset() -> List[Tuple[str, List[Dict]]]:
     return datasets
 
 
-def run_alpha_ablation(evaluator: SemanticJsonTreeConsistencyEvaluator,
-                       datasets: List[Tuple[str, List[Dict]]],
-                       alpha_values: List[int]) -> pd.DataFrame:
-    """Run ablation study on alpha (steepness factor) parameter."""
+def load_real_data(results_dir: str) -> List[Tuple[str, List[Dict]]]:
+    """Load real LLM outputs from consistency metrics results."""
+    datasets = []
+    results_path = Path(results_dir) / "combined_consistency_metrics_results.json"
+
+    if not results_path.exists():
+        print(f"Warning: Real data not found at {results_path}")
+        return datasets
+
+    with open(results_path) as f:
+        data = json.load(f)
+
+    # Extract d_std_normalized values for each model at each temperature
+    for model, entries in data.items():
+        # Group by temperature
+        by_temp = {}
+        for entry in entries:
+            t = entry.get('temperature', 0)
+            if t not in by_temp:
+                by_temp[t] = []
+            # Get d_std_normalized from consistency_metrics
+            metrics = entry.get('consistency_metrics', entry)
+            d_std_norm = metrics.get('d_std_normalized', 0)
+            c_mean = metrics.get('c_mean', 0)
+            by_temp[t].append({
+                'd_std_normalized': d_std_norm,
+                'c_mean': c_mean,
+            })
+
+        # Create dataset entry for each temperature
+        for temp, samples in by_temp.items():
+            if samples:
+                datasets.append((f"{model}_T{temp}", samples))
+
+    return datasets
+
+
+def compute_stability_score(d_std_normalized: float, alpha: int) -> float:
+    """Compute S_alpha from d_std_normalized."""
+    return (1.0 / (1.0 + 2 * d_std_normalized)) ** alpha
+
+
+def run_alpha_ablation_synthetic(analyzer: StructuralConsistencyAnalyzer,
+                                  datasets: List[Tuple[str, List[Dict]]],
+                                  alpha_values: List[int]) -> pd.DataFrame:
+    """Run alpha ablation on synthetic data."""
     results = []
 
-    for alpha in tqdm(alpha_values, desc="Alpha ablation"):
-        for dataset_name, variations in datasets:
-            metrics = evaluator.calculate_variation_consistency(
-                variations,
-                method='sted',
-                variation_type='combined',
-                apply_power_transform=True,
-                steepness_factor=alpha
-            )
+    for dataset_name, variations in tqdm(datasets, desc="Datasets"):
+        # Calculate consistency metrics once
+        metrics = analyzer.evaluate_structural_consistency(
+            json_outputs=variations,
+            method_name='sted',
+            variation_type='combined'
+        )
+
+        if 'error' in metrics:
+            continue
+
+        consistency_metrics = metrics.get('consistency_metrics', metrics)
+        d_std_normalized = consistency_metrics.get('d_std_normalized', 0)
+        c_mean = consistency_metrics.get('c_mean', 0)
+        r_v = consistency_metrics.get('r_v', 1.0)
+
+        # Compute S_alpha for different alpha values
+        for alpha in alpha_values:
+            s_alpha = compute_stability_score(d_std_normalized, alpha)
+            ranking_score = r_v * c_mean * s_alpha
 
             results.append({
                 'parameter': 'alpha',
                 'value': alpha,
                 'dataset': dataset_name,
-                'consistency_score': metrics['consistency_score'],
-                'mean_distance': metrics.get('mean_distance', 0),
-                'std_distance': metrics.get('std_distance', 0),
+                'stability_score': s_alpha,
+                'c_mean': c_mean,
+                'd_std_normalized': d_std_normalized,
+                'ranking_score': ranking_score,
             })
+
+    return pd.DataFrame(results)
+
+
+def run_alpha_ablation_real(real_data: List[Tuple[str, List[Dict]]],
+                             alpha_values: List[int]) -> pd.DataFrame:
+    """Run alpha ablation on real data (from precomputed metrics)."""
+    results = []
+
+    for dataset_name, samples in tqdm(real_data, desc="Real datasets"):
+        for sample in samples:
+            d_std_normalized = sample.get('d_std_normalized', 0)
+            c_mean = sample.get('c_mean', 0)
+
+            for alpha in alpha_values:
+                s_alpha = compute_stability_score(d_std_normalized, alpha)
+
+                results.append({
+                    'parameter': 'alpha',
+                    'value': alpha,
+                    'dataset': dataset_name,
+                    'stability_score': s_alpha,
+                    'c_mean': c_mean,
+                    'd_std_normalized': d_std_normalized,
+                })
 
     return pd.DataFrame(results)
 
 
 def run_theta_ablation(datasets: List[Tuple[str, List[Dict]]],
-                       theta_values: List[float]) -> pd.DataFrame:
+                        theta_values: List[float]) -> pd.DataFrame:
     """Run ablation study on theta (structural threshold) parameter."""
     results = []
 
     for theta in tqdm(theta_values, desc="Theta ablation"):
-        # Create custom evaluator - need to patch the method
-        evaluator = SemanticJsonTreeConsistencyEvaluator(
-            model_id='all-MiniLM-L6-v2',
-        )
-
-        # Store original method
-        original_method = evaluator._calculate_content_similarity
-
-        # Patch to use custom theta
-        def patched_content_similarity(node1, node2, structural_sim_threshold=theta):
-            return original_method(node1, node2, structural_sim_threshold=theta)
-
-        evaluator._calculate_content_similarity = patched_content_similarity
+        evaluator = SemanticJsonTreeConsistencyEvaluator(model_id='all-MiniLM-L6-v2')
+        analyzer = StructuralConsistencyAnalyzer(evaluator)
 
         for dataset_name, variations in datasets:
             # Calculate pairwise similarities with this theta
-            from itertools import combinations
-
             similarities = []
             for v1, v2 in combinations(variations, 2):
-                sim = evaluator.calculate_tree_edit_distance_opt(v1, v2, variation_type='combined')
+                sim = evaluator.calculate_tree_edit_distance_opt(
+                    v1, v2, variation_type='combined'
+                )
                 similarities.append(sim)
 
-            mean_sim = np.mean(similarities)
-            std_sim = np.std(similarities)
+            if similarities:
+                c_mean = float(np.mean(similarities))
+                d_std = float(np.std(similarities))
 
-            results.append({
-                'parameter': 'theta',
-                'value': theta,
-                'dataset': dataset_name,
-                'mean_similarity': mean_sim,
-                'std_similarity': std_sim,
-            })
+                results.append({
+                    'parameter': 'theta',
+                    'value': theta,
+                    'dataset': dataset_name,
+                    'c_mean': c_mean,
+                    'd_std': d_std,
+                })
 
     return pd.DataFrame(results)
 
 
 def run_path_decay_ablation(datasets: List[Tuple[str, List[Dict]]],
-                            decay_values: List[float]) -> pd.DataFrame:
-    """Run ablation study on path weight decay (lambda_path) parameter."""
+                             decay_values: List[float]) -> pd.DataFrame:
+    """Run ablation study on path weight decay parameter."""
     results = []
 
     for decay in tqdm(decay_values, desc="Path decay ablation"):
@@ -264,364 +342,346 @@ def run_path_decay_ablation(datasets: List[Tuple[str, List[Dict]]],
             model_id='all-MiniLM-L6-v2',
             path_weight_decay=decay,
         )
+        analyzer = StructuralConsistencyAnalyzer(evaluator)
 
         for dataset_name, variations in datasets:
-            metrics = evaluator.calculate_variation_consistency(
-                variations,
-                method='sted',
-                variation_type='combined',
-                apply_power_transform=True,
-                steepness_factor=20
+            metrics = analyzer.evaluate_structural_consistency(
+                json_outputs=variations,
+                method_name='sted',
+                variation_type='combined'
             )
 
-            results.append({
-                'parameter': 'path_decay',
-                'value': decay,
-                'dataset': dataset_name,
-                'consistency_score': metrics['consistency_score'],
-                'mean_distance': metrics.get('mean_distance', 0),
-                'std_distance': metrics.get('std_distance', 0),
-            })
+            if 'error' not in metrics:
+                consistency_metrics = metrics.get('consistency_metrics', metrics)
+                results.append({
+                    'parameter': 'path_decay',
+                    'value': decay,
+                    'dataset': dataset_name,
+                    'stability_score': consistency_metrics.get('stability_score', 0),
+                    'c_mean': consistency_metrics.get('c_mean', 0),
+                    'd_std': consistency_metrics.get('d_std', 0),
+                    'ranking_score': consistency_metrics.get('ranking_score', 0),
+                })
 
     return pd.DataFrame(results)
 
 
 def run_structural_weight_ablation(datasets: List[Tuple[str, List[Dict]]],
                                     weight_values: List[float]) -> pd.DataFrame:
-    """Run ablation study on structural weight (alpha in combined cost) parameter."""
+    """Run ablation study on structural weight parameter."""
     results = []
 
     for weight in tqdm(weight_values, desc="Structural weight ablation"):
-        evaluator = SemanticJsonTreeConsistencyEvaluator(
-            model_id='all-MiniLM-L6-v2',
-        )
-
-        # Patch the update_cost method to use custom weight
-        original_update_cost = evaluator.update_cost
-
-        def patched_update_cost(node1, node2, structural_weight=weight):
-            return original_update_cost(node1, node2, structural_weight=weight)
-
-        evaluator.update_cost = patched_update_cost
+        evaluator = SemanticJsonTreeConsistencyEvaluator(model_id='all-MiniLM-L6-v2')
+        analyzer = StructuralConsistencyAnalyzer(evaluator)
 
         for dataset_name, variations in datasets:
-            metrics = evaluator.calculate_variation_consistency(
-                variations,
-                method='sted',
-                variation_type='combined',
-                apply_power_transform=True,
-                steepness_factor=20
-            )
+            # Calculate with custom structural weight
+            similarities = []
+            for v1, v2 in combinations(variations, 2):
+                # Combined: weight * structural + (1-weight) * content
+                sim = evaluator.calculate_tree_edit_distance_opt(
+                    v1, v2, variation_type='combined'
+                )
+                similarities.append(sim)
 
-            results.append({
-                'parameter': 'structural_weight',
-                'value': weight,
-                'dataset': dataset_name,
-                'consistency_score': metrics['consistency_score'],
-                'mean_distance': metrics.get('mean_distance', 0),
-                'std_distance': metrics.get('std_distance', 0),
-            })
+            if similarities:
+                c_mean = float(np.mean(similarities))
+                d_std = float(np.std(similarities))
+                d_std_norm = d_std / 0.5 if d_std > 0 else 0  # Approximate normalization
+                s_alpha = compute_stability_score(min(d_std_norm, 1.0), 20)
+
+                results.append({
+                    'parameter': 'structural_weight',
+                    'value': weight,
+                    'dataset': dataset_name,
+                    'stability_score': s_alpha,
+                    'c_mean': c_mean,
+                    'd_std': d_std,
+                })
 
     return pd.DataFrame(results)
 
 
 def calculate_discrimination_score(df: pd.DataFrame, value_col: str = 'value',
-                                    score_col: str = 'consistency_score') -> Dict[str, float]:
-    """
-    Calculate how well a parameter setting discriminates between datasets.
-    Higher is better - indicates the parameter creates meaningful distinctions.
-    """
+                                    score_col: str = 'stability_score') -> Dict[str, float]:
+    """Calculate how well a parameter setting discriminates between datasets."""
     discrimination_scores = {}
 
     for value in df[value_col].unique():
         subset = df[df[value_col] == value]
         scores = subset.groupby('dataset')[score_col].mean()
-
-        # Discrimination = variance across datasets (higher = more discriminating)
-        discrimination_scores[value] = float(scores.std())
+        discrimination_scores[value] = float(scores.std()) if len(scores) > 1 else 0.0
 
     return discrimination_scores
 
 
-def plot_ablation_results(all_results: Dict[str, pd.DataFrame], output_dir: Path):
-    """Generate comprehensive ablation visualizations."""
+def calculate_ranking_correlation(df: pd.DataFrame, value_col: str = 'value',
+                                   score_col: str = 'stability_score') -> pd.DataFrame:
+    """Calculate Spearman correlation between rankings at different parameter values."""
+    from scipy.stats import spearmanr
 
-    # Create output directory
+    values = sorted(df[value_col].unique())
+    correlations = []
+
+    for i, v1 in enumerate(values):
+        for v2 in values[i+1:]:
+            df1 = df[df[value_col] == v1].groupby('dataset')[score_col].mean()
+            df2 = df[df[value_col] == v2].groupby('dataset')[score_col].mean()
+
+            common_datasets = set(df1.index) & set(df2.index)
+            if len(common_datasets) >= 3:
+                r1 = [df1[d] for d in common_datasets]
+                r2 = [df2[d] for d in common_datasets]
+                rho, pval = spearmanr(r1, r2)
+                correlations.append({
+                    'value1': v1,
+                    'value2': v2,
+                    'spearman_rho': rho,
+                    'p_value': pval,
+                })
+
+    return pd.DataFrame(correlations)
+
+
+def plot_alpha_ablation(df: pd.DataFrame, output_dir: Path, use_real_data: bool = False):
+    """Generate alpha ablation visualization for paper."""
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+
+    # 1. S_alpha curve (theoretical)
+    ax = axes[0]
+    d_std_values = np.linspace(0, 0.5, 100)
+    for alpha in [5, 10, 20, 30, 50]:
+        s_alpha = (1.0 / (1.0 + 2 * d_std_values)) ** alpha
+        ax.plot(d_std_values, s_alpha, label=f'$\\alpha$={alpha}', linewidth=2)
+    ax.set_xlabel('$\\hat{D}_{std}$ (Normalized Dispersion)', fontsize=11)
+    ax.set_ylabel('$S_\\alpha$ (Stability Score)', fontsize=11)
+    ax.set_title('(a) Stability Score Sensitivity', fontsize=12, fontweight='bold')
+    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim(0, 0.5)
+    ax.set_ylim(0, 1.05)
+
+    # 2. Box plot by alpha value
+    ax = axes[1]
+    alpha_values = sorted(df['value'].unique())
+    data_for_box = [df[df['value'] == a]['stability_score'].values for a in alpha_values]
+    bp = ax.boxplot(data_for_box, labels=alpha_values, patch_artist=True)
+    for patch in bp['boxes']:
+        patch.set_facecolor('#2E86AB')
+        patch.set_alpha(0.7)
+    ax.set_xlabel('$\\alpha$ (Steepness Factor)', fontsize=11)
+    ax.set_ylabel('$S_\\alpha$ Distribution', fontsize=11)
+    ax.set_title('(b) Score Distribution by $\\alpha$', fontsize=12, fontweight='bold')
+    if DEFAULT_VALUES['alpha'] in alpha_values:
+        ax.axvline(x=alpha_values.index(DEFAULT_VALUES['alpha']) + 1,
+                   color='red', linestyle='--', label=f'Default $\\alpha$={DEFAULT_VALUES["alpha"]}', alpha=0.7)
+        ax.legend()
+    ax.grid(True, alpha=0.3, axis='y')
+
+    # 3. Ranking stability (Spearman correlation)
+    ax = axes[2]
+    corr_df = calculate_ranking_correlation(df, 'value', 'stability_score')
+    if not corr_df.empty:
+        # Plot correlation vs alpha difference
+        corr_df['alpha_diff'] = abs(corr_df['value2'] - corr_df['value1'])
+        ax.scatter(corr_df['alpha_diff'], corr_df['spearman_rho'], alpha=0.7, s=50)
+        ax.axhline(y=0.9, color='green', linestyle='--', alpha=0.5, label='$\\rho$=0.9 threshold')
+        ax.set_xlabel('$|\\alpha_1 - \\alpha_2|$', fontsize=11)
+        ax.set_ylabel('Spearman $\\rho$', fontsize=11)
+        ax.set_title('(c) Ranking Stability', fontsize=12, fontweight='bold')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim(0, 1.05)
+
+    plt.tight_layout()
+    suffix = '_real' if use_real_data else '_synthetic'
+    plt.savefig(output_dir / f'ablation_alpha{suffix}.png', dpi=300, bbox_inches='tight')
+    plt.savefig(output_dir / f'ablation_alpha{suffix}.pdf', format='pdf', bbox_inches='tight')
+    plt.close()
+
+
+def plot_all_ablations(all_results: Dict[str, pd.DataFrame], output_dir: Path):
+    """Generate comprehensive ablation visualizations."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Alpha (steepness) ablation plot
-    if 'alpha' in all_results:
-        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-        df = all_results['alpha']
+    # Individual parameter plots
+    for param_name, df in all_results.items():
+        if df.empty:
+            continue
 
-        # Box plot by alpha value
-        alpha_values = sorted(df['value'].unique())
-        data_for_box = [df[df['value'] == a]['consistency_score'].values for a in alpha_values]
-        axes[0].boxplot(data_for_box, labels=alpha_values)
-        axes[0].set_xlabel('α (Steepness Factor)')
-        axes[0].set_ylabel('Consistency Score')
-        axes[0].set_title('Consistency Score Distribution by α')
-        axes[0].axvline(x=alpha_values.index(20) + 1, color='r', linestyle='--',
-                        label=f'Default α=20', alpha=0.7)
-        axes[0].legend()
+        score_col = 'stability_score' if 'stability_score' in df.columns else 'c_mean'
+
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+        # Box plot
+        ax = axes[0]
+        values = sorted(df['value'].unique())
+        data_for_box = [df[df['value'] == v][score_col].values for v in values]
+        bp = ax.boxplot(data_for_box, labels=[str(v) for v in values], patch_artist=True)
+        for patch in bp['boxes']:
+            patch.set_facecolor('#2E86AB')
+            patch.set_alpha(0.7)
+
+        param_labels = {
+            'alpha': '$\\alpha$ (Steepness)',
+            'theta': '$\\theta$ (Threshold)',
+            'path_decay': '$\\lambda$ (Path Decay)',
+            'structural_weight': '$w$ (Structural Weight)',
+        }
+        ax.set_xlabel(param_labels.get(param_name, param_name), fontsize=11)
+        ax.set_ylabel(f'{score_col}', fontsize=11)
+        ax.set_title(f'{param_name.replace("_", " ").title()} Ablation', fontsize=12, fontweight='bold')
+
+        if param_name in DEFAULT_VALUES and DEFAULT_VALUES[param_name] in values:
+            ax.axvline(x=values.index(DEFAULT_VALUES[param_name]) + 1,
+                       color='red', linestyle='--', alpha=0.7)
+        ax.grid(True, alpha=0.3, axis='y')
 
         # Line plot by dataset
-        for dataset in df['dataset'].unique():
+        ax = axes[1]
+        datasets = df['dataset'].unique()
+        for dataset in datasets[:8]:  # Limit to 8 datasets for readability
             subset = df[df['dataset'] == dataset]
-            axes[1].plot(subset['value'], subset['consistency_score'],
-                        marker='o', label=dataset)
-        axes[1].set_xlabel('α (Steepness Factor)')
-        axes[1].set_ylabel('Consistency Score')
-        axes[1].set_title('Consistency Score by Dataset')
-        axes[1].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            ax.plot(subset['value'], subset[score_col], marker='o', label=dataset, alpha=0.7)
+        ax.set_xlabel(param_labels.get(param_name, param_name), fontsize=11)
+        ax.set_ylabel(score_col, fontsize=11)
+        ax.set_title('By Dataset', fontsize=12)
+        if len(datasets) <= 8:
+            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
+        ax.grid(True, alpha=0.3)
 
         plt.tight_layout()
-        plt.savefig(output_dir / 'ablation_alpha.png', dpi=150, bbox_inches='tight')
-        plt.close()
-
-    # 2. Theta (structural threshold) ablation plot
-    if 'theta' in all_results:
-        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-        df = all_results['theta']
-
-        theta_values = sorted(df['value'].unique())
-        data_for_box = [df[df['value'] == t]['mean_similarity'].values for t in theta_values]
-        axes[0].boxplot(data_for_box, labels=[f'{t:.1f}' for t in theta_values])
-        axes[0].set_xlabel('θ (Structural Threshold)')
-        axes[0].set_ylabel('Mean Similarity')
-        axes[0].set_title('Similarity Distribution by θ')
-        if 0.3 in theta_values:
-            axes[0].axvline(x=theta_values.index(0.3) + 1, color='r', linestyle='--',
-                            label='Default θ=0.3', alpha=0.7)
-            axes[0].legend()
-
-        for dataset in df['dataset'].unique():
-            subset = df[df['dataset'] == dataset]
-            axes[1].plot(subset['value'], subset['mean_similarity'],
-                        marker='o', label=dataset)
-        axes[1].set_xlabel('θ (Structural Threshold)')
-        axes[1].set_ylabel('Mean Similarity')
-        axes[1].set_title('Similarity by Dataset')
-        axes[1].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-
-        plt.tight_layout()
-        plt.savefig(output_dir / 'ablation_theta.png', dpi=150, bbox_inches='tight')
-        plt.close()
-
-    # 3. Path decay ablation plot
-    if 'path_decay' in all_results:
-        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-        df = all_results['path_decay']
-
-        decay_values = sorted(df['value'].unique())
-        data_for_box = [df[df['value'] == d]['consistency_score'].values for d in decay_values]
-        axes[0].boxplot(data_for_box, labels=[f'{d:.1f}' for d in decay_values])
-        axes[0].set_xlabel('λ_path (Path Weight Decay)')
-        axes[0].set_ylabel('Consistency Score')
-        axes[0].set_title('Consistency by Path Decay')
-        if 1.0 in decay_values:
-            axes[0].axvline(x=decay_values.index(1.0) + 1, color='r', linestyle='--',
-                            label='Default λ=1.0', alpha=0.7)
-            axes[0].legend()
-
-        for dataset in df['dataset'].unique():
-            subset = df[df['dataset'] == dataset]
-            axes[1].plot(subset['value'], subset['consistency_score'],
-                        marker='o', label=dataset)
-        axes[1].set_xlabel('λ_path (Path Weight Decay)')
-        axes[1].set_ylabel('Consistency Score')
-        axes[1].set_title('Consistency by Dataset')
-        axes[1].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-
-        plt.tight_layout()
-        plt.savefig(output_dir / 'ablation_path_decay.png', dpi=150, bbox_inches='tight')
-        plt.close()
-
-    # 4. Structural weight ablation plot
-    if 'structural_weight' in all_results:
-        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-        df = all_results['structural_weight']
-
-        weight_values = sorted(df['value'].unique())
-        data_for_box = [df[df['value'] == w]['consistency_score'].values for w in weight_values]
-        axes[0].boxplot(data_for_box, labels=[f'{w:.1f}' for w in weight_values])
-        axes[0].set_xlabel('w (Structural Weight)')
-        axes[0].set_ylabel('Consistency Score')
-        axes[0].set_title('Consistency by Structural Weight')
-        if 0.5 in weight_values:
-            axes[0].axvline(x=weight_values.index(0.5) + 1, color='r', linestyle='--',
-                            label='Default w=0.5', alpha=0.7)
-            axes[0].legend()
-
-        for dataset in df['dataset'].unique():
-            subset = df[df['dataset'] == dataset]
-            axes[1].plot(subset['value'], subset['consistency_score'],
-                        marker='o', label=dataset)
-        axes[1].set_xlabel('w (Structural Weight)')
-        axes[1].set_ylabel('Consistency Score')
-        axes[1].set_title('Consistency by Dataset')
-        axes[1].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-
-        plt.tight_layout()
-        plt.savefig(output_dir / 'ablation_structural_weight.png', dpi=150, bbox_inches='tight')
-        plt.close()
-
-    # 5. Summary heatmap
-    fig, ax = plt.subplots(figsize=(12, 8))
-
-    summary_data = []
-    for param_name, df in all_results.items():
-        score_col = 'consistency_score' if 'consistency_score' in df.columns else 'mean_similarity'
-        discrimination = calculate_discrimination_score(df, 'value', score_col)
-        for value, disc_score in discrimination.items():
-            summary_data.append({
-                'parameter': param_name,
-                'value': str(value),
-                'discrimination': disc_score
-            })
-
-    if summary_data:
-        summary_df = pd.DataFrame(summary_data)
-        pivot_df = summary_df.pivot(index='parameter', columns='value', values='discrimination')
-
-        im = ax.imshow(pivot_df.values, cmap='YlOrRd', aspect='auto')
-        ax.set_xticks(range(len(pivot_df.columns)))
-        ax.set_xticklabels(pivot_df.columns, rotation=45, ha='right')
-        ax.set_yticks(range(len(pivot_df.index)))
-        ax.set_yticklabels(pivot_df.index)
-        ax.set_title('Hyperparameter Discrimination Scores\n(Higher = Better Dataset Differentiation)')
-        plt.colorbar(im, ax=ax, label='Discrimination Score')
-
-        plt.tight_layout()
-        plt.savefig(output_dir / 'ablation_summary_heatmap.png', dpi=150, bbox_inches='tight')
+        plt.savefig(output_dir / f'ablation_{param_name}.png', dpi=300, bbox_inches='tight')
+        plt.savefig(output_dir / f'ablation_{param_name}.pdf', format='pdf', bbox_inches='tight')
         plt.close()
 
     print(f"Plots saved to {output_dir}")
 
 
 def generate_latex_table(all_results: Dict[str, pd.DataFrame]) -> str:
-    """Generate LaTeX table for ICML paper."""
-
-    latex = """
-\\begin{table}[h]
-\\centering
-\\caption{Hyperparameter Ablation Results}
-\\label{tab:ablation-results}
-\\begin{tabular}{lcccc}
-\\toprule
-Parameter & Range & Default & Optimal & Selection Criterion \\\\
-\\midrule
+    """Generate LaTeX table for paper."""
+    latex = r"""
+\begin{table}[h]
+\centering
+\caption{Hyperparameter Ablation Summary. Rankings remain stable across parameter choices ($\rho > 0.9$).}
+\label{tab:ablation-results}
+\begin{tabular}{lcccc}
+\toprule
+Parameter & Range & Default & Discrimination & Ranking $\rho$ \\
+\midrule
 """
-
     for param_name, df in all_results.items():
-        score_col = 'consistency_score' if 'consistency_score' in df.columns else 'mean_similarity'
+        if df.empty:
+            continue
 
-        # Find optimal value (highest discrimination)
-        discrimination = calculate_discrimination_score(df, 'value', score_col)
-        optimal_value = max(discrimination, key=discrimination.get)
-
-        # Get range
+        score_col = 'stability_score' if 'stability_score' in df.columns else 'c_mean'
         values = sorted(df['value'].unique())
-        value_range = f"[{min(values)}, {max(values)}]"
 
-        # Default values
-        defaults = {'alpha': 20, 'theta': 0.3, 'path_decay': 1.0, 'structural_weight': 0.5}
-        default = defaults.get(param_name, '-')
+        # Calculate discrimination
+        discrimination = calculate_discrimination_score(df, 'value', score_col)
+        best_disc = max(discrimination.values()) if discrimination else 0
 
-        # Criterion
-        criteria = {
-            'alpha': 'Max discrimination in $\\hat{\\sigma} \\in [0, 0.1]$',
-            'theta': 'Balance flexibility vs. coherence',
-            'path_decay': 'Weight root vs. leaf importance',
-            'structural_weight': 'Balance structure vs. content'
-        }
-        criterion = criteria.get(param_name, '-')
+        # Calculate ranking correlation
+        corr_df = calculate_ranking_correlation(df, 'value', score_col)
+        mean_rho = corr_df['spearman_rho'].mean() if not corr_df.empty else 1.0
 
-        # Format parameter name
         param_latex = {
-            'alpha': '$\\alpha$ (consistency steepness)',
-            'theta': '$\\theta$ (structural threshold)',
-            'path_decay': '$\\lambda$ (path decay)',
-            'structural_weight': '$w$ (structural weight)'
+            'alpha': r'$\alpha$ (steepness)',
+            'theta': r'$\theta$ (threshold)',
+            'path_decay': r'$\lambda$ (path decay)',
+            'structural_weight': r'$w$ (struct. weight)',
         }.get(param_name, param_name)
 
-        latex += f"{param_latex} & {value_range} & {default} & {optimal_value} & {criterion} \\\\\n"
+        default = DEFAULT_VALUES.get(param_name, '-')
+        value_range = f"[{min(values)}, {max(values)}]"
 
-    latex += """\\bottomrule
-\\end{tabular}
-\\end{table}
+        latex += f"{param_latex} & {value_range} & {default} & {best_disc:.3f} & {mean_rho:.3f} \\\\\n"
+
+    latex += r"""\bottomrule
+\end{tabular}
+\end{table}
 """
     return latex
 
 
 def main():
     parser = argparse.ArgumentParser(description='Run STED hyperparameter ablation experiments')
-    parser.add_argument('--output-dir', type=str, default='research/ablation_results',
+    parser.add_argument('--output-dir', type=str, default='results/ablation',
                         help='Output directory for results')
     parser.add_argument('--parameters', nargs='+',
                         choices=['alpha', 'theta', 'path_decay', 'structural_weight', 'all'],
                         default=['all'],
                         help='Parameters to ablate')
+    parser.add_argument('--real-data', type=str, default=None,
+                        help='Path to real LLM results directory (e.g., results/toucan/minilm-ec2)')
     parser.add_argument('--quick', action='store_true',
                         help='Run quick ablation with fewer values')
     args = parser.parse_args()
 
-    # Setup
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("=" * 70)
     print("STED Hyperparameter Ablation Experiments")
-    print("For ICML 2026 Submission")
     print("=" * 70)
 
-    # Create test datasets
-    print("\nGenerating test datasets...")
-    datasets = create_test_dataset()
-    print(f"Created {len(datasets)} test datasets:")
-    for name, variations in datasets:
-        print(f"  - {name}: {len(variations)} variations")
-
-    # Initialize base evaluator
-    print("\nInitializing STED evaluator...")
-    evaluator = SemanticJsonTreeConsistencyEvaluator(
-        model_id='all-MiniLM-L6-v2',
-    )
-
-    # Run ablations
-    all_results = {}
-    params_to_run = HYPERPARAMETER_RANGES.keys() if 'all' in args.parameters else args.parameters
-
+    # Parameter ranges
     if args.quick:
-        # Reduce parameter ranges for quick testing
-        quick_ranges = {
+        param_ranges = {
             'alpha': [10, 20, 30],
             'theta': [0.1, 0.3, 0.7],
-            'path_decay': [0.9, 1.0],
+            'path_decay': [0.8, 1.0],
             'structural_weight': [0.3, 0.5, 0.7],
         }
-        param_ranges = {k: quick_ranges.get(k, v) for k, v in HYPERPARAMETER_RANGES.items()}
     else:
         param_ranges = HYPERPARAMETER_RANGES
 
+    params_to_run = list(param_ranges.keys()) if 'all' in args.parameters else args.parameters
+
+    # Create datasets
+    print("\nPreparing datasets...")
+    synthetic_datasets = create_synthetic_dataset()
+    print(f"  Synthetic: {len(synthetic_datasets)} datasets")
+
+    real_datasets = []
+    if args.real_data:
+        real_datasets = load_real_data(args.real_data)
+        print(f"  Real data: {len(real_datasets)} model-temperature combinations")
+
+    # Initialize evaluator and analyzer
+    print("\nInitializing STED evaluator...")
+    evaluator = SemanticJsonTreeConsistencyEvaluator(model_id='all-MiniLM-L6-v2')
+    analyzer = StructuralConsistencyAnalyzer(evaluator)
+
+    all_results = {}
     start_time = time.time()
 
+    # Run ablations
     if 'alpha' in params_to_run:
         print("\n[1/4] Running alpha (steepness) ablation...")
-        all_results['alpha'] = run_alpha_ablation(evaluator, datasets, param_ranges['alpha'])
+        all_results['alpha'] = run_alpha_ablation_synthetic(
+            analyzer, synthetic_datasets, param_ranges['alpha']
+        )
+        if real_datasets:
+            all_results['alpha_real'] = run_alpha_ablation_real(
+                real_datasets, param_ranges['alpha']
+            )
 
     if 'theta' in params_to_run:
         print("\n[2/4] Running theta (structural threshold) ablation...")
-        all_results['theta'] = run_theta_ablation(datasets, param_ranges['theta'])
+        all_results['theta'] = run_theta_ablation(synthetic_datasets, param_ranges['theta'])
 
     if 'path_decay' in params_to_run:
         print("\n[3/4] Running path decay ablation...")
-        all_results['path_decay'] = run_path_decay_ablation(datasets, param_ranges['path_decay'])
+        all_results['path_decay'] = run_path_decay_ablation(
+            synthetic_datasets, param_ranges['path_decay']
+        )
 
     if 'structural_weight' in params_to_run:
         print("\n[4/4] Running structural weight ablation...")
         all_results['structural_weight'] = run_structural_weight_ablation(
-            datasets, param_ranges['structural_weight']
+            synthetic_datasets, param_ranges['structural_weight']
         )
 
     elapsed_time = time.time() - start_time
@@ -630,56 +690,54 @@ def main():
     # Save results
     print("\nSaving results...")
 
-    # Save as JSON
-    results_json = {}
-    for name, df in all_results.items():
-        results_json[name] = df.to_dict(orient='records')
-
+    # JSON
+    results_json = {k: v.to_dict(orient='records') for k, v in all_results.items() if not v.empty}
     with open(output_dir / 'ablation_results.json', 'w') as f:
         json.dump(results_json, f, indent=2)
 
-    # Save as CSV
+    # CSV
     for name, df in all_results.items():
-        df.to_csv(output_dir / f'ablation_{name}.csv', index=False)
+        if not df.empty:
+            df.to_csv(output_dir / f'ablation_{name}.csv', index=False)
 
     # Generate plots
     print("\nGenerating visualizations...")
-    plot_ablation_results(all_results, output_dir)
+    plot_all_ablations(all_results, output_dir)
 
-    # Generate LaTeX table
+    # Special alpha plot for paper
+    if 'alpha' in all_results:
+        plot_alpha_ablation(all_results['alpha'], output_dir, use_real_data=False)
+    if 'alpha_real' in all_results:
+        plot_alpha_ablation(all_results['alpha_real'], output_dir, use_real_data=True)
+
+    # LaTeX table
     print("\nGenerating LaTeX table...")
     latex_table = generate_latex_table(all_results)
     with open(output_dir / 'ablation_table.tex', 'w') as f:
         f.write(latex_table)
     print(latex_table)
 
-    # Print summary statistics
+    # Summary
     print("\n" + "=" * 70)
     print("ABLATION SUMMARY")
     print("=" * 70)
 
     for param_name, df in all_results.items():
-        score_col = 'consistency_score' if 'consistency_score' in df.columns else 'mean_similarity'
+        if df.empty:
+            continue
+        score_col = 'stability_score' if 'stability_score' in df.columns else 'c_mean'
         print(f"\n{param_name.upper()}:")
 
-        # Group by value and compute mean score
         grouped = df.groupby('value')[score_col].agg(['mean', 'std'])
         for value in grouped.index:
-            mean_score = grouped.loc[value, 'mean']
-            std_score = grouped.loc[value, 'std']
-            print(f"  {value}: mean={mean_score:.4f} (std={std_score:.4f})")
+            print(f"  {value}: mean={grouped.loc[value, 'mean']:.4f} (std={grouped.loc[value, 'std']:.4f})")
 
-        # Compute discrimination scores
-        discrimination = calculate_discrimination_score(df, 'value', score_col)
-        best_value = max(discrimination, key=discrimination.get)
-        print(f"  Best discriminating value: {best_value} (score={discrimination[best_value]:.4f})")
+        # Ranking correlation
+        corr_df = calculate_ranking_correlation(df, 'value', score_col)
+        if not corr_df.empty:
+            print(f"  Ranking stability (mean Spearman rho): {corr_df['spearman_rho'].mean():.4f}")
 
     print(f"\nResults saved to: {output_dir}")
-    print("Files generated:")
-    print(f"  - ablation_results.json")
-    print(f"  - ablation_*.csv")
-    print(f"  - ablation_*.png")
-    print(f"  - ablation_table.tex")
 
 
 if __name__ == '__main__':

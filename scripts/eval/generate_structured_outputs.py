@@ -10,6 +10,7 @@ Usage:
 """
 
 import boto3
+from botocore.config import Config
 from dotenv import load_dotenv
 import argparse
 import json
@@ -135,15 +136,18 @@ def extract_json_from_string(input_string):
 def read_sharegpt(dataset_dir="data"):
     """
     Reads the dataset from the specified directory.
-    """    
-    dataset_list = os.listdir(dataset_dir)
+
+    Note: Uses sorted() to ensure deterministic sample ordering across runs.
+    """
+    # Filter out macOS metadata files (._*) and .DS_Store
+    dataset_list = sorted([d for d in os.listdir(dataset_dir) if not d.startswith('._') and d != '.DS_Store'])
     print(f"dataset_list: {dataset_list}")
-    
+
     json_data = []
     for dataset_name in dataset_list:
         print(f"Processing dataset: {dataset_name}")
         data_dir = os.path.join(dataset_dir, dataset_name)
-        if not os.path.exists(data_dir) or '.DS_Store' == dataset_name:
+        if not os.path.exists(data_dir):
             print(f"Dataset {dataset_name} does not exist. Skipping.")
             continue
         
@@ -176,11 +180,18 @@ def _single_inference(model_id, user_prompt, system_prompts=None, max_tokens=800
 
         logger.debug(f"[Task {task_id}] AWS Region: {aws_region}, Key ID present: {bool(aws_key_id)}, Secret present: {bool(aws_secret)}")
 
+        # Configure boto3 with increased timeout for slower models like Claude-Opus-4
+        boto_config = Config(
+            retries={'max_attempts': 5, 'mode': 'adaptive'},
+            read_timeout=300,  # 5 minutes timeout for large model responses
+            connect_timeout=30
+        )
         thread_client = boto3.client(
             'bedrock-runtime',
             region_name=aws_region,
             aws_access_key_id=aws_key_id,
-            aws_secret_access_key=aws_secret
+            aws_secret_access_key=aws_secret,
+            config=boto_config
         )
 
         provider = get_provider(model_id)

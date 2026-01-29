@@ -2,37 +2,37 @@
 Configuration constants and default values for the semantic JSON tree consistency evaluator.
 """
 
-from typing import Dict, Tuple, Set
+from typing import Dict, Tuple
 
 
 def get_default_type_change_costs() -> Dict[Tuple[str, str], float]:
     """Define default costs for type changes."""
     costs = {}
     types = ["object", "array", "string", "number", "boolean", "null"]
-    
+
     # Default cost is 1.0
     for t1 in types:
         for t2 in types:
             costs[(t1, t2)] = 1.0
-    
+
     # Same type has zero cost
     for t in types:
         costs[(t, t)] = 0.0
-    
+
     # Lower costs for some type conversions
     costs[("string", "number")] = costs[("number", "string")] = 0.5
     costs[("boolean", "string")] = costs[("string", "boolean")] = 0.7
     costs[("number", "boolean")] = costs[("boolean", "number")] = 0.7
     costs[("null", "string")] = costs[("string", "null")] = 0.5
     costs[("null", "number")] = costs[("number", "null")] = 0.5
-    
+
     # Higher costs for structure changes
     costs[("object", "array")] = costs[("array", "object")] = 1
     costs[("object", "string")] = costs[("string", "object")] = 1
     costs[("object", "number")] = costs[("number", "object")] = 1
     costs[("array", "string")] = costs[("string", "array")] = 1
     costs[("array", "number")] = costs[("number", "array")] = 1
-    
+
     return costs
 
 

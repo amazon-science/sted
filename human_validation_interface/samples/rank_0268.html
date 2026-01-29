@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sample 262 / 343</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            line-height: 1.5;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header h2 { margin: 0 0 10px 0; color: #333; }
+        .progress { color: #666; }
+        .nav-buttons { margin-top: 15px; }
+        .nav-buttons a {
+            display: inline-block;
+            padding: 8px 16px;
+            margin-right: 10px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .nav-buttons a:hover { background: #0056b3; }
+        .nav-buttons a.disabled {
+            background: #ccc;
+            pointer-events: none;
+        }
+
+        .task-description {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2196f3;
+        }
+        .task-description h3 { margin: 0 0 10px 0; color: #1565c0; }
+
+        .ground-truth {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #4caf50;
+        }
+        .ground-truth h3 { margin: 0 0 15px 0; color: #2e7d32; }
+
+        .candidates-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .candidates-section h3 { margin: 0 0 15px 0; color: #333; }
+
+        .candidate {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .candidate:hover { background: #f0f0f0; border-color: #ddd; }
+        .candidate.selected {
+            background: #e8f5e9;
+            border-color: #4caf50;
+        }
+        .candidate-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .candidate-label {
+            font-size: 18px;
+            font-weight: bold;
+            margin-left: 10px;
+            color: #333;
+        }
+        .model-name {
+            margin-left: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 13px;
+            margin: 0;
+        }
+        .ground-truth pre {
+            background: #1b5e20;
+            color: #c5e1a5;
+        }
+        .response-json { background: #37474f; }
+
+        .confidence-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff3e0;
+            border-radius: 8px;
+        }
+        .confidence-section h4 { margin: 0 0 10px 0; }
+        .confidence-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .confidence-btn {
+            padding: 8px 16px;
+            border: 1px solid #ccc;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .confidence-btn:hover { background: #f5f5f5; }
+        .confidence-btn.selected {
+            background: #ff9800;
+            color: white;
+            border-color: #ff9800;
+        }
+
+        .notes-section {
+            margin-top: 15px;
+        }
+        .notes-section textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            min-height: 60px;
+            font-family: inherit;
+        }
+
+        .save-status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .save-status.saved { background: #e8f5e9; color: #2e7d32; }
+        .save-status.unsaved { background: #ffebee; color: #c62828; }
+
+        .confirm-section {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .confirm-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .confirm-btn:hover { background: #388e3c; transform: scale(1.02); }
+        .confirm-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .confirm-btn.confirmed {
+            background: #2196f3;
+        }
+        .skip-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            background: #9e9e9e;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 20px;
+        }
+        .skip-btn:hover { background: #757575; }
+        .skip-btn.skipped {
+            background: #ff9800;
+        }
+        .skip-reason {
+            margin-top: 15px;
+            display: none;
+        }
+        .skip-reason.visible {
+            display: block;
+        }
+        .skip-reason select {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 100%;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Sample 262 of 343</h2>
+            <div class="progress">ID: 43948be7-bb3d-53db-a288-1de3f8f35dfa</div>
+            <div class="nav-buttons">
+                <a href='rank_0260.html'>Previous</a>
+                <a href="../index.html">Back to List</a>
+                <a href='rank_0262.html' onclick='confirmBeforeNav(event)'>Next</a>
+            </div>
+        </div>
+
+        <div class="task-description">
+            <h3>Task: Select the Most Similar Response</h3>
+            <p>Compare the responses below to the Ground Truth and select the one that is <strong>MOST SIMILAR</strong>.</p>
+            <p>Consider: same tool names, same parameters, same structure, functional equivalence.</p>
+        </div>
+
+        <div class="ground-truth">
+            <h3>Ground Truth (Reference)</h3>
+            <pre>{
+  "tool_calls": [
+    {
+      "name": "collaborative-reasoning-server-collaborativeReasoning",
+      "arguments": {
+        "topic": "New product launch planning with marketing, engineering, and finance alignment",
+        "personas": [
+          {
+            "id": "marketing-director",
+            "name": "Sarah Chen",
+            "expertise": [
+              "product marketing",
+              "customer acquisition",
+              "brand positioning",
+              "competitive analysis",
+              "go-to-market strategy"
+            ],
+            "background": "15 years in tech marketing, led 8 successful product launches, passionate about customer-centric design and market penetration",
+            "perspective": "Success equals market penetration and customer adoption with strong brand positioning and competitive differentiation",
+            "biases": [
+              "tends to prioritize features that customers ask for over technical simplicity",
+              "may underestimate implementation complexity if it makes marketing story better"
+            ],
+            "communication": {
+              "style": "narrative-driven with customer stories",
+              "tone": "enthusiastic and persuasive"
+            }
+          },
+          {
+            "id": "engineering-lead",
+            "name": "Marcus Rodriguez",
+            "expertise": [
+              "system architecture",
+              "scalability planning",
+              "technical debt management",
+              "feature development",
+              "release management"
+            ],
+            "background": "12 years in software engineering, senior architect who has seen how marketing promises can impact technical quality and maintainability",
+            "perspective": "Success equals technically sound product that scales well and doesn't create long-term engineering burdens",
+            "biases": [
+              "prioritizes technical excellence over market timing",
+              "concerned about feature bloat from customer requests",
+              "wants to minimize technical debt"
+            ],
+            "communication": {
+              "style": "analytical with technical metrics",
+              "tone": "measured and cautious"
+            }
+          },
+          {
+            "id": "finance-director",
+            "name": "Jennifer Park",
+            "expertise": [
+              "financial planning",
+              "ROI analysis",
+              "cost control",
+              "pricing strategy",
+              "resource allocation",
+              "risk assessment"
+            ],
+            "background": "10 years in finance, experienced in technology investment decisions and measuring launch success through financial metrics",
+            "perspective": "Success equals profitable launch within budget constraints with predictable revenue generation",
+            "biases": [
+              "wants to minimize upfront investment until market validation",
+              "prioritizes proven features over innovative risks",
+              "focuses on short-term ROI metrics"
+            ],
+            "communication": {
+              "style": "data-driven and concise",
+              "tone": "pragmatic and results-focused"
+            }
+          }
+        ],
+        "contributions": [
+          {
+            "personaId": "marketing-director",
+            "type": "insight",
+            "content": "We need to establish clear market positioning within 2 weeks of launch to avoid being seen as \"me-too\" competitor. This requires feature completeness for our core use case and compelling customer success stories ready to share immediately.",
+            "confidence": 0.85
+          },
+          {
+            "personaId": "engineering-lead",
+            "type": "concern",
+            "content": "The current timeline might force us to ship with known technical debt. I've identified 3 critical areas that could cause scaling issues within 6 months of launch if not addressed now. Would prefer either scope reduction or timeline extension.",
+            "confidence": 0.9
+          },
+          {
+            "personaId": "finance-director",
+            "type": "observation",
+            "content": "Market validation through MVP release could reduce our burn rate by 40% before full launch. We have budget for either comprehensive marketing campaign OR technical scaling improvements, but not both simultaneously within current constraints.",
+            "confidence": 0.8
+          },
+          {
+            "personaId": "marketing-director",
+            "type": "suggestion",
+            "content": "What if we launch in phases? Phase 1: Core MVP to early adopters with marketing focused on thought leadership. Phase 2: Scale improvements for broader market. This addresses both technical scaling concerns and reduces upfront financial risk.",
+            "confidence": 0.75
+          },
+          {
+            "personaId": "engineering-lead",
+            "type": "challenge",
+            "content": "Phased approach might work, but we need to ensure the initial architecture supports the scaling requirements. Can we agree on specific technical metrics that must be met before Phase 2 investment?",
+            "confidence": 0.8
+          },
+          {
+            "personaId": "finance-director",
+            "type": "insight",
+            "content": "A phased approach aligns with our financial risk management. We can measure customer acquisition cost and lifetime value in Phase 1 to make data-driven decisions on Phase 2 scaling investment.",
+            "confidence": 0.85
+          }
+        ],
+        "stage": "ideation",
+        "activePersonaId": "finance-director",
+        "nextPersonaId": "marketing-director",
+        "sessionId": "product-launch-alignment-001",
+        "iteration": 1,
+        "nextContributionNeeded": true
+      }
+    }
+  ]
+}</pre>
+        </div>
+
+        <div class="candidates-section">
+            <h3>Candidate Responses - Select the Most Similar:</h3>
+            
+        <div class="candidate" onclick="selectCandidate('A')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_A" value="A" onchange="saveChoice('A')">
+                <label for="choice_A" class="candidate-label">[A]</label>
+                <span class="model-name">(mimo-v2-flash)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "collaborative-reasoning-server-collaborativeReasoning",
+      "arguments": {
+        "topic": "Product launch planning with marketing, engineering, and finance team alignment",
+        "personas": [
+          {
+            "id": "marketing_lead",
+            "name": "Sarah (Marketing Director)",
+            "expertise": [
+              "Brand positioning",
+              "Customer acquisition",
+              "Market timing",
+              "Go-to-market strategy",
+              "Competitive analysis"
+            ]
+          },
+          {
+            "id": "engineering_lead",
+            "name": "Alex (Engineering Manager)",
+            "expertise": [
+              "Technical feasibility",
+              "Development timeline",
+              "Resource allocation",
+              "Quality assurance",
+              "Scalability requirements"
+            ]
+          },
+          {
+            "id": "finance_lead",
+            "name": "Marcus (Finance Controller)",
+            "expertise": [
+              "Budget optimization",
+              "ROI forecasting",
+              "Risk assessment",
+              "Unit economics",
+              "Cash flow management"
+            ]
+          }
+        ],
+        "contributions": [
+          {
+            "personaId": "marketing_lead",
+            "contribution": "Success for me means launching with strong market positioning, achieving 10,000 qualified leads in the first 30 days, maintaining brand consistency across all touchpoints, and generating media buzz. We need to time the launch to coincide with industry events and ensure our messaging resonates with early adopters."
+          },
+          {
+            "personaId": "engineering_lead",
+            "contribution": "My success criteria focus on delivering a stable, scalable product that meets all technical requirements. We need adequate time for QA (minimum 3 weeks), proper documentation, and post-launch support capacity. Rushing development creates technical debt that hurts long-term viability."
+          },
+          {
+            "personaId": "finance_lead",
+            "contribution": "From a financial perspective, we need to keep customer acquisition cost under $150, achieve break-even within 6 months, and ensure the launch budget doesn't exceed $250K. I'm concerned about over-investing in marketing before we've validated product-market fit."
+          }
+        ],
+        "disagreements": [
+          {
+            "personaId": "marketing_lead",
+            "disagreementWith": "engineering_lead",
+            "issue": "Marketing wants to launch in 8 weeks to capitalize on a major industry conference, but engineering insists on 12 weeks for proper testing and stability."
+          },
+          {
+            "personaId": "engineering_lead",
+            "disagreementWith": "finance_lead",
+            "issue": "Finance wants to minimize upfront development costs, but engineering argues that investing in scalable architecture now prevents expensive rework later."
+          },
+          {
+            "personaId": "finance_lead",
+            "disagreementWith": "marketing_lead",
+            "issue": "Marketing wants to allocate 60% of budget to paid acquisition, but finance believes this is too aggressive before validating conversion rates."
+          }
+        ],
+        "stage": "problem-definition",
+        "activePersonaId": "marketing_lead",
+        "nextPersonaId": "engineering_lead",
+        "keyInsights": [],
+        "consensusPoints": [],
+        "openQuestions": [
+          "How can we balance speed-to-market with product stability?",
+          "What's the minimum viable feature set for launch?",
+          "How do we measure success across all three perspectives?"
+        ],
+        "finalRecommendation": "",
+        "sessionId": "product-launch-planning-2024",
+        "iteration": 1,
+        "nextContributionNeeded": true,
+        "suggestedContributionTypes": [
+          "solution-ideas",
+          "compromise-proposals",
+          "success-metrics"
+        ]
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('B')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_B" value="B" onchange="saveChoice('B')">
+                <label for="choice_B" class="candidate-label">[B]</label>
+                <span class="model-name">(claude-haiku-4.5)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "sequential-thinking-sequentialthinking",
+      "arguments": {
+        "thought": "The user needs a comprehensive product launch plan that incorporates three different team perspectives (marketing, engineering, finance) with different success criteria. This requires two things: (1) a logical execution framework, and (2) a structured way to align these diverse perspectives. Let me start by mapping out the key phases and considerations for a product launch.",
+        "nextThoughtNeeded": true,
+        "thoughtNumber": 1,
+        "totalThoughts": 8,
+        "isRevision": false,
+        "revisesThought": 0,
+        "branchFromThought": 0,
+        "branchId": "",
+        "needsMoreThoughts": false
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+        <div class="candidate" onclick="selectCandidate('C')">
+            <div class="candidate-header">
+                <input type="radio" name="choice" id="choice_C" value="C" onchange="saveChoice('C')">
+                <label for="choice_C" class="candidate-label">[C]</label>
+                <span class="model-name">(gemini-2.5-flash-lite)</span>
+            </div>
+            <pre class="response-json">{
+  "tool_calls": [
+    {
+      "name": "collaborative-reasoning-server-collaborativeReasoning",
+      "arguments": {
+        "suggestedContributionTypes": [
+          "Identify common goals that bridge team priorities",
+          "Propose strategies for integrating diverse success metrics into a single launch plan"
+        ],
+        "sessionId": "product_launch_collab_12345",
+        "activePersonaId": "marketing_lead",
+        "nextPersonaId": "engineering_lead",
+        "iteration": 1,
+        "openQuestions": [
+          "How can we reconcile differing success metrics across teams to create a unified set of launch objectives?"
+        ],
+        "personas": [
+          {
+            "role": "Head of Marketing",
+            "id": "marketing_lead",
+            "name": "Sarah Chen"
+          },
+          {
+            "name": "David Lee",
+            "id": "engineering_lead",
+            "role": "VP of Engineering"
+          },
+          {
+            "role": "CFO",
+            "id": "finance_lead",
+            "name": "Emily Carter"
+          }
+        ],
+        "nextContributionNeeded": true,
+        "contributions": [
+          {
+            "text": "Our primary goal is to maximize market penetration and brand awareness. Success will be measured by lead generation volume, customer acquisition cost (CAC), and market share growth. We need to ensure the product messaging resonates with the target audience and that we have a robust go-to-market strategy. Target CAC, target lead volume, target market share.",
+            "personaId": "marketing_lead"
+          },
+          {
+            "text": "From an engineering perspective, success hinges on delivering a stable, scalable, and high-quality product on time. Our key metrics include product uptime, bug resolution rate, and adherence to development timelines. We need to ensure the product meets technical specifications and can handle projected user loads. Uptime percentage, critical bug count, on-time delivery.",
+            "personaId": "engineering_lead"
+          },
+          {
+            "text": "Finance is focused on the return on investment (ROI) and profitability of this launch. We need to ensure the project stays within budget, achieves projected revenue targets, and demonstrates a clear path to profitability. Our success metrics are ROI, revenue generated, and adherence to the allocated budget. Projected ROI, revenue targets, budget variance.",
+            "personaId": "finance_lead"
+          }
+        ],
+        "keyInsights": [],
+        "topic": "Product Launch Planning and Execution",
+        "consensusPoints": [],
+        "disagreements": [
+          "Differing success metrics across teams require alignment to ensure a cohesive launch strategy."
+        ],
+        "stage": "INITIATION"
+      }
+    }
+  ]
+}</pre>
+        </div>
+        
+
+            <div class="confidence-section">
+                <h4>How confident are you in your choice?</h4>
+                <div class="confidence-buttons">
+                    <button class="confidence-btn" onclick="saveConfidence(1)">1 - Very Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(2)">2 - Unsure</button>
+                    <button class="confidence-btn" onclick="saveConfidence(3)">3 - Neutral</button>
+                    <button class="confidence-btn" onclick="saveConfidence(4)">4 - Confident</button>
+                    <button class="confidence-btn" onclick="saveConfidence(5)">5 - Very Confident</button>
+                </div>
+            </div>
+
+            <div class="notes-section">
+                <h4>Notes (optional)</h4>
+                <textarea id="notes" placeholder="Any additional comments..." onchange="saveNotes()"></textarea>
+            </div>
+
+            <div id="save-status" class="save-status unsaved">Not saved yet</div>
+
+            <div class="skip-reason" id="skip-reason-section">
+                <h4>Reason for skipping:</h4>
+                <select id="skip-reason" onchange="saveSkipReason()">
+                    <option value="">-- Select a reason --</option>
+                    <option value="all_equally_wrong">All options are equally wrong/incorrect</option>
+                    <option value="all_equally_similar">All options are equally similar (can't decide)</option>
+                    <option value="ground_truth_unclear">Ground truth is unclear or ambiguous</option>
+                    <option value="too_complex">Too complex to evaluate</option>
+                    <option value="other">Other (add note below)</option>
+                </select>
+            </div>
+
+            <div class="confirm-section">
+                <button class="confirm-btn" id="confirm-btn" onclick="confirmAndNext()">Confirm & Next</button>
+                <button class="skip-btn" id="skip-btn" onclick="toggleSkip()">Skip</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const sampleId = "43948be7-bb3d-53db-a288-1de3f8f35dfa";
+        const itemId = "rank_0261";
+
+        function getAnnotations() {
+            const saved = localStorage.getItem('best_match_annotations');
+            return saved ? JSON.parse(saved) : {};
+        }
+
+        function saveAnnotations(annotations) {
+            localStorage.setItem('best_match_annotations', JSON.stringify(annotations));
+        }
+
+        function selectCandidate(label) {
+            document.getElementById('choice_' + label).checked = true;
+            saveChoice(label);
+        }
+
+        function saveChoice(label) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].choice = label;
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveConfidence(level) {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].confidence = level;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveNotes() {
+            const notes = document.getElementById('notes').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].notes = notes;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function toggleSkip() {
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+
+            if (annotations[itemId].skipped) {
+                // Un-skip
+                annotations[itemId].skipped = false;
+                annotations[itemId].skipReason = null;
+            } else {
+                // Skip - clear any choice
+                annotations[itemId].skipped = true;
+                annotations[itemId].choice = null;
+                annotations[itemId].confirmed = false;
+            }
+            annotations[itemId].timestamp = new Date().toISOString();
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function saveSkipReason() {
+            const reason = document.getElementById('skip-reason').value;
+            const annotations = getAnnotations();
+            if (!annotations[itemId]) annotations[itemId] = {};
+            annotations[itemId].skipReason = reason;
+            saveAnnotations(annotations);
+            updateUI();
+        }
+
+        function skipAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.skipReason) {
+                alert('Please select a reason for skipping.');
+                return;
+            }
+
+            // Mark as confirmed skip
+            ann.skipped = true;
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Navigate to next
+            setTimeout(() => {
+                window.location.href = 'rank_0262.html';
+            }, 300);
+        }
+
+        function updateUI() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // Update skip state
+            const skipBtn = document.getElementById('skip-btn');
+            const skipReasonSection = document.getElementById('skip-reason-section');
+            const confirmBtn = document.getElementById('confirm-btn');
+
+            if (ann.skipped) {
+                skipBtn.textContent = 'Undo Skip';
+                skipBtn.classList.add('skipped');
+                skipReasonSection.classList.add('visible');
+                confirmBtn.textContent = 'Confirm Skip & Next';
+                confirmBtn.onclick = skipAndNext;
+
+                // Disable candidate selection when skipped
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '0.5';
+                    el.style.pointerEvents = 'none';
+                });
+            } else {
+                skipBtn.textContent = 'Skip';
+                skipBtn.classList.remove('skipped');
+                skipReasonSection.classList.remove('visible');
+                confirmBtn.textContent = 'Confirm & Next';
+                confirmBtn.onclick = confirmAndNext;
+
+                // Enable candidate selection
+                document.querySelectorAll('.candidate').forEach(el => {
+                    el.style.opacity = '1';
+                    el.style.pointerEvents = 'auto';
+                });
+            }
+
+            // Update skip reason dropdown
+            if (ann.skipReason) {
+                document.getElementById('skip-reason').value = ann.skipReason;
+            }
+
+            // Update candidate selection
+            document.querySelectorAll('.candidate').forEach(el => el.classList.remove('selected'));
+            if (ann.choice) {
+                const radio = document.getElementById('choice_' + ann.choice);
+                if (radio) {
+                    radio.checked = true;
+                    radio.closest('.candidate').classList.add('selected');
+                }
+            }
+
+            // Update confidence buttons
+            document.querySelectorAll('.confidence-btn').forEach((btn, idx) => {
+                btn.classList.toggle('selected', ann.confidence === idx + 1);
+            });
+
+            // Update notes
+            if (ann.notes) {
+                document.getElementById('notes').value = ann.notes;
+            }
+
+            // Update save status
+            const status = document.getElementById('save-status');
+            if (ann.skipped) {
+                status.textContent = 'Marked as SKIP' + (ann.skipReason ? ' - ' + ann.skipReason : '');
+                status.className = 'save-status saved';
+            } else if (ann.choice) {
+                status.textContent = 'Saved: Choice ' + ann.choice + (ann.confidence ? ', Confidence ' + ann.confidence : '');
+                status.className = 'save-status saved';
+            } else {
+                status.textContent = 'Not saved yet - please select a response or skip';
+                status.className = 'save-status unsaved';
+            }
+        }
+
+        function confirmBeforeNav(event) {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            // If a choice is made, confirm it before navigating
+            if (ann.choice && !ann.confirmed) {
+                ann.confirmed = true;
+                ann.confirmedAt = new Date().toISOString();
+                annotations[itemId] = ann;
+                saveAnnotations(annotations);
+            }
+            // Allow navigation to proceed
+        }
+
+        function confirmAndNext() {
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+
+            if (!ann.choice) {
+                alert('Please select a response before confirming.');
+                return;
+            }
+
+            // Mark as confirmed
+            ann.confirmed = true;
+            ann.confirmedAt = new Date().toISOString();
+            annotations[itemId] = ann;
+            saveAnnotations(annotations);
+
+            // Update button state
+            const btn = document.getElementById('confirm-btn');
+            btn.textContent = 'Confirmed!';
+            btn.classList.add('confirmed');
+
+            // Navigate to next after brief delay
+            setTimeout(() => {
+                window.location.href = 'rank_0262.html';
+            }, 500);
+        }
+
+        // Load saved state on page load
+        window.onload = function() {
+            updateUI();
+            // Update confirm button if already confirmed
+            const annotations = getAnnotations();
+            const ann = annotations[itemId] || {};
+            if (ann.confirmed) {
+                const btn = document.getElementById('confirm-btn');
+                btn.textContent = 'Confirmed';
+                btn.classList.add('confirmed');
+            }
+        };
+    </script>
+</body>
+</html>
