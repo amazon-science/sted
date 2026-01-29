@@ -3,46 +3,50 @@ Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: icml2026_submission.aux
 The style file: icml2025.bst
 Database file #1: neurips_2025_camera_ready.bib
+Warning--entry type for "seperman" isn't style-file defined
+--line 36 of file neurips_2025_camera_ready.bib
+Warning--entry type for "toucan2024" isn't style-file defined
+--line 842 of file neurips_2025_camera_ready.bib
 Warning--can't use both volume and number fields in Chawathe1996
-You've used 39 entries,
+You've used 38 entries,
             2773 wiz_defined-function locations,
-            835 strings with 12400 characters,
-and the built_in function-call counts, 22000 in all, are:
-= -- 1891
-> -- 1595
+            833 strings with 12243 characters,
+and the built_in function-call counts, 21373 in all, are:
+= -- 1840
+> -- 1528
 < -- 28
-+ -- 537
-- -- 498
-* -- 1814
-:= -- 3352
-add.period$ -- 134
-call.type$ -- 39
-change.case$ -- 275
-chr.to.int$ -- 39
-cite$ -- 79
-duplicate$ -- 911
-empty$ -- 1599
-format.name$ -- 554
-if$ -- 4630
++ -- 515
+- -- 477
+* -- 1757
+:= -- 3246
+add.period$ -- 130
+call.type$ -- 38
+change.case$ -- 266
+chr.to.int$ -- 38
+cite$ -- 77
+duplicate$ -- 891
+empty$ -- 1568
+format.name$ -- 531
+if$ -- 4504
 int.to.chr$ -- 1
 int.to.str$ -- 1
-missing$ -- 32
-newline$ -- 219
-num.names$ -- 158
-pop$ -- 595
+missing$ -- 31
+newline$ -- 213
+num.names$ -- 154
+pop$ -- 579
 preamble$ -- 1
-purify$ -- 237
+purify$ -- 229
 quote$ -- 0
-skip$ -- 810
+skip$ -- 790
 stack$ -- 0
-substring$ -- 670
-swap$ -- 166
+substring$ -- 668
+swap$ -- 165
 text.length$ -- 13
 text.prefix$ -- 0
 top$ -- 0
-type$ -- 424
+type$ -- 413
 warning$ -- 1
-while$ -- 167
+while$ -- 164
 width$ -- 0
-write$ -- 530
-(There was 1 warning)
+write$ -- 516
+(There were 3 warnings)
