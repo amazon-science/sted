@@ -1,0 +1,30 @@
+
+% Table: LLM-as-Judge Baseline Comparison
+\begin{table}[h]
+\centering
+\caption{Comparison of Similarity Metrics Including LLM-as-Judge Baseline}
+\label{tab:llm_judge_comparison}
+\begin{tabular}{lccccc}
+\toprule
+Test Case & TED & STED & BERTScore & DeepDiff & LLM Judge \\
+\midrule
+Identical & \textbf{1.000} & \textbf{1.000} & \textbf{1.000} & \textbf{1.000} & \textbf{1.000} \\
+Minor Expression Variation & 1.000 & 0.982 & 0.986 & 0.955 & \textbf{0.950} \\
+Moderate Expression Variation & 1.000 & 0.966 & 0.969 & \textbf{0.750} & 0.930 \\
+High Value Variation & 1.000 & 0.793 & 0.929 & 0.650 & 0.650 \\
+Breaking Flat Structure & -1.333 & \textbf{0.000} & 0.939 & 0.864 & 0.800 \\
+Breaking Nested Change & \textbf{0.000} & \textbf{0.000} & 0.900 & 0.864 & 0.850 \\
+Field Name Semantic & 0.000 & \textbf{0.712} & 0.972 & \textbf{0.786} & \textbf{0.850} \\
+Type Changes & 1.000 & 0.857 & 0.957 & \textbf{0.500} & 0.850 \\
+Array Order Variation & \textbf{1.000} & \textbf{1.000} & \textbf{1.000} & \textbf{1.000} & \textbf{1.000} \\
+Missing Optional Fields & 0.600 & 0.560 & 0.954 & \textbf{0.889} & \textbf{0.850} \\
+\midrule
+\multicolumn{6}{l}{\textit{In-Range Accuracy (\%)}} \\
+Accuracy & 30.0 & 50.0 & 20.0 & 60.0 & 50.0 \\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}
+\small
+\item Note: Bold values indicate scores within expected range. LLM Judge uses Claude 3 Haiku.
+\end{tablenotes}
+\end{table}

@@ -1,0 +1,41 @@
+
+% Table: Statistical Analysis of Variation Detection
+\begin{table}[h]
+\centering
+\caption{Statistical Analysis of Metric Sensitivity to Expression Variation}
+\label{tab:variation_stats}
+\begin{tabular}{lcccccc}
+\toprule
+Metric & Spearman $\rho$ & p-value & Cohen's $d$ & Effect & Low (95\% CI) & High (95\% CI) \\
+\midrule
+TED & -- & -- & 0.00 & negligible & 1.000 [1.000, 1.000] & 1.000 [1.000, 1.000] \\
+STED & -0.617^{***} & 1.84e-06 & 1.47 & large & 0.979 [0.972, 0.986] & 0.953 [0.945, 0.962] \\
+BERTSCORE & -0.602^{***} & 3.70e-06 & 1.50 & large & 0.965 [0.954, 0.974] & 0.935 [0.926, 0.943] \\
+DEEPDIFF & -0.955^{***} & 5.12e-27 & 5.18 & large & 0.941 [0.924, 0.957] & 0.595 [0.562, 0.632] \\
+GNN & -0.693^{***} & 2.50e-08 & 1.37 & large & 1.000 [1.000, 1.000] & 0.997 [0.996, 0.998] \\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}
+\small
+\item Note: $^{***}p<0.001$, $^{**}p<0.01$, $^{*}p<0.05$. Low = variation ratio 0.1-0.3, High = 0.7-1.0.
+\end{tablenotes}
+\end{table}
+
+
+% Table: Schema Breaking Change Detection
+\begin{table}[h]
+\centering
+\caption{Metric Response to Structural Breaking Changes}
+\label{tab:breaking_changes}
+\begin{tabular}{lccc}
+\toprule
+Metric & Flat Structure & Nested Change & Correctly Detects Break \\
+\midrule
+TED & -0.003 & 0.886 & Yes \\
+STED & 0.000 & 0.000 & \textbf{Yes} \\
+BERTSCORE & 0.892 & 0.990 & No \\
+DEEPDIFF & 0.802 & 0.780 & No \\
+GNN & 0.871 & 0.853 & No \\
+\bottomrule
+\end{tabular}
+\end{table}
