@@ -128,6 +128,7 @@ class SemanticJsonTreeConsistencyEvaluator:
                  required_fields: Set[str] = None,
                  order_sensitive_fields: Set[str] = None,
                  exact_match_fields: Set[str] = None,
+                 exact_match_all_keys: bool = False,
                  model_id: str = 'all-MiniLM-L6-v2',
                  chunk_size: int = 300,
                  chunk_overlap: int = 50,
@@ -156,6 +157,9 @@ class SemanticJsonTreeConsistencyEvaluator:
                                (e.g., {"name"} for function/tool names).
                                For these fields, semantic similarity is bypassed and
                                only exact value equality is considered (1.0 if equal, 0.0 otherwise).
+            exact_match_all_keys: If True, use exact string matching for all field names (keys)
+                                 instead of semantic similarity. Useful for tool calling where
+                                 parameter names must match exactly.
             model_id: Name of the sentence transformer model or Bedrock model ID
             chunk_size: Size of chunks for text splitting
             chunk_overlap: Overlap between chunks
@@ -170,6 +174,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         self.required_fields = required_fields or set()
         self.order_sensitive_fields = order_sensitive_fields or set()
         self.exact_match_fields = exact_match_fields or set()
+        self.exact_match_all_keys = exact_match_all_keys
 
         # Initialize embedding model if available
         self.embedding_model = None
@@ -1667,11 +1672,17 @@ class SemanticJsonTreeConsistencyEvaluator:
         key1 = re.sub(r'\[\d+\]', '', key1)
         key2 = re.sub(r'\[\d+\]', '', key2)
 
-        # replace all special characters such as -, _, % with space
-        key1 = re.sub(r'[^a-zA-Z0-9]', ' ', key1)
-        key2 = re.sub(r'[^a-zA-Z0-9]', ' ', key2)
+        # Use exact match for field names if enabled (e.g., for tool calling)
+        if self.exact_match_all_keys:
+            # Exact string match for field names
+            field_similarity = 1.0 if key1 == key2 else 0.0
+        else:
+            # Semantic similarity for field names (default behavior)
+            # replace all special characters such as -, _, % with space
+            key1_normalized = re.sub(r'[^a-zA-Z0-9]', ' ', key1)
+            key2_normalized = re.sub(r'[^a-zA-Z0-9]', ' ', key2)
+            field_similarity = self._calculate_semantic_similarity(key1_normalized, key2_normalized)
 
-        field_similarity = self._calculate_semantic_similarity(key1, key2)
         structural_similarity = (field_similarity + (1 if path_match else 0)) / 2
 
         return structural_similarity

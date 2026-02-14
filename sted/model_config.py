@@ -1,5 +1,33 @@
 """Centralized model configuration for STED framework."""
 
+# Invalid ShareGPT sample indices (ground_truth has "Invalid JSON" error)
+# These samples should be excluded from all experiments
+# Total: 80 - 9 = 71 valid ShareGPT samples
+INVALID_SHAREGPT_SAMPLES = [10, 17, 18, 38, 45, 60, 67, 68, 75]
+
+# Final 18 models that work on both ShareGPT (71 valid samples) and Toucan (1006 samples) datasets
+# These are the models used for official benchmarking results
+FINAL_MODELS = [
+    'Qwen3-235B-A22B',
+    'Claude-3.5-Sonnet',
+    'Claude-Haiku-4.5',
+    'Claude-3.7-Sonnet',
+    'Claude-3.5-Haiku',
+    'Claude-Opus-4.5',
+    'Claude-Opus-4',
+    'Claude-Sonnet-4',
+    'Claude-Sonnet-4.5',
+    'Qwen3-32B',
+    'Llama-3.3-70B',
+    'Nova-2-Lite',
+    'Mimo-V2-Flash',  # Also matches 'Mimo-V2-Flash:free'
+    'Grok-4.1-Fast',
+    'Minimax-M2',
+    'GPT-4.1-Mini',
+    'Gemini-2.5-Flash-Lite',
+    'GPT-OSS-120B',
+]
+
 # Model registry: model_id -> (provider, display_name, max_workers)
 # max_workers is based on cross-region RPM quotas from AWS Bedrock
 # Formula: max_workers ≈ RPM / 10 (assuming ~6 seconds avg per request)

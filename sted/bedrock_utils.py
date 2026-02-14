@@ -164,25 +164,36 @@ def inference_with_converse_api(bedrock_client,
         params["inferenceConfig"]["temperature"] = 1
 
 
-    # Send the message with retry logic for ReadTimeoutError
-    max_timeout_retries = 5
-    for timeout_attempt in range(max_timeout_retries):
+    # Send the message with retry logic for ReadTimeoutError and ThrottlingException
+    max_retries = 10
+    for attempt in range(max_retries):
         try:
             response = bedrock_client.converse(**params)
             break  # Success, exit retry loop
         except ReadTimeoutError as e:
-            if timeout_attempt < max_timeout_retries - 1:
-                wait_time = (timeout_attempt + 1) * 30  # 30s, 60s, 90s, 120s
-                logger.warning(f"ReadTimeoutError on attempt {timeout_attempt + 1}/{max_timeout_retries}: {e}. Retrying in {wait_time}s...")
+            if attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 30  # 30s, 60s, 90s, 120s
+                logger.warning(f"ReadTimeoutError on attempt {attempt + 1}/{max_retries}: {e}. Retrying in {wait_time}s...")
                 time.sleep(wait_time)
             else:
-                logger.error(f"ReadTimeoutError after {max_timeout_retries} attempts. Returning empty response.")
+                logger.error(f"ReadTimeoutError after {max_retries} attempts. Returning empty response.")
                 return []  # Return empty list as empty response
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            logger.error(f"Non-timeout exception: {e}")
-            return {}
+            error_str = str(e)
+            # Retry on throttling/rate limit errors with exponential backoff
+            if "ThrottlingException" in error_str or "TooManyRequestsException" in error_str or "Too many tokens" in error_str:
+                if attempt < max_retries - 1:
+                    wait_time = min(300, (2 ** attempt) * 5 + random.uniform(0, 5))  # Exponential backoff with jitter, max 5 min
+                    logger.warning(f"Throttling on attempt {attempt + 1}/{max_retries}: {e}. Retrying in {wait_time:.1f}s...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"Throttling after {max_retries} attempts. Returning empty response.")
+                    return {}
+            else:
+                import traceback
+                traceback.print_exc()
+                logger.error(f"Non-retryable exception: {e}")
+                return {}
     else:
         # All retries exhausted (should not reach here due to return in except block)
         return []

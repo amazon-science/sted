@@ -135,6 +135,13 @@ def main():
                              'in the filename (e.g., embeddings_titan-embed-text-v2_0_dim256_20260126_120000.npz)')
     parser.add_argument('--cache-dir', default=None,
                         help='Directory to save auto-generated cache files (default: results-dir)')
+    parser.add_argument('--exact-match-fields', type=str, default=None,
+                        help='Comma-separated list of field names to use exact matching for instead of semantic similarity. '
+                             'For tool-calling datasets like Toucan, use --exact-match-fields=name to enforce exact '
+                             'matching of tool names. Example: --exact-match-fields=name,type')
+    parser.add_argument('--exact-match-all-keys', action='store_true',
+                        help='Use exact string matching for ALL field names (keys) instead of semantic similarity. '
+                             'Useful for tool calling where parameter names must match exactly.')
     args = parser.parse_args()
 
     # Resolve parallel workers
@@ -156,8 +163,22 @@ def main():
             print(f"Auto-adjusting cache filename to include dimension: {cache_path}")
         args.embedding_cache = cache_path
 
+    # Parse exact match fields if provided
+    exact_match_fields = None
+    if args.exact_match_fields:
+        exact_match_fields = set(f.strip() for f in args.exact_match_fields.split(','))
+        print(f"Using exact match for fields: {exact_match_fields}")
+
     print(f"Using embedding model: {args.model_id} with dimension={args.dimension}")
-    evaluator = SemanticJsonTreeConsistencyEvaluator(model_id=args.model_id, region_name=args.region, embedding_dim=args.dimension)
+    if args.exact_match_all_keys:
+        print("Using exact match for ALL field names (keys)")
+    evaluator = SemanticJsonTreeConsistencyEvaluator(
+        model_id=args.model_id,
+        region_name=args.region,
+        embedding_dim=args.dimension,
+        exact_match_fields=exact_match_fields,
+        exact_match_all_keys=args.exact_match_all_keys
+    )
 
     # Apply STED optimization settings
     if args.use_greedy:
