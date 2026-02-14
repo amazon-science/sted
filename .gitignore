@@ -259,7 +259,6 @@ results/latest
 # Large generated datasets and results
 llm_gen_results/
 synthetic_dataset/
-sharegpt_data/
 
 # MCP deployment package (generated)
 mcp_deployment/
@@ -270,14 +269,28 @@ research/experiments/*.zip
 research/experiments/*/llm_gen_results/
 research/notebooks/.ipynb_checkpoints/
 
-research/
-benchmarks/
+# Archive directory (old/deprecated files)
+.archive/
 
-# Experimental modules
+# Temporary directories
+temp_test/
+temperature_experiment/
+
+# Large archives (store in S3 instead)
+*.zip
+*.tar.gz
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.synctex.gz
+texput.log
+
+# Human validation interface (generated)
+human_validation_interface/samples/
+
+# Experimental modules (not part of core library)
 sted/gnn.py
 sted/pdc_metric.py
 sted/probabilistic_consistency.py
-
-# Experimental scripts
-scripts/experiments/
-scripts/analysis/
