@@ -5,6 +5,8 @@ Run LLM Judge as a baseline for Best-Match Selection Task.
 Uses the existing LLMJudge class to score each candidate against ground truth
 and pick the most similar one, providing a baseline comparison against
 STED, BERTScore, DeepDiff, and TED methods.
+
+NEW: Runs multiple times per sample to measure LLM-as-judge consistency.
 """
 
 import argparse
@@ -15,7 +17,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import Counter
 from tqdm import tqdm
+import numpy as np
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent.parent))
@@ -29,7 +33,8 @@ logger = logging.getLogger(__name__)
 def score_candidates(
     judge: LLMJudge,
     ground_truth: dict,
-    candidates: list
+    candidates: list,
+    temperature: float = 0.0
 ) -> dict:
     """
     Score each candidate against ground truth using LLM judge.
@@ -38,6 +43,7 @@ def score_candidates(
         judge: LLMJudge instance
         ground_truth: Ground truth JSON
         candidates: List of candidate responses with 'label' and 'response'
+        temperature: Temperature for LLM calls
 
     Returns:
         Dict with scores for each candidate and the best pick
@@ -67,55 +73,145 @@ def score_candidates(
     }
 
 
-def process_sample(args_tuple):
-    """Process a single sample (for parallel execution)."""
-    judge, sample = args_tuple
+def single_run(args):
+    """Execute a single LLM judge run (for parallel execution)."""
+    judge, ground_truth, candidates, run_idx, item_id = args
+    try:
+        result = score_candidates(judge, ground_truth, candidates)
+        return {
+            'run': run_idx,
+            'pick': result['pick'],
+            'scores': result['scores'],
+            'best_score': result['best_score'],
+            'error': None
+        }
+    except Exception as e:
+        logger.error(f"Error processing {item_id} run {run_idx}: {e}")
+        return {
+            'run': run_idx,
+            'pick': None,
+            'scores': {},
+            'best_score': 0.0,
+            'error': str(e)
+        }
+
+
+def process_sample_multi_run(args_tuple):
+    """Process a single sample multiple times to measure consistency (with parallel runs)."""
+    judge, sample, n_runs, temperature, parallel_runs = args_tuple
 
     item_id = sample.get('id', 'unknown')
     ground_truth = sample.get('ground_truth', {})
     candidates = sample.get('candidates', [])
 
-    try:
-        result = score_candidates(judge, ground_truth, candidates)
-        return {
-            'item_id': item_id,
-            'pick': result['pick'],
-            'scores': result['scores'],
-            'best_score': result['best_score'],
-            'error': False
-        }
-    except Exception as e:
-        logger.error(f"Error processing {item_id}: {e}")
-        return {
-            'item_id': item_id,
-            'pick': None,
-            'scores': {},
-            'best_score': 0.0,
-            'error': True,
-            'error_message': str(e)
-        }
+    all_runs = []
+    all_picks = []
+    all_scores = []
+    errors = 0
+
+    if parallel_runs and n_runs > 1:
+        # Run in parallel using ThreadPoolExecutor
+        run_args = [(judge, ground_truth, candidates, run_idx, item_id) for run_idx in range(n_runs)]
+        with ThreadPoolExecutor(max_workers=min(n_runs, 5)) as executor:
+            results = list(executor.map(single_run, run_args))
+
+        for result in results:
+            all_runs.append(result)
+            if result['error']:
+                errors += 1
+            else:
+                all_picks.append(result['pick'])
+                all_scores.append(result['scores'])
+    else:
+        # Sequential execution
+        for run_idx in range(n_runs):
+            try:
+                result = score_candidates(judge, ground_truth, candidates, temperature)
+                all_runs.append({
+                    'run': run_idx,
+                    'pick': result['pick'],
+                    'scores': result['scores'],
+                    'best_score': result['best_score']
+                })
+                all_picks.append(result['pick'])
+                all_scores.append(result['scores'])
+            except Exception as e:
+                logger.error(f"Error processing {item_id} run {run_idx}: {e}")
+                all_runs.append({
+                    'run': run_idx,
+                    'pick': None,
+                    'scores': {},
+                    'best_score': 0.0,
+                    'error': str(e)
+                })
+                errors += 1
+
+    # Compute consistency metrics
+    valid_picks = [p for p in all_picks if p is not None]
+
+    if valid_picks:
+        # Count how many times each pick was selected
+        pick_counts = Counter(valid_picks)
+        most_common_pick, most_common_count = pick_counts.most_common(1)[0]
+
+        # Consistency = fraction of runs that agree with majority
+        consistency = most_common_count / len(valid_picks)
+
+        # All-agree = did all runs agree?
+        all_agree = len(set(valid_picks)) == 1
+
+        # Score variance per candidate
+        score_variance = {}
+        for label in candidates[0]['response'] if candidates else []:
+            label_scores = [s.get(label, 0) for s in all_scores if label in s]
+            if label_scores:
+                score_variance[label] = np.var(label_scores)
+    else:
+        most_common_pick = None
+        consistency = 0.0
+        all_agree = False
+        score_variance = {}
+
+    return {
+        'item_id': item_id,
+        'n_runs': n_runs,
+        'n_errors': errors,
+        'picks': all_picks,
+        'pick_counts': dict(Counter(valid_picks)) if valid_picks else {},
+        'majority_pick': most_common_pick,
+        'consistency': consistency,
+        'all_agree': all_agree,
+        'runs': all_runs,
+        'error': errors == n_runs  # Only error if ALL runs failed
+    }
 
 
-def run_llm_judge_baseline(
+def run_llm_judge_consistency(
     dataset_path: str,
     output_path: str,
     model_id: str = "us.anthropic.claude-3-5-haiku-20241022-v1:0",
     region: str = "us-west-2",
+    n_runs: int = 5,
+    temperature: float = 0.7,
     n_workers: int = 3,
     limit: int = None,
-    resume: bool = True
+    resume: bool = True,
+    parallel_runs: bool = True
 ):
     """
-    Run LLM judge baseline on the validation dataset.
+    Run LLM judge multiple times per sample to measure consistency.
 
     Args:
         dataset_path: Path to validation dataset JSON
         output_path: Path to save results
         model_id: Bedrock model ID for the judge
         region: AWS region
-        n_workers: Number of parallel workers
+        n_runs: Number of runs per sample to measure consistency
+        temperature: Temperature for LLM calls (higher = more variability)
+        n_workers: Number of parallel workers for processing samples
         limit: Limit number of items to process
         resume: Resume from existing results
+        parallel_runs: Run the n_runs in parallel within each sample
     """
 
     # Load dataset
@@ -149,86 +245,108 @@ def run_llm_judge_baseline(
 
     if not items_to_process:
         logger.info("All items already processed!")
-        return list(existing_results.values())
+        results = list(existing_results.values())
+        compute_consistency_statistics(results, dataset)
+        return results
 
-    # Create LLM Judge
-    logger.info(f"Creating LLM Judge with model: {model_id}")
+    # Create LLM Judge with specified temperature
+    logger.info(f"Creating LLM Judge with model: {model_id}, temperature: {temperature}")
     judge = LLMJudge(
         provider="bedrock",
         model_id=model_id,
         region_name=region,
-        temperature=0.0
+        temperature=temperature
     )
 
     results = list(existing_results.values())
     errors = 0
     completed = 0
 
-    # Process items in parallel using ThreadPoolExecutor
-    logger.info(f"Processing with {n_workers} parallel workers")
-    with tqdm(total=len(items_to_process), desc="LLM Judge Baseline") as pbar:
+    # Process items with parallel workers
+    logger.info(f"Processing {len(items_to_process)} items with {n_runs} runs each (workers={n_workers}, parallel_runs={parallel_runs})")
+
+    def process_item(item):
+        """Process a single item."""
+        try:
+            return process_sample_multi_run((judge, item, n_runs, temperature, parallel_runs))
+        except Exception as e:
+            logger.error(f"Error processing {item.get('id')}: {e}")
+            return {
+                'item_id': item.get('id'),
+                'n_runs': n_runs,
+                'n_errors': n_runs,
+                'picks': [],
+                'majority_pick': None,
+                'consistency': 0.0,
+                'all_agree': False,
+                'runs': [],
+                'error': True,
+                'error_message': str(e)
+            }
+
+    if n_workers > 1:
+        # Parallel processing of samples
         with ThreadPoolExecutor(max_workers=n_workers) as executor:
-            # Submit all tasks
-            futures = {executor.submit(process_sample, (judge, item)): item.get('id') for item in items_to_process}
-
-            for future in as_completed(futures):
-                item_id = futures[future]
-                try:
-                    result = future.result()
-                    results.append(result)
-                    completed += 1
-
-                    if result.get('error'):
-                        errors += 1
-
-                except Exception as e:
-                    logger.error(f"Error processing {item_id}: {e}")
-                    results.append({
-                        'item_id': item_id,
-                        'pick': None,
-                        'scores': {},
-                        'best_score': 0.0,
-                        'error': True,
-                        'error_message': str(e)
-                    })
+            futures = {executor.submit(process_item, item): item.get('id') for item in items_to_process}
+            for future in tqdm(as_completed(futures), total=len(futures), desc=f"LLM Judge ({n_runs} runs × {n_workers} workers)"):
+                result = future.result()
+                results.append(result)
+                completed += 1
+                if result.get('error'):
                     errors += 1
-                    completed += 1
-
-                pbar.update(1)
-                pbar.set_postfix({'errors': errors, 'done': completed})
-
-                # Save intermediate results every 20 items
-                if completed % 20 == 0:
-                    save_results(results, output_path, model_id, dataset)
+                # Save intermediate results every 10 items
+                if completed % 10 == 0:
+                    save_consistency_results(results, output_path, model_id, n_runs, temperature, dataset)
+    else:
+        # Sequential processing
+        for item in tqdm(items_to_process, desc=f"LLM Judge ({n_runs} runs each)"):
+            result = process_item(item)
+            results.append(result)
+            completed += 1
+            if result.get('error'):
+                errors += 1
+            # Save intermediate results every 10 items
+            if completed % 10 == 0:
+                save_consistency_results(results, output_path, model_id, n_runs, temperature, dataset)
 
     # Save final results
-    save_results(results, output_path, model_id, dataset)
+    save_consistency_results(results, output_path, model_id, n_runs, temperature, dataset)
 
     # Compute and print statistics
-    compute_statistics(results, dataset)
+    compute_consistency_statistics(results, dataset)
 
     return results
 
 
-def save_results(results: list, output_path: str, model_id: str, dataset: dict):
+def save_consistency_results(results: list, output_path: str, model_id: str, n_runs: int, temperature: float, dataset: dict):
     """Save results to JSON file."""
 
-    # Build method picks mapping
-    method_picks = {'llm': {}}
-    for result in results:
-        if not result.get('error'):
-            method_picks['llm'][result['item_id']] = result['pick']
+    # Compute overall consistency stats
+    valid_results = [r for r in results if not r.get('error')]
+
+    if valid_results:
+        avg_consistency = np.mean([r['consistency'] for r in valid_results])
+        all_agree_rate = np.mean([1 if r['all_agree'] else 0 for r in valid_results])
+    else:
+        avg_consistency = 0.0
+        all_agree_rate = 0.0
 
     output_data = {
         'metadata': {
             'created': datetime.now().isoformat(),
             'model': model_id,
+            'n_runs_per_sample': n_runs,
+            'temperature': temperature,
             'n_items': len(results),
             'n_errors': sum(1 for r in results if r.get('error')),
-            'method': 'llm_judge',
+            'method': 'llm_judge_consistency',
             'source_dataset': dataset.get('metadata', {})
         },
-        'method_picks': method_picks,
+        'summary': {
+            'avg_consistency': avg_consistency,
+            'all_agree_rate': all_agree_rate,
+            'n_valid': len(valid_results)
+        },
         'results': results
     }
 
@@ -240,92 +358,96 @@ def save_results(results: list, output_path: str, model_id: str, dataset: dict):
 
     logger.info(f"Saved {len(results)} results to {output_path}")
 
-    # Also save as CSV in human annotation format
-    csv_path = output_path.replace('.json', '.csv')
-    save_results_csv(results, csv_path, model_id)
 
+def compute_consistency_statistics(results: list, dataset: dict):
+    """Compute and print consistency statistics."""
 
-def save_results_csv(results: list, csv_path: str, model_id: str):
-    """Save results in CSV format matching human annotation format."""
-    import csv
+    valid_results = [r for r in results if not r.get('error')]
 
-    # Sort results by item_id for consistent ordering
-    sorted_results = sorted(results, key=lambda x: x.get('item_id', ''))
+    if not valid_results:
+        print("\nNo valid results to analyze.")
+        return
 
-    with open(csv_path, 'w', newline='') as f:
-        writer = csv.writer(f)
-        # Write header matching human annotation format
-        writer.writerow(['item_id', 'choice', 'confidence', 'skipped', 'skip_reason', 'notes', 'timestamp'])
+    # Consistency metrics
+    consistencies = [r['consistency'] for r in valid_results]
+    all_agree_flags = [r['all_agree'] for r in valid_results]
 
-        for result in sorted_results:
-            item_id = result.get('item_id', '')
-            choice = result.get('pick', '')
-            error = result.get('error', False)
-            timestamp = datetime.now().isoformat()
-
-            # Mark as skipped if there was an error
-            skipped = 'true' if error else 'false'
-            skip_reason = result.get('error_message', '') if error else ''
-            notes = f"LLM Judge ({model_id}), score={result.get('best_score', 0):.3f}"
-
-            writer.writerow([item_id, choice, '', skipped, skip_reason, notes, timestamp])
-
-    logger.info(f"Saved CSV results to {csv_path}")
-
-
-def compute_statistics(results: list, dataset: dict):
-    """Compute and print statistics comparing LLM judge to other methods."""
-
-    # Build method picks map from dataset
+    # Build method picks map from dataset for comparison
     method_picks = {}
     for item in dataset.get('items', []):
         item_id = item.get('id')
         picks = item.get('metadata', {}).get('method_picks', {})
         method_picks[item_id] = picks
 
-    # Count agreements with each method
+    # Count agreements with each method (using majority pick)
     methods = ['sted', 'deepdiff', 'ted', 'bertscore']
     agreement_counts = {method: 0 for method in methods}
-    total_valid = 0
+    total_comparable = 0
 
-    llm_picks = {}
-    for result in results:
-        if result.get('error'):
-            continue
-
+    for result in valid_results:
         item_id = result['item_id']
-        choice = result.get('pick')
-        llm_picks[item_id] = choice
+        majority_pick = result.get('majority_pick')
 
-        if item_id not in method_picks:
+        if item_id not in method_picks or majority_pick is None:
             continue
 
-        total_valid += 1
+        total_comparable += 1
 
         for method in methods:
-            if method_picks[item_id].get(method) == choice:
+            if method_picks[item_id].get(method) == majority_pick:
                 agreement_counts[method] += 1
 
     # Print results
-    print("\n" + "=" * 60)
-    print("LLM Judge Baseline Results Summary")
-    print("=" * 60)
-    print(f"Total items judged: {len(results)}")
-    print(f"Valid judgments: {total_valid}")
-    print(f"Errors: {len(results) - total_valid}")
-    print("")
-    print("Agreement with other methods:")
-    for method in methods:
-        if total_valid > 0:
-            rate = agreement_counts[method] / total_valid * 100
-            print(f"  {method.upper():12s}: {agreement_counts[method]:3d}/{total_valid} ({rate:.1f}%)")
-    print("=" * 60)
+    print("\n" + "=" * 70)
+    print("LLM-AS-JUDGE CONSISTENCY ANALYSIS")
+    print("=" * 70)
+    print(f"\nSamples analyzed: {len(valid_results)}")
+    print(f"Runs per sample: {valid_results[0].get('n_runs', 'N/A') if valid_results else 'N/A'}")
 
-    return agreement_counts, total_valid
+    print(f"\n{'='*40}")
+    print("CONSISTENCY METRICS (Is LLM-as-judge self-consistent?)")
+    print(f"{'='*40}")
+    print(f"  Average consistency:     {np.mean(consistencies):.1%}")
+    print(f"  Min consistency:         {np.min(consistencies):.1%}")
+    print(f"  Max consistency:         {np.max(consistencies):.1%}")
+    print(f"  Std consistency:         {np.std(consistencies):.1%}")
+    print(f"  All runs agree rate:     {np.mean(all_agree_flags):.1%}")
+
+    # Breakdown by consistency level
+    perfect = sum(1 for c in consistencies if c == 1.0)
+    high = sum(1 for c in consistencies if 0.8 <= c < 1.0)
+    medium = sum(1 for c in consistencies if 0.6 <= c < 0.8)
+    low = sum(1 for c in consistencies if c < 0.6)
+
+    print(f"\n  Consistency breakdown:")
+    print(f"    Perfect (100%):        {perfect}/{len(valid_results)} ({perfect/len(valid_results)*100:.1f}%)")
+    print(f"    High (80-99%):         {high}/{len(valid_results)} ({high/len(valid_results)*100:.1f}%)")
+    print(f"    Medium (60-79%):       {medium}/{len(valid_results)} ({medium/len(valid_results)*100:.1f}%)")
+    print(f"    Low (<60%):            {low}/{len(valid_results)} ({low/len(valid_results)*100:.1f}%)")
+
+    print(f"\n{'='*40}")
+    print("AGREEMENT WITH OTHER METHODS")
+    print(f"{'='*40}")
+    if total_comparable > 0:
+        for method in methods:
+            rate = agreement_counts[method] / total_comparable * 100
+            print(f"  {method.upper():12s}: {agreement_counts[method]:3d}/{total_comparable} ({rate:.1f}%)")
+    else:
+        print("  No comparable items found.")
+
+    print("=" * 70)
+
+    # Return for programmatic use
+    return {
+        'avg_consistency': np.mean(consistencies),
+        'all_agree_rate': np.mean(all_agree_flags),
+        'agreement_with_methods': agreement_counts,
+        'total_comparable': total_comparable
+    }
 
 
 def main():
-    parser = argparse.ArgumentParser(description="LLM Judge Baseline for Best-Match Selection")
+    parser = argparse.ArgumentParser(description="LLM Judge Consistency Analysis")
     parser.add_argument(
         '--dataset',
         type=str,
@@ -335,7 +457,7 @@ def main():
     parser.add_argument(
         '--output',
         type=str,
-        default='scripts/data/human_validation/best_match_selection/data/llm_judge_baseline_results.json',
+        default='scripts/data/human_validation/best_match_selection/data/llm_judge_consistency_results.json',
         help='Path to save results'
     )
     parser.add_argument(
@@ -351,10 +473,22 @@ def main():
         help='AWS region'
     )
     parser.add_argument(
+        '--n-runs',
+        type=int,
+        default=5,
+        help='Number of runs per sample to measure consistency'
+    )
+    parser.add_argument(
+        '--temperature',
+        type=float,
+        default=0.7,
+        help='Temperature for LLM calls (higher = more variability expected)'
+    )
+    parser.add_argument(
         '--workers',
         type=int,
-        default=1,
-        help='Number of parallel workers (keep low to avoid rate limits)'
+        default=3,
+        help='Number of parallel workers for processing samples'
     )
     parser.add_argument(
         '--limit',
@@ -367,17 +501,25 @@ def main():
         action='store_true',
         help='Do not resume from existing results'
     )
+    parser.add_argument(
+        '--no-parallel-runs',
+        action='store_true',
+        help='Disable parallel execution of runs within each sample'
+    )
 
     args = parser.parse_args()
 
-    run_llm_judge_baseline(
+    run_llm_judge_consistency(
         dataset_path=args.dataset,
         output_path=args.output,
         model_id=args.model,
         region=args.region,
+        n_runs=args.n_runs,
+        temperature=args.temperature,
         n_workers=args.workers,
         limit=args.limit,
-        resume=not args.no_resume
+        resume=not args.no_resume,
+        parallel_runs=not args.no_parallel_runs
     )
 
 
