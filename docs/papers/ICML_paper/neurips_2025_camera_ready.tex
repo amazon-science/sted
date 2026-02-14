@@ -1,0 +1,947 @@
+\documentclass{article}
+
+% if you need to pass options to natbib, use, e.g.:
+%     \PassOptionsToPackage{numbers, compress}{natbib}
+% before loading neurips_2025
+
+% The authors should use one of these tracks.
+% Before accepting by the NeurIPS conference, select one of the options below.
+% 0. "default" for submission
+% \usepackage{neurips_2025}
+% the "default" option is equal to the "main" option, which is used for the Main Track with double-blind reviewing.
+% 1. "main" option is used for the Main Track
+%  \usepackage[main]{neurips_2025}
+% 2. "position" option is used for the Position Paper Track
+%  \usepackage[position]{neurips_2025}
+% 3. "dandb" option is used for the Datasets & Benchmarks Track
+ % \usepackage[dandb]{neurips_2025}
+% 4. "creativeai" option is used for the Creative AI Track
+%  \usepackage[creativeai]{neurips_2025}
+% 5. "sglblindworkshop" option is used for the Workshop with single-blind reviewing
+ % \usepackage[sglblindworkshop]{neurips_2025}
+% 6. "dblblindworkshop" option is used for the Workshop with double-blind reviewing
+%  \usepackage[dblblindworkshop]{neurips_2025}
+
+% After being accepted, the authors should add "final" behind the track to compile a camera-ready version.
+% 1. Main Track
+ % \usepackage[main, final]{neurips_2025}
+% 2. Position Paper Track
+%  \usepackage[position, final]{neurips_2025}
+% 3. Datasets & Benchmarks Track
+ % \usepackage[dandb, final]{neurips_2025}
+% 4. Creative AI Track
+%  \usepackage[creativeai, final]{neurips_2025}
+% 5. Workshop with single-blind reviewing
+%  \usepackage[sglblindworkshop, final]{neurips_2025}
+% 6. Workshop with double-blind reviewing
+\usepackage[dblblindworkshop, final]{neurips_2025}
+% Note. For the workshop paper template, both \title{} and \workshoptitle{} are required, with the former indicating the paper title shown in the title and the latter indicating the workshop title displayed in the footnote.
+% For workshops (5., 6.), the authors should add the name of the workshop, "\workshoptitle" command is used to set the workshop title.
+\workshoptitle{Structured Probabilistic Inference and Generative Modeling}
+
+% "preprint" option is used for arXiv or other preprint submissions
+ % \usepackage[preprint]{neurips_2025}
+
+% to avoid loading the natbib package, add option nonatbib:
+%    \usepackage[nonatbib]{neurips_2025}
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{xcolor}         % colors
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+
+% Theorem environments
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{definition}{Definition}
+\newtheorem{remark}{Remark}
+% Note. For the workshop paper template, both \title{} and \workshoptitle{} are required, with the former indicating the paper title shown in the title and the latter indicating the workshop title displayed in the footnote. 
+\title{STED and Consistency Scoring: A Framework for Evaluating LLM Structured Output Reliability}
+
+
+% The \author macro works with any number of authors. There are two commands
+% used to separate the names and addresses of multiple authors: \And and \AND.
+%
+% Using \And between authors leaves it to LaTeX to determine where to break the
+% lines. Using \AND forces a line break at that point. So, if LaTeX puts 3 of 4
+% authors names on the first line, and the last on the second line, try using
+% \AND instead of \And before the third author name.
+
+
+\author{
+Guanghui Wang$^{1}$\thanks{Equal contribution} \quad 
+Jinze Yu$^{1}$\footnotemark[1]\thanks{Corresponding author} \quad
+Xing Zhang$^{1}$ \quad
+Dayuan Jiang$^{1}$ \quad
+Yin Song$^{2}$ \quad
+Bing Zhu$^{3}$  \\
+\textbf{Ziyuan Li}$^{3}$ \quad
+\textbf{Wei Qiu}$^{3}$ \quad
+\textbf{Heng Zhi Qiu}$^{3}$ \quad
+\textbf{Tomal Deb}$^{1}$ \quad
+\textbf{Xuefeng Liu}$^{1}$ \quad 
+\textbf{Peiyang He}$^{1}$\\
+$^{1}$AWS Generative AI Innovation Center\\
+$^{2}$AWS WWSO SA Field Initiatives\\
+$^{3}$HSBC\\
+}
+
+
+\begin{document}
+
+
+\maketitle
+
+
+\begin{abstract}
+Large Language Models (LLMs) are increasingly deployed for structured data generation, yet output consistency remains critical for production applications. We introduce a comprehensive framework for evaluating and improving consistency in LLM-generated structured outputs. Our approach combines: (1) STED (Semantic Tree Edit Distance), a novel similarity metric balancing semantic flexibility with structural strictness when comparing JSON outputs, and (2) a consistency scoring framework aggregating multiple STED measurements across repeated generations to quantify reliability. Through systematic experiments on synthetic datasets with controlled schema, expression, and semantic variations, we demonstrate STED achieves superior performance ($0.86-0.90$ similarity for semantic equivalents, $0.0$ for structural breaks) compared to existing metrics including TED, BERTScore, and DeepDiff. Applying our framework to benchmark 20 LLMs across 11 providers on two evaluation tasks (structured output generation and tool calling) reveals significant variations: Qwen3-235B-A22B achieves perfect consistency on both tasks, while models like Llama-3.3-70B show dramatic task-specific differences (99\% structured output vs 20\% tool calling). Our framework enables practical applications including targeted model selection for structured tasks, iterative prompt refinement for reproducible results, and diagnostic analysis to identify inconsistency root causes. This work provides theoretical foundations and practical tools for ensuring reliable structured output generation in LLM-based production systems.
+\end{abstract}
+
+
+\section{Introduction}
+
+Large Language Models (LLMs) have become integral to production systems requiring structured data generation, particularly in JSON format for APIs, data extraction pipelines, and automated workflows. However, evaluating the consistency and quality of LLM-generated structured outputs presents unique challenges that existing evaluation methods fail to adequately address.
+
+A fundamental issue in evaluating structured outputs is the mismatch between evaluation methods and structured semantics. Consider two structured objects with identical content but different key ordering---while the structured specification treats these as equivalent, popular evaluation methods like BERTScore \cite{Zhang2020} assign them significantly different similarity scores due to position-sensitive embeddings, leading to false negatives in production systems.
+
+The challenge extends beyond simple key reordering. LLMs frequently generate functionally equivalent structures with various forms of semantic equivalence: naming convention differences (\texttt{"user\_name"} versus \texttt{"userName"}), array reorderings where sequence is not semantically significant, structural reorganizations preserving information content, and type representation variations (\texttt{"true"} versus \texttt{true}, \texttt{"123"} versus \texttt{123}). Each represents valid structured data conveying identical information, yet existing metrics fail to recognize their equivalence.
+
+Current evaluation approaches exhibit systematic limitations when applied to structured outputs. BERTScore \cite{Zhang2020}, while effective for natural language evaluation, suffers from order sensitivity that violates JSON's order-agnostic semantics for object properties, systematically underestimating similarity for reordered but identical structures. Tree Edit Distance (TED) methods focus purely on structural differences without considering semantic equivalence, while exact matching approaches are overly restrictive for practical applications.
+
+\textbf{DeepDiff} \cite{seperman} and similar structural comparison tools can ignore ordering through configuration but lack semantic understanding. They treat \texttt{"email"} and \texttt{"email\_address"} as completely different keys, missing obvious semantic relationships that humans would recognize.
+
+These limitations have significant practical consequences. In production systems processing thousands of API responses, false negatives from order sensitivity can trigger unnecessary alerts, increase operational overhead, and mask genuine inconsistencies.
+
+While traditional edit distances like Tree Edit Distance (TED) have been applied to structured data comparison, they fail to handle the semantic equivalences common in LLM outputs. Recent advances in learned edit distances \cite{paassen2018tree} improve classification accuracy but focus on discriminative tasks rather than consistency evaluation. We propose STED (Semantic Tree Edit Distance), which adapts edit distance specifically for LLM output evaluation, balancing semantic equivalence with structural validity.
+
+Unlike embedding-based approaches that learn vectorial representations \cite{paassen2018tree}, STED directly incorporates JSON semantics through three key innovations: (1) \textbf{Semantic-Enhanced Tree Edit Distance} that recognizes semantically equivalent keys and values while preserving structural constraints, (2) \textbf{Order-Invariant Matching} using Hungarian algorithm for optimal element pairing, and (3) \textbf{Multi-Level Similarity} integrating structural, key, value, and type similarities with configurable weights.
+
+Our experiments demonstrate STED's superior discrimination: while BERTScore and DeepDiff score $>0.95$ across all variations---failing to distinguish schema violations from benign reorderings---STED correctly identifies critical differences ($0.23$ for schema violations vs $>0.95$ for order variations), achieving $4\times$ better discrimination.
+
+As LLMs increasingly power production systems, STED provides a theoretically grounded solution for evaluating structured output consistency, enabling reliable deployment through accurate distinction between critical errors and acceptable variations.
+\vspace{-3mm}
+\section{Related Work}
+\vspace{-3mm}
+\subsection{Edit Distance and Structured Data Comparison}
+The tree edit distance problem, formalized by Tai \cite{Tai1979}, provides the foundation for comparing hierarchical structures. Zhang and Shasha \cite{Zhang1989} proposed the first polynomial-time algorithm, later improved by RTED \cite{Pawlik2011} and extended with move operations \cite{Chawathe1996}. However, these classical approaches rely on exact node matching without semantic understanding. Recent learning-based approaches \cite{paassen2018tree, paassen2022revisiting} explore adaptive embeddings, while graph edit distance methods \cite{jain2024graph, piao2023computing} handle complex structures, inspiring our semantic enhancements.
+JSON-specific tools like RFC 6902 \cite{RFC6902} and DeepDiff \cite{seperman} provide structural comparison with optional order-insensitive matching but lack semantic awareness. JSON Schema validation \cite{Wright2022} focuses on conformance rather than similarity, while query languages like JMESPath \cite{JMESPath2014} and JSONPath \cite{Gessner2007} target extraction, not comparison.
+\subsection{Neural Approaches to Similarity}
+BERTScore \cite{Zhang2020} revolutionized text evaluation using contextualized embeddings from BERT \cite{Devlin2019}, but its position sensitivity makes it unsuitable for JSON where key ordering is irrelevant. Advances like Sentence-BERT \cite{Reimers2019}, SimCSE \cite{Gao2021}, and Universal Sentence Encoder \cite{Cer2018} improve embedding quality but process JSON as flat strings, losing structural information. Code similarity work including CodeBERT \cite{Feng2020} and GraphCodeBERT \cite{Guo2021} demonstrates the importance of combining structural and semantic features. Graph neural networks offer another perspective through GraphSAGE \cite{Hamilton2017}, GAT \cite{Velickovic2018}, Tree-LSTM \cite{Tai2015}, and GraphFormers \cite{Yang2021}. While powerful, these require training data and are computationally expensive compared to our approach.
+\subsection{LLM Structured Output Generation and Consistency}
+Recent work addresses structured output challenges in LLMs. Bubeck et al. \cite{Bubeck2023} analyze GPT-4's structured generation capabilities, while HELM \cite{Liang2022} provides holistic evaluation focusing on task performance. SLOT \cite{Wang2024slot} and StructuredRAG \cite{shorten2024structuredrag} address output structuring, with StructEval \cite{yang2025structeval} benchmarking generation capabilities. Format control studies \cite{wang-etal-2025-verifiable, geng2025jsonschema} examine verification and schema conformance.
+LLM consistency research spans multiple dimensions. Elazar et al. \cite{elazar2021measuring} and Raj et al. \cite{Raj2023} examine consistency across paraphrases, while recent studies investigate stability \cite{atil2024llm}, non-determinism \cite{baldwin2024nondeterminism}, and automated analysis \cite{patwardhan2025automated, wu2025estimating}. Temperature effects \cite{renze2024effect, renze-2024-effect} and prompt stability \cite{chen2025prompt} are also explored, but these focus on input variations rather than output consistency for identical inputs.
+\subsection{Semantic Matching and Optimal Assignment}
+Semantic similarity in structured data draws from ontology matching \cite{Euzenat2013} and schema matching \cite{Rahm2001}, with approaches like SimFlood \cite{Melnik2002} and COMA \cite{Do2002} combining multiple strategies. Neural methods including DeepMatcher \cite{Mudgal2018} and SMAT \cite{Zhang2021smat} achieve high accuracy but target one-time alignment rather than continuous evaluation. Distance functions for structured data \cite{ontanon2020overview, kriegel2005similarity, yang2005similarity} provide theoretical foundations.
+The Hungarian algorithm \cite{Kuhn1955, Munkres1957} enables polynomial-time optimal assignment, extended recently for large-scale approximations \cite{Schwiegelshohn2022}. TreeKernel \cite{Collins2001} and subsequent work \cite{Moschitti2006} apply assignment to tree matching, inspiring our combination with semantic similarity for arrays and keys in JSON.
+
+Despite extensive related work, existing methods fail to address structured LLM-generated outputs consistency evaluation challenges:
+(1) Methods focus on either structure or semantics but not both;
+(2) Tools are either order-agnostic or overly sensitive;
+(3) No method handles LLM-specific variation patterns.
+STED bridges these gaps through unified structural-semantic analysis with appropriate order handling and granular insights.
+\vspace{-3mm}
+\section{Methodology}
+\vspace{-3mm}
+We present STED (Semantic Tree Edit Distance), a novel framework for evaluating consistency in LLM-generated structured outputs. While traditional metrics treat structured formats like JSON, XML, and HTML as flat text, we recognize their hierarchical nature by transforming them into tree representations. This allows us to reframe the structured output consistency problem as tree consistency evaluation. Our approach extends classical tree edit distance algorithms with semantic similarity capabilities to compute pairwise distances, then aggregates these distances across multiple LLM generations into a normalized consistency score. This two-stage process addresses the fundamental challenge of quantifying output reliability when LLMs produce functionally equivalent but syntactically different structures.
+
+\subsection{Problem Formulation}
+
+Let $\mathcal{O} = \{o_1, o_2, ..., o_n\}$ denote structured outputs generated by an LLM for identical inputs. While our framework applies to any hierarchical format (JSON, XML, HTML), we use JSON for clarity. Each output $o_i$ is represented as a tree $T_i = (V_i, E_i)$, where $V_i$ contains nodes (keys, values, structural elements) and $E_i$ encodes parent-child relationships.
+
+The consistency evaluation problem involves two stages:
+
+\textbf{Pairwise Similarity:} Given trees $T_1$ and $T_2$, compute a similarity score $s(T_1, T_2) \in [0, 1]$ that captures semantic and structural equivalence, where $s = 1$ indicates perfect consistency and $s = 0$ indicates fundamental incompatibility.
+
+\textbf{Consistency Score:} Given $n$ outputs, aggregate pairwise similarities into a global consistency score $C(\mathcal{O}) \in [0, 1]$ that quantifies the LLM's reliability:
+
+\begin{equation}
+C(\mathcal{O}) = \frac{2}{n(n-1)} \sum_{i=1}^{n-1} \sum_{j=i+1}^{n} s(T_i, T_j)
+\end{equation}
+
+The core challenge is distinguishing benign variations from critical differences that affect functionality, while providing an interpretable consistency metric for production deployment.
+
+\subsection{Tree Representation of Structured Data}
+
+We transform structured documents into trees $T = (V, E)$ where each node $v \in V$ contains: \textbf{Type}: $\{\text{object}, \text{array}, \text{string}, \text{number}, \text{boolean}, \text{null}\}$; \textbf{Label}: Key name for object properties; \textbf{Value}: Raw value for primitives, child list for arrays; \textbf{Path}: Hierarchical path for unique identification.
+
+The transformation rules are: (1) \textbf{Objects} become internal nodes with labeled edges to child values, (2) \textbf{Arrays} remain as nodes containing element lists, recursively transformed if complex, and (3) \textbf{Primitives} map to leaf nodes with actual values. This preserves array structure while enabling order-invariant matching and maintaining the semantic distinction between arrays and objects.
+
+\subsection{Semantic Tree Edit Distance}
+
+Our STED algorithm extends classical tree edit distance with semantic awareness through three operations: \textbf{Insert} (cost $\gamma_{ins}(v)$), \textbf{Delete} (cost $\gamma_{del}(v)$), and \textbf{Update} (cost $\gamma_{upd}(v_1, v_2)$). The semantic update cost combines multiple dimensions:
+\vspace{-2mm}
+\begin{equation}
+\gamma_{upd}(v_1, v_2) = w \cdot \gamma_{struct}(v_1, v_2) + (1-w) \cdot \gamma_{content}(v_1, v_2)
+\end{equation}
+
+where $\gamma_{struct}$ measures structural similarity using embedding-based comparison, and $\gamma_{content}$ evaluates value similarity with type-aware costs. For arrays and objects, we employ Hungarian algorithm for optimal child matching, ensuring order-invariant comparison.
+
+\begin{theorem}[STED Metric Properties]
+\label{thm:metric}
+For any JSON trees $T_1, T_2, T_3$, the STED distance $d_{\text{STED}}$ satisfies: (i) \textbf{Non-negativity}: $d_{\text{STED}}(T_1, T_2) \geq 0$; (ii) \textbf{Identity}: $d_{\text{STED}}(T_1, T_2) = 0 \Leftrightarrow T_1 \equiv_{\phi} T_2$; (iii) \textbf{Symmetry}: $d_{\text{STED}}(T_1, T_2) = d_{\text{STED}}(T_2, T_1)$; (iv) \textbf{Triangle Inequality}: $d_{\text{STED}}(T_1, T_3) \leq d_{\text{STED}}(T_1, T_2) + d_{\text{STED}}(T_2, T_3)$.
+\end{theorem}
+\vspace{-1mm}
+\noindent Properties (i)-(iii) follow directly from cost function definitions. Property (iv) is proven by structural induction: the Hungarian algorithm's global optimality ensures composing matchings preserves the inequality (see Appendix~\ref{sec:metric-proof}).
+
+\subsection{Semantic Similarity Computation}
+
+Field names are normalized (e.g., \texttt{"userName"} $\rightarrow$ \texttt{"user name"}) to capture semantic relationships. We compute similarity using embeddings with cosine similarity for texts $<300$ characters; longer texts are chunked recursively with 50-character overlaps. We used Amazon Titan Text Embeddings v2 in our implementation, though the choice of embedding model has minimal impact on STED's performance since we primarily match short field names and values where most modern embedding models achieve similar semantic understanding. The framework remains model-agnostic and can use any embedding model (e.g., all-MiniLM-L6-v2, Sentence-BERT, OpenAI embeddings). Type-aware comparison ensures appropriate metrics: semantic for strings, exact for numbers, order-invariant for arrays. This recognizes functional equivalence (e.g., \{\texttt{"user\_name"}: \texttt{"John"}\} $\equiv$ \{\texttt{"userName"}: \texttt{"John"}\}) while detecting type violations that break compatibility.
+
+\subsection{Optimal Subtree Matching}
+
+Traditional tree edit distance algorithms process nodes sequentially, potentially missing globally optimal alignments. We address this through Hungarian algorithm-based matching at each tree level.
+
+For trees $T_1$ and $T_2$ with children sets $C_1$ and $C_2$, we formulate optimal matching as an assignment problem:
+\vspace{-2mm}
+\begin{equation}
+\text{OptimalCost}(T_1, T_2) = \min_{\pi} \left[ \sum_{(i,j) \in \pi} d(c_1^i, c_2^j) + \sum_{i \notin \pi} \gamma_{del}(c_1^i) + \sum_{j \notin \pi} \gamma_{ins}(c_2^j) \right]
+\end{equation}
+
+where $\pi$ represents the matching between children, $d(\cdot, \cdot)$ is the recursive distance, and unmatched nodes incur insertion/deletion costs.
+
+The algorithm constructs a cost matrix $M \in \mathbb{R}^{\max(|C_1|, |C_2|) \times \max(|C_1|, |C_2|)}$ where $M_{ij}$ represents the cost of matching child $i$ from $T_1$ with child $j$ from $T_2$. The Hungarian algorithm finds the minimum-cost assignment in $O(n^3)$ time, ensuring globally optimal child alignment rather than greedy local decisions.
+
+\begin{theorem}[Hungarian Algorithm Optimality]
+\label{thm:hungarian}
+Given trees $T_1, T_2$ with root children sets $C_1, C_2$, the Hungarian algorithm finds the optimal assignment $\pi^*$ minimizing $\text{Cost}(\pi) = \sum_{(i,j) \in \pi} d_{\text{STED}}(c_i^{(1)}, c_j^{(2)}) + \sum_{i \notin \pi_1} \gamma_{\text{del}}(c_i^{(1)}) + \sum_{j \notin \pi_2} \gamma_{\text{ins}}(c_j^{(2)})$ in $O(\max(|C_1|, |C_2|)^3)$ time.
+\end{theorem}
+\vspace{-1mm}
+\noindent The proof constructs a padded cost matrix reducing child matching to the classical assignment problem solvable by Kuhn-Munkres (Appendix~\ref{sec:proofs}).
+
+\subsection{Similarity Score Normalization}
+
+The STED algorithm normalizes the computed distance at each tree level to produce an interpretable similarity score in [0,1]:
+\vspace{-2mm}
+\begin{equation}
+\text{STED}(T_1, T_2) = 1 - \min\left(1, \frac{d_{\text{total}}}{\max(|C_1|, |C_2|)}\right)
+\end{equation}
+
+where $d_{\text{total}}$ is the total cost from Hungarian assignment (including insert/delete costs for unmatched nodes). This per-level normalization ensures consistent scoring regardless of tree depth.
+
+\subsection{Consistency Score Calculation}
+
+Let $\{s_i\}_{i=1}^n$ be the similarity values between responses across different runs, with empirical standard deviation $\sigma = \operatorname{std}(s_1, \dots, s_n)$. To normalize for scale, we compute the maximum possible standard deviation for $n$ values in $[0,1]$:
+
+\[
+\sigma_{\max} = \operatorname{std}\big(\underbrace{0, \dots, 0}_{\lfloor n/2 \rfloor}, \underbrace{1, \dots, 1}_{\lceil n/2 \rceil}\big).
+\]
+
+We then define the normalized deviation
+
+\[
+\hat{\sigma} = 
+\begin{cases}
+\dfrac{\sigma}{\sigma_{\max}}, & \sigma_{\max} > 0, \\
+0, & \text{otherwise}.
+\end{cases}
+\]
+
+Finally, the consistency score is given by
+\vspace{-2mm}
+\[
+\text{ConsistencyScore}(s_1,\dots,s_n) = \left( \frac{1}{1 + 2\hat{\sigma}} \right)^{\alpha},
+\]
+
+The base formula $C_{base} = 1/(1 + 2\hat{\sigma})$ maps $\hat{\sigma} \in [0,1]$ to $[0.333, 1]$, not the intuitive $[0,1]$ range. The steepness parameter $\alpha$ serves two purposes: (1) \textbf{range normalization}---with $\alpha=20$, worst-case $(1/3)^{20} \approx 0$, achieving the full $[0,1]$ range; and (2) \textbf{discrimination}---amplifying small deviations typical in LLM outputs ($\hat{\sigma} < 0.1$). We analyze the $\alpha$ selection in detail in Section~4.4. If $n \leq 1$, we set $\text{ConsistencyScore} = 1$.
+
+\textbf{Invalid Response Penalty.} LLMs may produce unparseable or malformed outputs. We penalize such failures by multiplying the consistency score by the validity rate $r_v$ (fraction of valid outputs):
+\[
+C_{\text{penalized}} = C \times r_v, \quad \text{where } r_v = \frac{|\text{valid outputs}|}{|\text{total outputs}|}
+\]
+A model producing 50\% invalid responses has its consistency halved, reflecting reduced reliability. This ensures models are evaluated on both output quality and generation success rate.
+
+\begin{proposition}[Consistency Score Properties]
+\label{prop:consistency}
+The consistency score $C(\mathcal{O})$ satisfies: (i) $C \in (0, 1]$; (ii) $C = 1 \Leftrightarrow$ all outputs identical; (iii) $C$ decreases monotonically with variance.
+\end{proposition}
+
+\begin{proposition}[Convergence Rate]
+\label{prop:convergence}
+Let $\{o_i\}_{i=1}^n$ be i.i.d. samples from an LLM's output distribution. As $n \to \infty$, $C(\mathcal{O}_n) \xrightarrow{p} C^*$ with rate $O(n^{-1/2})$, following from U-statistic theory applied to pairwise similarities.
+\end{proposition}
+\vspace{-1mm}
+\noindent The sample variance of pairwise similarities forms a U-statistic of order 2. By Hoeffding's theorem and the delta method, convergence follows at $O(n^{-1/2})$. Empirical validation confirms rate $\beta \approx 0.73$ (Appendix~\ref{sec:proofs}).
+
+\subsection{Computational Complexity}
+
+\begin{corollary}[Overall Complexity]
+\label{cor:complexity}
+For trees with $N$ nodes, maximum branching factor $B$, depth $D$, and embedding dimension $d$:
+\vspace{-2mm}
+\begin{equation}
+    \text{Time: } O(N \cdot B^3 + N \cdot T_\phi) \qquad \text{Space: } O(B^2 + D + N \cdot d)
+\end{equation}
+where $T_\phi$ is embedding computation time. With caching, $T_\phi$ is amortized over repeated comparisons.
+\end{corollary}
+\vspace{-1mm}
+\noindent The Hungarian algorithm contributes the $B^3$ factor at each internal node. Memory profiling across $N \in \{10, 500\}$ confirms linear scaling ($R^2 > 0.999$), with embedding cache ($\approx$875 bytes/node for $d=384$) dominating space. Full proofs of all theorems are provided in Appendix~\ref{sec:proofs}.
+
+\section{Experiments and Results}
+\vspace{-2mm}
+Our experimental evaluation comprises two complementary studies. First, we validate our method's effectiveness using synthetic datasets with controlled variations to verify its ability to accurately quantify similarity degradation. Second, we deploy our framework to benchmark the structured output consistency of \textbf{20 LLMs across 11 providers} on two tasks: (1) \textbf{ShareGPT Structured Output} (80 samples, JSON generation) and (2) \textbf{Toucan Tool Calling} (1,006 samples, function invocation). Models span diverse architectures: Claude family (3.5-Sonnet, 3.7-Sonnet, Haiku-4.5, Opus-4/4.5, Sonnet-4/4.5), Qwen (235B-A22B, 32B), Meta (Llama-3.3-70B), AWS (Nova-Pro, Nova-2-Lite), Mistral (Large-3-675B, Pixtral-Large), xAI (Grok-4.1-Fast), Minimax (M2), Moonshot (Mimo-V2-Flash), OpenAI (GPT-OSS-120B, GPT-4.1-Mini), Google (Gemini-2.5-Flash-Lite), and NVIDIA (NemoTron-3-Nano). This comprehensive coverage reveals consistency patterns across model scales (32B--675B parameters), optimization strategies (efficiency vs performance), and access tiers (commercial vs free). The framework itself is model-agnostic and can evaluate any LLM with structured output capabilities.
+
+\subsection{Method Effectiveness Verification}
+
+\subsubsection{Variation Taxonomy}
+LLM-generated structured data exhibits three distinct variation types: \textbf{Schema Variation}: Structural modifications including field name changes, structure flattening, and hierarchy alterations that affect parseability; \textbf{Expression Variation}: Lexical modifications preserving semantic meaning through synonym substitution, paraphrasing, and abbreviation usage; \textbf{Semantic Variation}: Fundamental content changes that alter data meaning, potentially causing incorrect interpretations.
+
+\subsubsection{Dataset Construction}
+
+\textbf{Our evaluation leverages 2,400 synthetic test cases} systematically generated from a diverse set of 80 base samples. We begin with 80 ShareGPT-formatted JSON samples from Quiz Generation and Structured Output datasets (75 valid after parsing errors), which serve as seeds for controlled variation generation. These base samples ensure structural diversity: depths range from 2--7 levels (mean 4.0±1.0, mode 4), field counts span 4--228 (mean 42.3±37.8), and include realistic type distributions (68.2\% strings, 18.4\% integers, 13.4\% complex types). A comprehensive distribution analysis is provided in Appendix~\ref{sec:dataset-distribution}.
+
+\textbf{Gradual Variations (2,250 samples):} We create variants with controlled modification ratios from 0.1 to 1.0 (10 levels) for: (1) \textit{Field Name Variants} - semantically equivalent keys (e.g., "user\_name" → "userName"), (2) \textit{Expression Variants} - paraphrased values preserving meaning, and (3) \textit{Semantic Variants} - content changes affecting functionality. Each category yields 750 samples (75 × 10 levels).
+
+\textbf{Structural Variations (150 samples):} We generate single variants for: (1) \textit{Flattened Structure} - nested-to-flat transformations potentially causing field collisions, and (2) \textit{Nested Changes} - modified hierarchies breaking API compatibility. These binary changes yield 75 samples each.
+
+\textbf{Toucan Tool Calling Dataset (1,006 samples):} For evaluating tool calling consistency, we use a curated subset from the Toucan benchmark~\cite{toucan2024}---a large-scale multilingual dataset (119K+ samples across 4 subsets: multi-turn, single-turn-original, single-turn-diversify, and irrelevant queries) designed for function invocation evaluation. Our subset contains 1,006 samples from two single-turn subsets: \textit{single-turn-original} (515 samples) and \textit{single-turn-diversify} (491 samples), selected to focus on direct tool calling without conversation history complexity. Each sample includes a natural language query, available tool definitions, and ground-truth tool calls. Key characteristics: 993 unique tools across diverse domains (weather, search, math, creative writing, etc.), 1--14 tool calls per sample (mean 1.6), and 56\% multilingual content spanning multiple languages including Chinese, Japanese, Korean, and European languages. This complements ShareGPT by testing structured output in the specific context of function calling, where parameter extraction and tool selection must be consistent.
+
+\subsubsection{Baseline Methods}
+We compare STED against three established approaches: \textbf{TED}: Tree Edit Distance using Zhang-Shasha algorithm with default cost functions; \textbf{BERTScore}: Adapted for JSON by serializing structures with sorted keys, computing F1 scores from BERT embedding alignments; \textbf{DeepDiff}: Rule-based structural comparison using Deep Distance metric, converted to similarity as $1 - \text{DeepDistance}$.
+
+\subsection{LLM Consistency Benchmarking}
+
+We design a comprehensive framework to evaluate LLM consistency across two complementary tasks. \textbf{ShareGPT Structured Output}: 80 JSON generation samples, each executed 10 times across 11 temperatures (0.0--1.0), yielding \textbf{8,800 outputs per model}. \textbf{Toucan Tool Calling}: 1,006 function invocation samples with the same protocol, yielding \textbf{110,660 outputs per model}. Combined across 20 models, our evaluation comprises over \textbf{2.4 million LLM outputs}.
+
+We employ three evaluation modes: (1) structural consistency measuring format adherence, (2) semantic consistency evaluating content preservation, and (3) hybrid approach with equal weighting ($\alpha = 0.5$). This multi-faceted evaluation reveals how temperature variations affect different aspects of structured output generation.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=1.0\textwidth]{figures/schema_variation_analysis.png}
+\caption{Similarity scores across schema variation types for four consistency evaluation methods. Field name changes (0.1-1.0 ratios) show gradual similarity degradation, with BERTScore maintaining highest scores. For structural variations, STED achieves zero similarity on nested changes but moderate scores on flat structures. All methods use similarity scores ranging from 0 to 1.}
+\label{fig:schema_variation_analysis}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=1.0\textwidth]{figures/similarity_progression_combined.png}
+\caption{Similarity score progression under semantic variations (left) and expression variations (right). Ideal behavior: sensitivity to semantic changes, robustness to expression changes. STED achieves optimal balance with controlled degradation for semantic variations while maintaining high scores for expression variations, aligning with human consistency perception. (TED remains constant at 1.0 as it measures only structural similarity, not content.)}
+\label{fig:similarity_progression_combined}
+\end{figure}
+
+\subsection{Method Effectiveness Verification}
+
+\subsubsection{Schema Variation Analysis}
+Figure~\ref{fig:schema_variation_analysis} reveals how methods handle structural variations in LLM outputs. For field name variations using semantic equivalents, STED maintains stable similarity across all variation ratios, correctly recognizing functional equivalence. TED degrades significantly due to lack of semantic understanding, while BERTScore's excessive permissiveness may mask important structural differences. For structural modifications (flattening and nesting changes), STED correctly assigns zero similarity, recognizing these as breaking changes for downstream systems. Other methods problematically tolerate these changes with non-zero scores that could allow incompatible outputs to pass consistency checks.
+
+\subsubsection{Content Variation Analysis}
+Figure~\ref{fig:similarity_progression_combined} evaluates content variation handling, critical for applications like content moderation where semantic accuracy impacts outcomes. For semantic variations, STED (0.954±0.039) and BERTScore (0.958±0.025) show statistically equivalent calibrated sensitivity (p=0.600), while DeepDiff over-reacts (0.799±0.165) and TED remains insensitive (1.0, structure-only). For expression variations, STED achieves superior robustness (0.981±0.017, p<0.001), correctly preserving high similarity for paraphrases, unlike DeepDiff which incorrectly penalizes valid rewording (0.805±0.164).\footnote{Detailed statistical analysis in Supplementary Section~\ref{sec:statistical-analysis}.} STED's differential response—5.2\% degradation for semantic changes versus 1.9\% for expression changes—enables threshold-based detection of genuine semantic drift while accepting natural language variation, providing human-aligned consistency assessment for practical applications.
+
+\vspace{-3mm}
+\subsection{Model Consistency Analysis}
+\vspace{-3mm}
+Our comprehensive evaluation across 20 models reveals critical insights into consistency patterns, providing guidance for model selection and parameter tuning.
+
+\subsubsection{Top Performers}
+On \textbf{ShareGPT Structured Output}, three models achieve near-perfect validity ($>$99\%): Qwen3-235B-A22B (100.0\%), Claude-3.5-Sonnet (100.0\%), and Claude-Haiku-4.5 (100.0\%). On \textbf{Toucan Tool Calling}, Qwen3-235B-A22B leads with 98\% validity across all temperatures, followed by Claude-Opus-4.5 (98\%) and Claude-Opus-4 (97\%). Notably, \textbf{Qwen3-235B-A22B achieves exceptional performance on both tasks}, demonstrating consistent structured output capabilities.
+
+\subsubsection{Task-Specific Divergence}
+A striking finding is the \textbf{dramatic task-specific performance gap} exhibited by some models. Llama-3.3-70B achieves 99.1\% on structured output but only 20\% on tool calling---a 79-point difference indicating fundamental architectural differences in handling these tasks. Conversely, Claude-Sonnet-4/4.5 show the opposite pattern: moderate structured output (83\%) but excellent tool calling (97\%). This divergence demonstrates the importance of task-specific evaluation rather than relying on general benchmarks.
+
+\subsubsection{Temperature Stability}
+All models exhibit inverse temperature-consistency relationships, with varying sensitivity. Claude-3.7-Sonnet maintains near-perfect structural consistency (0.999±0.037) across all temperatures including T=0.9, while models like Claude-3.5-Haiku show 46\% degradation. Free-tier models like Mimo-V2-Flash achieve surprisingly strong performance (97.1\% on ShareGPT, 95\% on Toucan at T=0.0), offering cost-effective alternatives for production deployment.
+
+\subsubsection{Provider and Scale Effects}
+Performance does not strictly correlate with model size. Qwen3-32B (32B parameters) achieves 96\% on both tasks, comparable to much larger models. Provider-specific patterns emerge: Claude models excel at tool calling (93--98\%), AWS Nova models show consistent mid-tier performance (95--98\% structured, 0\% tool calling for Nova-Pro due to unsupported API), and open models vary widely (Llama excellent on structured output, poor on tool calling; Mistral-Large moderate on both).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=1.0\textwidth]{figures/consistency_score_by_consistency_type_with_errors.png}
+\caption{Model consistency across temperature settings for representative models. Higher scores indicate better consistency between outputs for the same prompts. Error bars show standard deviation across 80 test cases per temperature. Full results for all 20 models available in Supplementary Tables \ref{tab:overall-consistency-temp}--\ref{tab:consistency-summary}.}
+\label{fig:consistency_score_by_consistency_type}
+\end{figure}
+
+\vspace{-2mm}
+\subsection{Ablation Studies}
+\vspace{-2mm}
+
+We analyze the sensitivity of STED to its key hyperparameters using our synthetic dataset (750 samples per variation type).
+
+\subsubsection{Structural-Content Weight ($w$)}
+The weight $w$ in $\gamma_{upd} = w \cdot \gamma_{struct} + (1-w) \cdot \gamma_{content}$ controls the balance between structural and content similarity. Table~\ref{tab:ablation-w} shows performance across $w \in \{0.3, 0.5, 0.7\}$.
+
+\begin{table}[h]
+\vspace{-2mm}
+\centering
+\caption{Effect of structural-content weight $w$ on STED similarity scores}
+\label{tab:ablation-w}
+\small
+\begin{tabular}{lccc}
+\toprule
+\textbf{Variation Type} & $w=0.3$ & $w=0.5$ (default) & $w=0.7$ \\
+\midrule
+Expression (desired: high) & 0.973 & \textbf{0.981} & 0.976 \\
+Semantic (desired: moderate) & 0.962 & \textbf{0.954} & 0.941 \\
+Schema-Flat (desired: low) & 0.089 & \textbf{0.051} & 0.032 \\
+Schema-Nested (desired: $\approx$0) & 0.012 & \textbf{0.000} & 0.000 \\
+\bottomrule
+\end{tabular}
+\vspace{-2mm}
+\end{table}
+
+The default $w=0.5$ achieves optimal balance: maintaining high expression similarity (0.981) while correctly penalizing structural violations. Lower $w$ over-weights content, allowing structural violations to pass; higher $w$ reduces semantic sensitivity.
+
+\subsubsection{Structural Threshold ($\theta$)}
+The threshold $\theta$ determines when content similarity is computed (only if $S_{struct} > \theta$). We test $\theta \in \{0.1, 0.3, 0.5, 0.7\}$:
+
+\begin{table}[h]
+\vspace{-2mm}
+\centering
+\caption{Effect of structural threshold $\theta$ on discrimination ability}
+\label{tab:ablation-theta}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Metric} & $\theta=0.1$ & $\theta=0.3$ (default) & $\theta=0.5$ & $\theta=0.7$ \\
+\midrule
+Expr-Semantic Gap & 0.015 & \textbf{0.027} & 0.031 & 0.024 \\
+False Positive Rate$^a$ & 0.08 & \textbf{0.02} & 0.01 & 0.05 \\
+\bottomrule
+\end{tabular}
+\vspace{0.3em}
+\small{$^a$ Schema violations incorrectly scored $>0.1$}
+\vspace{-2mm}
+\end{table}
+
+The default $\theta=0.3$ minimizes false positives while maintaining the expression-semantic gap needed for threshold-based detection.
+
+\subsubsection{Consistency Steepness ($\alpha_{cons}$)}
+The base formula $C_{base} = 1/(1 + 2\hat{\sigma})$ maps normalized deviation $\hat{\sigma} \in [0,1]$ to $[0.333, 1]$---not the intuitive $[0,1]$ range. This occurs because even at maximum deviation ($\hat{\sigma}=1$), we get $C_{base} = 1/(1+2) = 0.333$, which fails to convey ``poor consistency'' to users.
+
+The steepness parameter $\alpha_{cons}$ in $C = C_{base}^{\alpha_{cons}}$ addresses two objectives:
+
+\textbf{(1) Range Normalization:} Transform $[0.333, 1] \rightarrow [0, 1]$ for interpretability. With $\alpha_{cons}=20$, worst-case score becomes $(1/3)^{20} \approx 2.9 \times 10^{-10} \approx 0$.
+
+\textbf{(2) Discrimination:} Amplify small differences in the typical LLM operating range ($\hat{\sigma} < 0.1$). Table~\ref{tab:ablation-steepness} shows the trade-off: discrimination peaks at $\alpha \approx 10$--$15$, but these values don't fully normalize the range.
+
+\begin{table}[h]
+\vspace{-2mm}
+\centering
+\caption{Effect of steepness $\alpha_{cons}$ on range normalization vs discrimination}
+\label{tab:ablation-steepness}
+\small
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Metric} & $\alpha_{cons}$=5 & 10 & 15 & \textbf{20} & 25 \\
+\midrule
+$C$ at $\hat{\sigma}=1.0$ (worst) & 0.004 & $10^{-5}$ & $10^{-7}$ & \textbf{$\approx$0} & $\approx$0 \\
+$C$ at $\hat{\sigma}=0.01$ & 0.905 & 0.819 & 0.741 & \textbf{0.670} & 0.607 \\
+$C$ at $\hat{\sigma}=0.10$ & 0.402 & 0.162 & 0.065 & \textbf{0.026} & 0.011 \\
+Discrimination$^a$ & 0.503 & \textbf{0.657} & 0.676 & 0.644 & 0.596 \\
+\bottomrule
+\end{tabular}
+\vspace{0.3em}
+\small{$^a$ Score difference: $C(\hat{\sigma}=0.01) - C(\hat{\sigma}=0.10)$}
+\vspace{-2mm}
+\end{table}
+
+We select $\alpha_{cons}=20$ as the default because it achieves full range normalization while retaining 95\% of peak discrimination. Lower values ($\alpha_{cons} \leq 10$) maximize discrimination but leave worst-case scores non-zero; higher values ($\alpha_{cons} \geq 25$) compress the useful range, making most models appear equally consistent.
+
+Figure~\ref{fig:consistency_steepness} visualizes these effects. The top-left panel shows how increasing $\alpha$ steepens the curve, pushing low-consistency scores toward zero. The top-right zooms into the typical LLM range ($\hat{\sigma} < 0.2$), where $\alpha=20$ provides good discrimination. The bottom panels show $\alpha=20$ balances range normalization with near-peak discrimination (peak is at $\alpha \approx 10$--$15$).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=1.0\textwidth]{figures/consistency_steepness_analysis.png}
+\caption{Analysis of consistency steepness ($\alpha$) parameter. Top-left: Effect of $\alpha$ on full consistency curve. Top-right: Zoom on typical LLM deviation range ($\hat{\sigma} < 0.2$). Bottom-left: Worst-case score $C(\hat{\sigma}=1)$ vs $\alpha$ (log scale). Bottom-right: Discrimination ability (score difference for $\hat{\sigma}=0.01$ vs $\hat{\sigma}=0.1$). Default $\alpha=20$ balances range normalization with near-peak discrimination.}
+\label{fig:consistency_steepness}
+\end{figure}
+
+\vspace{-3mm}
+\section{Conclusion}
+We present STED and consistency score, a novel metric for evaluating consistency in LLM-generated structured outputs that balances semantic flexibility with structural strictness. Through controlled experiments on synthetic datasets, we demonstrate STED's superiority: it correctly assigns zero similarity to structure-breaking modifications while maintaining robustness to semantically equivalent variations (0.86-0.90), outperforming TED, BERTScore, and DeepDiff.
+Our benchmarking of 20 LLMs across 11 providers reveals critical insights for production deployment. The proposed consistency score enables three key applications: (1) model selection for structured output tasks, providing targeted evaluation beyond general-purpose benchmarks; (2) prompt refinement through iterative optimization, enabling developers to craft prompts yielding reproducible outputs; and (3) diagnostic analysis to identify factors contributing to inconsistency. These capabilities make our framework a practical tool for improving the reliability of LLM-based systems in production environments where structured output consistency is paramount.
+Our work has several limitations. We focus exclusively on JSON format, potentially missing patterns in other structured formats like XML or YAML. The semantic similarity metrics may not capture domain-specific equivalences, and the computational cost of multiple generations for consistency evaluation may limit adoption in resource-constrained settings. Future work should extend to other formats and optimize evaluation efficiency for real-time applications.
+
+\bibliographystyle{unsrt}
+\bibliography{neurips_2025_camera_ready}
+
+% After your main content and references
+\appendix
+
+\section{Theoretical Proofs}
+\label{sec:proofs}
+
+\subsection{Proof of Metric Properties (Theorem~\ref{thm:metric})}
+\label{sec:metric-proof}
+
+\begin{proof}
+\textbf{(i) Non-negativity:} By construction, all cost functions $\gamma_{\text{ins}}, \gamma_{\text{del}}, \gamma_{\text{upd}} \geq 0$ since weights $w(n) > 0$ and similarities are bounded in $[0,1]$. Thus $d_{\text{STED}}(T_1, T_2) = \min_\pi \sum_{op \in \pi} \gamma(op) \geq 0$.
+
+\textbf{(ii) Identity:}
+$(\Rightarrow)$ If $d_{\text{STED}}(T_1, T_2) = 0$, then the optimal edit script has zero cost. This requires:
+\begin{itemize}
+    \item No insertions/deletions (since $\gamma_{\text{ins}}, \gamma_{\text{del}} > 0$)
+    \item All updates have zero cost, meaning $S_{\text{struct}}(n_1, n_2) = 1$ and $S_{\text{value}}(n_1, n_2) = 1$ for all matched pairs
+\end{itemize}
+This implies $\text{sim}(\ell(n_1), \ell(n_2)) = 1$ (semantically identical labels) and identical values, hence $T_1 \equiv_\phi T_2$.
+
+$(\Leftarrow)$ If $T_1 \equiv_\phi T_2$, then the identity mapping has zero cost: all nodes match with $S_{\text{struct}} = S_{\text{value}} = 1$.
+
+\textbf{(iii) Symmetry:} The cost functions are symmetric by construction:
+$\gamma_{\text{ins}}(n) = \gamma_{\text{del}}(n)$ (same formula), and similarity functions are symmetric. For any edit script $\pi: T_1 \to T_2$, the inverse script $\pi^{-1}: T_2 \to T_1$ has equal cost.
+
+\textbf{(iv) Triangle Inequality:} We prove by structural induction on tree depth.
+
+\emph{Base case (leaf nodes):} For leaf nodes, the STED distance equals the node-level cost $\gamma(n_1, n_2)$. Since $S(n_i, n_j) \in [0,1]$ and $\gamma = (1 - S) \cdot w$, the triangle inequality follows from sub-additivity:
+\begin{equation}
+    (1 - S(n_1, n_3)) \leq (1 - S(n_1, n_2)) + (1 - S(n_2, n_3))
+\end{equation}
+which holds when $S(n_1, n_3) \geq S(n_1, n_2) + S(n_2, n_3) - 1$ (satisfied by cosine similarity).
+
+\emph{Inductive step (internal nodes):} Let $\pi_{12}^*$ and $\pi_{23}^*$ be optimal Hungarian matchings for $(T_1, T_2)$ and $(T_2, T_3)$. Construct a feasible matching $\pi_{13}$ by composition. The Hungarian algorithm's global optimality ensures:
+\begin{align}
+    d(T_1, T_3) &\leq \text{cost}(\pi_{13}) \\
+    &\leq \sum_{(c_1, c_2) \in \pi_{12}^*} d(c_1, c_2) + \sum_{(c_2, c_3) \in \pi_{23}^*} d(c_2, c_3) \\
+    &= d(T_1, T_2) + d(T_2, T_3)
+\end{align}
+where the second inequality uses the inductive hypothesis on child subtrees.
+\end{proof}
+
+\textbf{Empirical Validation:} We validated the triangle inequality on 200 diverse JSON triples across 8 categories (simple, nested, array-heavy, semantic variations). The inequality held for \textbf{100\% of test cases}.
+
+\subsection{Proof of Hungarian Algorithm Optimality (Theorem~\ref{thm:hungarian})}
+
+\begin{proof}
+We reduce child matching to the classical assignment problem.
+
+\textbf{Step 1: Cost Matrix Construction.}
+Construct matrix $M \in \mathbb{R}^{m \times m}$ where $m = \max(n_1, n_2)$:
+\begin{equation}
+    M[i][j] = \begin{cases}
+        d_{\text{STED}}(c_i^{(1)}, c_j^{(2)}) & \text{if } i \leq n_1, j \leq n_2 \\
+        \gamma_{\text{del}}(c_i^{(1)}) & \text{if } i \leq n_1, j > n_2 \\
+        \gamma_{\text{ins}}(c_j^{(2)}) & \text{if } i > n_1, j \leq n_2 \\
+        0 & \text{otherwise}
+    \end{cases}
+\end{equation}
+
+\textbf{Step 2: Equivalence.} Matching real node $i$ to dummy $j$ represents deletion (cost $\gamma_{\text{del}}$); matching dummy $i$ to real node $j$ represents insertion (cost $\gamma_{\text{ins}}$).
+
+\textbf{Step 3: Complexity.} The Kuhn-Munkres algorithm solves $m \times m$ assignment in $O(m^3)$ time and $O(m^2)$ space, guaranteeing global optimality via complementary slackness.
+\end{proof}
+
+\subsection{Proof of Consistency Score Convergence (Proposition~\ref{prop:convergence})}
+
+\begin{proof}
+\textbf{Step 1: U-statistic structure.}
+The sample variance of pairwise similarities is a U-statistic of order 2:
+\begin{equation}
+    \hat{\sigma}^2_n = \frac{2}{n(n-1)} \sum_{i<j} (S_{ij} - \bar{s}_n)^2
+\end{equation}
+By Hoeffding's theorem, $\sqrt{n}(\hat{\sigma}^2_n - \sigma^{*2}) \xrightarrow{d} \mathcal{N}(0, 4\zeta_1^2)$ where $\zeta_1^2 = \text{Var}[\mathbb{E}[(S_{12} - \mu)^2 | o_1]]$.
+
+\textbf{Step 2: Delta method.}
+Since $C = g(\sigma) = (1 + 2\sigma/\sigma_{\max})^{-\alpha}$ is continuously differentiable:
+\begin{equation}
+    \sqrt{n}(C_n - C^*) \xrightarrow{d} \mathcal{N}(0, [g'(\sigma^*)]^2 \cdot 4\zeta_1^2)
+\end{equation}
+
+\textbf{Step 3: Rate bound.}
+By the CLT for U-statistics: $|C_n - C^*| = O_p(n^{-1/2})$.
+\end{proof}
+
+\section{Dataset Characteristics and Distribution Analysis}
+\label{sec:dataset-distribution}
+
+We provide a comprehensive analysis of the 75 base samples used to generate our 2,400 synthetic test cases. This analysis demonstrates the representativeness and diversity of our dataset across multiple dimensions of JSON structural complexity.
+
+\subsection{Structural Complexity Distribution}
+\label{subsec:structural-complexity}
+
+Table~\ref{tab:json-depth-appendix} shows the distribution of JSON depths across our base samples, with the majority (58.7\%) at depth 4, aligning with typical enterprise API structures.
+
+\begin{table}[H]
+\centering
+\caption{JSON Depth Distribution Across Base Samples}
+\label{tab:json-depth-appendix}
+\begin{tabular}{lccp{5cm}}
+\toprule
+\textbf{Depth Level} & \textbf{Count} & \textbf{Percentage} & \textbf{Interpretation} \\
+\midrule
+Depth 2 & 8 & 10.7\% & Simple, flat structures \\
+Depth 3 & 7 & 9.3\% & Moderately nested \\
+\textbf{Depth 4} & \textbf{44} & \textbf{58.7\%} & \textbf{Most common depth} \\
+Depth 5 & 13 & 17.3\% & Complex nested structures \\
+Depth 6 & 2 & 2.7\% & Highly complex \\
+Depth 7 & 1 & 1.3\% & Maximum complexity \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:field-count-appendix} presents the field count distribution, demonstrating coverage from simple configurations to complex documents.
+
+\begin{table}[H]
+\centering
+\caption{Field Count Distribution}
+\label{tab:field-count-appendix}
+\begin{tabular}{lccp{4.5cm}}
+\toprule
+\textbf{Field Range} & \textbf{Count} & \textbf{Percentage} & \textbf{Real-world Analogy} \\
+\midrule
+1--10 fields & 6 & 8.0\% & Simple config files \\
+11--25 fields & 22 & 29.3\% & API responses \\
+\textbf{26--50 fields} & \textbf{27} & \textbf{36.0\%} & \textbf{Most common} \\
+51--100 fields & 16 & 21.3\% & Complex documents \\
+100+ fields & 4 & 5.3\% & Large schemas \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Field Type and Complexity Analysis}
+\label{subsec:field-type-analysis}
+
+Tables~\ref{tab:field-types-appendix} and \ref{tab:complexity-summary-appendix} provide detailed breakdowns of field types and complexity metrics across the dataset.
+
+\begin{table}[H]
+\centering
+\caption{Distribution of Field Types Across All Samples}
+\label{tab:field-types-appendix}
+\begin{tabular}{lrrp{5.5cm}}
+\toprule
+\textbf{Field Type} & \textbf{Count} & \textbf{Percentage} & \textbf{Coverage} \\
+\midrule
+String & 7,276 & 68.2\% & Text data, IDs, descriptions \\
+Integer & 1,968 & 18.4\% & Counts, IDs, numeric values \\
+Array & 907 & 8.5\% & Lists, collections \\
+Object & 524 & 4.9\% & Nested structures \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Statistical Summary of Complexity Metrics}
+\label{tab:complexity-summary-appendix}
+\begin{tabular}{lrrrrl}
+\toprule
+\textbf{Metric} & \textbf{Min} & \textbf{Max} & \textbf{Mean} & \textbf{Std Dev} & \textbf{Interpretation} \\
+\midrule
+Max Depth & 2 & 7 & 4.0 & 1.0 & Good variety \\
+Total Fields & 4 & 228 & 42.3 & 37.8 & Wide range \\
+Total Nodes & 10 & 320 & 64.2 & 44.9 & Diverse complexity \\
+Arrays & 0 & 11 & 4.7 & 2.7 & Adequate coverage \\
+Nested Objects & 0 & 98 & 12.1 & 13.6 & Strong variety \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Statistical Analysis Details}
+\label{sec:statistical-analysis}
+
+\subsection{Methodology}
+
+We performed comprehensive statistical validation using:
+\begin{itemize}
+\item \textbf{Paired t-tests}: Each of the 75 base samples was evaluated by all metrics on the same variations, enabling paired comparisons
+\item \textbf{Bonferroni correction}: Applied for multiple comparisons ($\alpha = 0.05/30 = 0.0017$)
+\item \textbf{Effect size calculation}: Cohen's d to quantify practical significance
+\item \textbf{Confidence intervals}: 95\% CIs computed using bootstrap with 1000 iterations
+\end{itemize}
+
+\subsection{Semantic Variations - Detailed Results}
+
+\begin{table}[H]
+\centering
+\caption{Summary Statistics for Semantic Variations (N=750)}
+\label{tab:semantic-stats-detailed}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Metric} & \textbf{Mean} & \textbf{Std Dev} & \textbf{95\% CI} & \textbf{Min} & \textbf{Max} & \textbf{Median} \\
+\midrule
+STED & 0.9539 & 0.0393 & [0.9511, 0.9567] & 0.832 & 1.000 & 0.961 \\
+BERTScore & 0.9582 & 0.0249 & [0.9564, 0.9600] & 0.871 & 1.000 & 0.963 \\
+TED & 1.0000 & 0.0000 & [1.0000, 1.0000] & 1.000 & 1.000 & 1.000 \\
+DeepDiff & 0.7991 & 0.1647 & [0.7873, 0.8109] & 0.412 & 1.000 & 0.825 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Pairwise Statistical Comparisons - Semantic Variations}
+\label{tab:semantic-pairwise}
+\small
+\begin{tabular}{lccccccccccc}
+\toprule
+\textbf{STED vs} & \multicolumn{10}{c}{\textbf{p-values by Variation Ratio}} & \textbf{Mean p} \\
+\cmidrule{2-11}
+& 0.1 & 0.2 & 0.3 & 0.4 & 0.5 & 0.6 & 0.7 & 0.8 & 0.9 & 1.0 & \\
+\midrule
+TED & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001*** \\
+BERTScore & .391 & .197 & .724 & .721 & .857 & .973 & .655 & .575 & .454 & .454 & .600 (ns) \\
+DeepDiff & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001*** \\
+\bottomrule
+\end{tabular}
+\vspace{0.3em}
+\small{*** Significant after Bonferroni correction (p < 0.0017), ns = not significant}
+\end{table}
+
+\textbf{Interpretation}: STED and BERTScore show statistically equivalent performance on semantic variations (mean p = 0.600), both correctly maintaining high similarity for semantic equivalents. TED's complete insensitivity (constant 1.0) and DeepDiff's over-sensitivity (mean 0.799) are both significantly different from STED (p < 0.001).
+
+\subsection{Expression Variations - Detailed Results}
+
+\begin{table}[H]
+\centering
+\caption{Summary Statistics for Expression Variations (N=750)}
+\label{tab:expression-stats-detailed}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Metric} & \textbf{Mean} & \textbf{Std Dev} & \textbf{95\% CI} & \textbf{Min} & \textbf{Max} & \textbf{Median} \\
+\midrule
+STED & 0.9812 & 0.0174 & [0.9799, 0.9824] & 0.918 & 1.000 & 0.985 \\
+BERTScore & 0.9595 & 0.0267 & [0.9576, 0.9614] & 0.882 & 1.000 & 0.964 \\
+TED & 1.0000 & 0.0000 & [1.0000, 1.0000] & 1.000 & 1.000 & 1.000 \\
+DeepDiff & 0.8051 & 0.1644 & [0.7934, 0.8169] & 0.423 & 1.000 & 0.831 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Pairwise Statistical Comparisons - Expression Variations}
+\label{tab:expression-pairwise}
+\small
+\begin{tabular}{lccccccccccc}
+\toprule
+\textbf{STED vs} & \multicolumn{10}{c}{\textbf{p-values by Variation Ratio}} & \textbf{Mean p} \\
+\cmidrule{2-11}
+& 0.1 & 0.2 & 0.3 & 0.4 & 0.5 & 0.6 & 0.7 & 0.8 & 0.9 & 1.0 & \\
+\midrule
+TED & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001*** \\
+BERTScore & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001*** \\
+DeepDiff & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001 & <.001*** \\
+\bottomrule
+\end{tabular}
+\vspace{0.3em}
+\small{*** Significant after Bonferroni correction (p < 0.0017)}
+\end{table}
+
+\textbf{Interpretation}: STED significantly outperforms all baselines on expression variations (p < 0.001), demonstrating superior format-agnostic understanding. The lower standard deviation (0.0174) compared to semantic variations (0.0393) indicates more consistent performance.
+
+\subsection{Effect Size Analysis}
+
+\begin{table}[H]
+\centering
+\caption{Cohen's d Effect Sizes for STED Comparisons}
+\label{tab:effect-sizes}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Comparison} & \multicolumn{2}{c}{\textbf{Semantic Variations}} & \multicolumn{2}{c}{\textbf{Expression Variations}} \\
+\cmidrule{2-3} \cmidrule{4-5}
+& Cohen's d & Interpretation & Cohen's d & Interpretation \\
+\midrule
+STED vs TED & -1.23 & Large & -1.45 & Large \\
+STED vs BERTScore & -0.12 & Negligible & 0.82 & Large \\
+STED vs DeepDiff & 1.26 & Large & 1.38 & Large \\
+\bottomrule
+\end{tabular}
+\vspace{0.3em}
+\small{Cohen's d interpretation: 0.2 = small, 0.5 = medium, 0.8 = large}
+\end{table}
+
+\subsection{Statistical Power Analysis}
+
+With 75 samples per variation ratio and 10 ratios per variation type:
+\begin{itemize}
+\item \textbf{Statistical power}: 0.99 for detecting medium effect sizes (d = 0.5) at $\alpha = 0.05$
+\item \textbf{Minimum detectable effect}: d = 0.33 with 80\% power
+\item \textbf{Sample size adequacy}: Our 750 samples per variation type exceed requirements for robust conclusions
+\end{itemize}
+
+\subsection{Schema Variation Robustness}
+
+We evaluate metric robustness under common schema evolution scenarios that preserve semantic equivalence but alter structural representation.
+
+\subsubsection{Field Name Evolution}
+
+Real-world schemas evolve through refactoring, where field names change while preserving meaning (e.g., API versioning). We simulate this by progressively renaming fields to semantically equivalent alternatives.
+
+\begin{table}[H]
+\centering
+\caption{Metric robustness to schema field renaming (N=75)}
+\label{tab:field-name-robustness}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Fields} & \textbf{TED} & \textbf{STED} & \textbf{BERTScore} & \textbf{DeepDiff} \\
+\textbf{Renamed} & & & & \\
+\midrule
+10\% & 0.942 & 0.903 & 0.996 & 0.947 \\
+20\% & 0.915 & 0.893 & 0.995 & 0.942 \\
+30\% & 0.900 & 0.886 & 0.994 & 0.938 \\
+40\% & 0.879 & 0.882 & 0.993 & 0.933 \\
+50\% & 0.848 & 0.877 & 0.992 & 0.928 \\
+60\% & 0.831 & 0.874 & 0.991 & 0.923 \\
+70\% & 0.811 & 0.870 & 0.990 & 0.919 \\
+80\% & 0.790 & 0.866 & 0.989 & 0.916 \\
+90\% & 0.775 & 0.862 & 0.989 & 0.915 \\
+100\% & 0.759 & 0.856 & 0.988 & 0.913 \\
+\midrule
+\textbf{Degradation}$^a$ & -19.4\% & -5.2\% & -0.8\% & -3.6\% \\
+\bottomrule
+\end{tabular}
+\vspace{-2mm}
+\begin{flushleft}
+\small $^a$ Relative decrease from 0\% renamed (baseline=1.0) to 100\% renamed
+\end{flushleft}
+\end{table}
+
+\subsubsection{Schema Restructuring Patterns}
+
+We test two common schema refactoring patterns that preserve information content:
+
+\begin{table}[H]
+\centering
+\caption{Metric sensitivity to schema restructuring patterns}
+\label{tab:structural-perturbations}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Metric} & \textbf{Schema Flattening}$^a$ & \textbf{Schema Nesting}$^b$ \\
+\midrule
+TED & 0.000 & 0.506 \\
+STED & 0.051 & 0.000 \\
+BERTScore & 0.897 & 0.989 \\
+DeepDiff & 0.809 & 0.781 \\
+\bottomrule
+\end{tabular}
+\vspace{2mm}
+\begin{flushleft}
+\small $^a$ \textbf{Flattening}: Denormalizing nested objects into flat structure\\
+\small Example: \texttt{\{"user": \{"name": "John", "age": 30\}\}} → \texttt{\{"user\_name": "John", "user\_age": 30\}}\\[1mm]
+\small $^b$ \textbf{Nesting}: Organizing flat fields into logical groups\\
+\small Example: \texttt{\{"street": "Main", "city": "NYC"\}} → \texttt{\{"address": \{"street": "Main", "city": "NYC"\}\}}
+\end{flushleft}
+\end{table}
+
+The results demonstrate that:
+\begin{itemize}
+\item \textbf{TED} shows steep degradation (-19.4\%) as field names change, treating renamed fields as completely different
+\item \textbf{STED} maintains better robustness (-5.2\% degradation) through structural pattern recognition
+\item \textbf{BERTScore} demonstrates exceptional robustness (-0.8\%) via semantic understanding of field names
+\item \textbf{DeepDiff} shows moderate robustness (-3.6\%) with consistent degradation pattern
+\end{itemize}
+
+For structural transformations, TED and STED show complementary sensitivities: TED detects flattening as complete change (0.000) while STED identifies nesting as significant (0.000). This reflects their different approaches to structural similarity.
+
+\section{Detailed Consistency Results}
+
+\subsection{Temperature Sensitivity Analysis}
+
+We analyze how temperature settings affect model consistency across 9 temperature values from 0.1 to 0.9. Each cell represents mean consistency score across 80 test cases (720 total per model).
+
+\begin{table}[H]
+\centering
+\caption{Overall consistency scores across temperature settings}
+\label{tab:overall-consistency-temp}
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+\textbf{Model} & \multicolumn{9}{c}{\textbf{Temperature}} \\
+\cmidrule{2-10}
+ & 0.1 & 0.2 & 0.3 & 0.4 & 0.5 & 0.6 & 0.7 & 0.8 & 0.9 \\
+\midrule
+Claude-3.5-Sonnet-V2 & 0.595 & 0.666 & 0.628 & 0.607 & 0.603 & 0.604 & 0.577 & 0.578 & 0.570 \\
+Claude-3-Haiku & 0.527 & 0.479 & 0.490 & 0.433 & 0.432 & 0.344 & 0.371 & 0.374 & 0.361 \\
+Claude-3.5-Haiku & 0.674 & 0.650 & 0.537 & 0.530 & 0.513 & 0.497 & 0.448 & 0.442 & 0.428 \\
+Claude-3.7-Sonnet & \textbf{0.717} & \textbf{0.698} & \textbf{0.690} & \textbf{0.672} & \textbf{0.661} & \textbf{0.648} & \textbf{0.623} & \textbf{0.628} & \textbf{0.581} \\
+Llama-3.3-70B & 0.519 & 0.522 & 0.457 & 0.411 & 0.346 & 0.386 & 0.368 & 0.374 & 0.334 \\
+Nova-Pro & 0.438 & 0.507 & 0.454 & 0.457 & 0.494 & 0.448 & 0.380 & 0.420 & 0.401 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Semantic consistency scores across temperature settings}
+\label{tab:semantic-consistency-temp}
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+\textbf{Model} & \multicolumn{9}{c}{\textbf{Temperature}} \\
+\cmidrule{2-10}
+ & 0.1 & 0.2 & 0.3 & 0.4 & 0.5 & 0.6 & 0.7 & 0.8 & 0.9 \\
+\midrule
+Claude-3.5-Sonnet-V2 & 0.464 & 0.535 & 0.481 & 0.464 & 0.463 & 0.450 & 0.423 & 0.432 & 0.416 \\
+Claude-3-Haiku & 0.456 & 0.406 & 0.402 & 0.337 & 0.336 & 0.263 & 0.283 & 0.279 & 0.264 \\
+Claude-3.5-Haiku & \textbf{0.583} & 0.537 & 0.443 & 0.424 & 0.427 & 0.380 & 0.354 & 0.339 & 0.319 \\
+Claude-3.7-Sonnet & 0.565 & \textbf{0.547} & \textbf{0.535} & \textbf{0.508} & \textbf{0.498} & \textbf{0.476} & \textbf{0.454} & \textbf{0.462} & \textbf{0.414} \\
+Llama-3.3-70B & 0.387 & 0.390 & 0.326 & 0.292 & 0.222 & 0.263 & 0.246 & 0.257 & 0.215 \\
+Nova-Pro & 0.342 & 0.404 & 0.354 & 0.348 & 0.377 & 0.338 & 0.283 & 0.314 & 0.300 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Structural consistency scores across temperature settings}
+\label{tab:structural-consistency-temp}
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+\textbf{Model} & \multicolumn{9}{c}{\textbf{Temperature}} \\
+\cmidrule{2-10}
+ & 0.1 & 0.2 & 0.3 & 0.4 & 0.5 & 0.6 & 0.7 & 0.8 & 0.9 \\
+\midrule
+Claude-3.5-Sonnet-V2 & 0.875 & 0.975 & 0.963 & 0.950 & 0.950 & 0.963 & 0.950 & 0.938 & 0.950 \\
+Claude-3-Haiku & 0.755 & 0.750 & 0.781 & 0.767 & 0.758 & 0.679 & 0.682 & 0.708 & 0.722 \\
+Claude-3.5-Haiku & 0.860 & 0.869 & 0.776 & 0.768 & 0.757 & 0.771 & 0.703 & 0.722 & 0.704 \\
+Claude-3.7-Sonnet & \textbf{1.000} & \textbf{1.000} & \textbf{1.000} & \textbf{1.000} & \textbf{1.000} & \textbf{1.000} & \textbf{1.000} & \textbf{1.000} & \textbf{0.988} \\
+Llama-3.3-70B & 0.825 & 0.863 & 0.825 & 0.800 & 0.800 & 0.850 & 0.825 & 0.838 & 0.838 \\
+Nova-Pro & 0.722 & 0.775 & 0.700 & 0.739 & 0.787 & 0.749 & 0.658 & 0.748 & 0.673 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Summary Statistics}
+
+\begin{table}[H]
+\centering
+\caption{Aggregated consistency metrics (Mean ± SD across all temperatures, N=720 per model)}
+\label{tab:consistency-summary}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Model} & \textbf{Overall} & \textbf{Semantic} & \textbf{Structural} \\
+\midrule
+Claude-3.5-Sonnet-V2 & 0.603±0.303 & 0.459±0.318 & 0.946±0.227 \\
+Claude-3-Haiku & 0.424±0.386 & 0.336±0.399 & 0.734±0.432 \\
+Claude-3.5-Haiku & 0.524±0.368 & 0.423±0.378 & 0.770±0.411 \\
+Claude-3.7-Sonnet & \textbf{0.658±0.240} & \textbf{0.495±0.288} & \textbf{0.999±0.037} \\
+Llama-3.3-70B & 0.413±0.337 & 0.289±0.340 & 0.829±0.377 \\
+Nova-Pro & 0.444±0.378 & 0.340±0.388 & 0.728±0.430 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Key Findings}
+
+\paragraph{Temperature Effects}
+\begin{itemize}
+\item Most models show declining consistency as temperature increases, with steepest drops between T=0.5 and T=0.7
+\item Claude-3.5-Haiku exhibits strongest temperature sensitivity (46\% decline from T=0.1 to T=0.9)
+\item Claude-3.7-Sonnet maintains most stable performance across temperatures (19\% decline)
+\item Structural consistency remains more robust to temperature changes than semantic consistency
+\end{itemize}
+
+\paragraph{Optimal Temperature Ranges}
+\begin{itemize}
+\item \textbf{T=0.1-0.3}: Best for consistency, all models achieve peak performance
+\item \textbf{T=0.4-0.6}: Moderate degradation, acceptable for most applications
+\item \textbf{T=0.7-0.9}: Significant consistency loss, especially for semantic preservation
+\end{itemize}
+
+\paragraph{Model-Specific Observations}
+\begin{itemize}
+\item \textbf{Claude-3.7-Sonnet}: Near-perfect structural consistency ($\geq$0.988) across all temperatures
+\item \textbf{Nova-Pro}: Shows irregular pattern with local maximum at T=0.5
+\item \textbf{Llama-3.3-70B}: Exhibits sharp semantic consistency drop at T=0.5
+\end{itemize}
+
+\end{document}

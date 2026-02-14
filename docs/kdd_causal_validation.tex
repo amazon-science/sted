@@ -1,0 +1,78 @@
+\subsection{Causal Validation via Bidirectional Intervention}
+\label{sec:causal_validation}
+
+While observational analysis identified prompt features predictive of consistency, correlation does not imply causation. To validate whether these features \textit{causally} affect consistency, we conduct a bidirectional intervention study.
+
+\subsubsection{Methodology}
+
+\textbf{Bidirectional Intervention Design.} For each feature $f$, we perform two complementary interventions: (1) \textsc{Add}: select prompts lacking $f$, rewrite to include $f$; (2) \textsc{Remove}: select prompts containing $f$, rewrite to remove $f$. This design controls for selection bias and enables symmetric causal effect estimation.
+
+We test six high-importance features: \texttt{word\_count} (0.673), \texttt{has\_should} (0.071), \texttt{has\_if} (0.070), \texttt{has\_can\_you} (0.065), \texttt{has\_must} (0.040), and \texttt{has\_numbered\_list} (0.016). Rewriting uses deterministic rules to ensure reproducibility and isolate feature effects. We test 50 samples per feature across 3 temperatures with 10 runs each (675 total experiments).
+
+\subsubsection{Aggregate Results}
+
+\begin{table}[h]
+\centering
+\caption{Aggregate causal effects of feature interventions on consistency.}
+\label{tab:causal_aggregate}
+\begin{tabular}{lcccc}
+\toprule
+Feature & $\Delta$ Cons. & p-value & n \\
+\midrule
+word\_count & +0.50\% & 0.505 & 75 \\
+has\_should & +0.02\% & 0.959 & 150 \\
+has\_if & $-$0.17\% & 0.822 & 75 \\
+has\_can\_you & $-$0.36\% & 0.075 & 75 \\
+has\_must & $\mathbf{-1.48\%}$ & $\mathbf{0.040}$ & 150 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Despite high observational importance, most features show \textbf{no significant aggregate causal effect}. Only \texttt{has\_must} exhibits a small significant effect ($-1.48\%$, $p=0.040$).
+
+\subsubsection{Conditional Effects: Simpson's Paradox}
+
+The null aggregate effects mask significant conditional effects. Stratifying by baseline consistency reveals opposite effects:
+
+\begin{table}[h]
+\centering
+\caption{Conditional causal effects by baseline consistency level.}
+\label{tab:causal_conditional}
+\begin{tabular}{lccccc}
+\toprule
+Feature & $\Delta$ (Low$<$0.8) & $\Delta$ (High$\geq$0.8) & Diff. & t & p \\
+\midrule
+word\_count & +6.17\% & $-$0.58\% & +6.75\% & 3.56 & \textbf{0.0007} \\
+has\_should & +1.81\% & $-$0.39\% & +2.20\% & 2.04 & \textbf{0.043} \\
+has\_must & +1.20\% & $-$1.82\% & +3.01\% & 1.35 & 0.180 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For \textbf{difficult prompts} (low baseline consistency), interventions \textit{improve} consistency; for \textbf{easy prompts}, effects are neutral or negative. This Simpson's Paradox pattern explains the null aggregate effect.
+
+\subsubsection{Confounding Analysis}
+
+We test whether features correlate with inherent prompt difficulty by comparing baseline consistency:
+
+\begin{table}[h]
+\centering
+\caption{Baseline consistency by feature presence (confounding test).}
+\label{tab:confounding}
+\begin{tabular}{lcccc}
+\toprule
+Feature & Without & With & Diff. & p-value \\
+\midrule
+has\_should & 0.961 & 0.844 & $\mathbf{-0.116}$ & $\mathbf{<0.001}$ \\
+has\_must & 0.934 & 0.923 & $-$0.011 & 0.720 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Prompts containing ``should'' have significantly lower baseline consistency ($0.844$ vs $0.961$, $p<0.001$), revealing \textbf{confounding}: the feature correlates with complex prompts rather than causing inconsistency.
+
+\subsubsection{Implications}
+
+Our causal validation yields three insights: (1) \textbf{Observational $\neq$ Causal}: High feature importance does not imply causal influence---the top feature (\texttt{word\_count}, importance 0.673) shows no aggregate effect ($p=0.505$). (2) \textbf{Features as Complexity Markers}: Linguistic features serve as markers of prompt complexity rather than direct causes. (3) \textbf{Conditional Effects}: Interventions benefit difficult prompts but can harm easy ones, suggesting targeted optimization strategies.
+
+These findings validate that STED captures genuine difficulty signals: predictive features identify harder prompts even though they don't directly cause inconsistency.

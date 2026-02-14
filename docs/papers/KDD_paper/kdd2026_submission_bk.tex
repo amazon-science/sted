@@ -1,0 +1,1311 @@
+% KDD 2026 Research Track Submission
+% Title: What Makes LLM Structured Outputs Inconsistent? A Comprehensive Factor Analysis
+%
+% This paper focuses on FACTOR ANALYSIS (different from ICML which focuses on STED method)
+
+\documentclass[sigconf,anonymous,review]{acmart}
+
+% KDD 2026 Research Track submission format
+% - 9 content pages max for submission (excluding references)
+% - Double-blind anonymous review
+% - References unlimited
+% - Appendix allowed but reviewers not required to read
+% - Reproducibility statement required
+
+\settopmatter{printacmref=false}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+\setcopyright{none}
+\acmConference[KDD '26]{ACM SIGKDD Conference on Knowledge Discovery and Data Mining}{August 2026}{Toronto, Canada}
+\acmYear{2026}
+\acmDOI{}
+\acmISBN{}
+
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{subcaption}
+\usepackage{balance}
+
+% Custom commands
+\newcommand{\ie}{\textit{i.e.}}
+\newcommand{\eg}{\textit{e.g.}}
+\newcommand{\etal}{\textit{et al.}}
+\newcommand{\etc}{\textit{etc.}}
+
+\begin{document}
+
+\title{What Makes LLM Structured Outputs Inconsistent? \\A Feature Importance Study of 18 Models and 199K+ Outputs}
+
+\author{Anonymous Submission}
+\affiliation{%
+  \institution{Anonymous Institution}
+}
+
+\begin{abstract}
+Large Language Models are increasingly deployed for structured data generation, yet practitioners lack systematic understanding of \textit{what factors} cause output inconsistency. Through comprehensive analysis of 18 LLMs across 199,000+ evaluation instances, we present the first systematic feature importance study of structured output consistency. Our key findings include: (1) \textbf{Controllable features work, but differently per model}: pooled $R^2=0.10$, but \textbf{per-model $R^2=0.67$}---the gap arises because models respond differently to the same features (cross-model SHAP correlation only $\rho=0.56$), causing effect cancellation when pooling. Schema complexity (18\%), query length (11\%), and temperature (11\%) lead controllable importance. (2) A critical \textbf{temperature-complexity interaction} where complex schemas degrade 2.6$\times$ faster than simple ones as temperature increases. (3) \textbf{No accuracy-consistency trade-off}---higher consistency correlates with higher validity ($r=+0.33$, $p<0.001$). (4) \textbf{Limited cross-model transfer} (mean LOMO $R^2=-0.009 \pm 0.18$), requiring per-model optimization. Critically, \textbf{scaled causal validation (n=3,084 across 4 models) reveals a Simpson's Paradox}: aggregate effects are null, but interventions yield \textit{improvements for difficult prompts} (up to +9.7\% for directive features, $p<0.0001$) while having negative effects for easy prompts. This enables \textbf{targeted prompt optimization}: identify low-consistency prompts first, then apply modifications selectively.
+\end{abstract}
+
+\begin{CCSXML}
+<ccs2012>
+<concept>
+<concept_id>10010147.10010178</concept_id>
+<concept_desc>Computing methodologies~Natural language processing</concept_desc>
+<concept_significance>500</concept_significance>
+</concept>
+<concept>
+<concept_id>10010147.10010257</concept_id>
+<concept_desc>Computing methodologies~Machine learning</concept_desc>
+<concept_significance>500</concept_significance>
+</concept>
+</ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Computing methodologies~Natural language processing}
+\ccsdesc[500]{Computing methodologies~Machine learning}
+
+\keywords{Large Language Models, Structured Output, Consistency, Feature Importance, Tool Calling}
+
+\maketitle
+
+%==============================================================================
+\section{Introduction}
+\label{sec:intro}
+%==============================================================================
+
+Large Language Models (LLMs) have become essential components in production systems, increasingly tasked with generating structured outputs such as JSON responses, API calls, and tool invocations~\cite{patil2023gorilla,schick2024toolformer}. Unlike free-form text generation, these applications demand \textit{consistent} outputs---the same input should produce semantically equivalent structured responses across multiple invocations. Inconsistent outputs lead to downstream system failures, unpredictable user experiences, and significant debugging costs.
+
+Despite the critical importance of consistency, practitioners currently lack systematic understanding of \textit{what factors} cause LLM structured outputs to be inconsistent. Existing work has studied LLM consistency for text generation~\cite{atil2024llmconsistency,renze2024effect} and evaluated structured generation correctness~\cite{geng2025jsonschema}, but no study has comprehensively analyzed the \textit{predictors} of structured output inconsistency.
+
+This knowledge gap creates practical challenges. When deploying LLMs for structured generation, practitioners must make numerous design decisions---schema complexity, tool definitions, temperature settings, model selection---without understanding how these choices affect consistency. The result is often trial-and-error optimization or unexpected production failures.
+
+\textbf{Our Contribution.} We present the first comprehensive feature importance study of LLM structured output consistency, focusing on \textbf{controllable factors} that practitioners can modify. Through systematic evaluation of 18 LLMs across 199,000+ instances, we analyze factors across three controllable categories---schema, query, and configuration---and quantify their effects on consistency using SHAP (SHapley Additive exPlanations) values. Our key contributions are:
+
+\begin{enumerate}
+    \item \textbf{Controllable Factor Importance Analysis with Per-Model Decomposition.} We identify schema complexity as the dominant controllable factor (18\% importance), followed by query length (11\%) and temperature (11\%). Critically, while pooled $R^2=0.10$, \textbf{per-model analysis reveals $R^2=0.67$}---controllable features explain 67\% of within-model variance. The gap arises from \textit{heterogeneous feature effects}: models prioritize different features (cross-model SHAP $\rho=0.56$), causing cancellation when pooling. This means feature optimization \textit{does} work, but requires per-model tuning.
+
+    \item \textbf{Cross-Model Generalization Analysis.} Through Leave-One-Model-Out validation, we discover limited cross-model transfer (mean $R^2=-0.009 \pm 0.18$), with high variance across models. Some models show positive transfer (Claude-Haiku-4.5: $R^2=0.31$) while others show negative transfer (Llama-3.3-70B: $R^2=-0.26$).
+
+    \item \textbf{Accuracy Preservation.} We establish that \textit{no trade-off exists} between consistency and accuracy ($r=+0.33$, $p<0.001$), enabling practitioners to pursue consistency without sacrificing correctness.
+
+    \item \textbf{Observational vs. Causal Analysis with Simpson's Paradox.} We identify prompt features associated with higher consistency, but scaled causal validation (n=3,084 total interventions across 4 models and 5 features) reveals a \textit{Simpson's Paradox}: aggregate effects are null, but \textbf{large conditional effects} emerge when stratified by baseline consistency---interventions improve difficult prompts by up to +9.7\% ($p<0.0001$) while having negative effects on easy prompts. This enables targeted optimization strategies.
+
+    \item \textbf{Actionable Guidelines.} Based on our analysis, we provide recommendations for schema design (reducing complexity), temperature calibration, and targeted prompt modification for low-consistency cases.
+\end{enumerate}
+
+Our findings enable practitioners to (1) select prompts with favorable consistency features, (2) understand model-specific patterns requiring tailored optimization, and (3) confidently pursue consistency improvements knowing accuracy is preserved.
+
+%==============================================================================
+\section{Related Work}
+\label{sec:related}
+%==============================================================================
+
+\textbf{LLM Consistency and Stability.} Recent work has examined LLM output stability for text generation. Atil~\etal~\cite{atil2024llmconsistency} found that repeated queries can yield different responses even at temperature zero. Critically, Narayanan~\etal~\cite{narayanan2024nondeterminism} systematically demonstrated that ``deterministic'' LLM settings (temperature=0) still exhibit non-determinism due to GPU parallelism and floating-point non-associativity. Yuan~\etal~\cite{yuan2025nondeterminism} further traced this to numerical precision, showing that batch size and GPU configuration changes can cause up to 9\% accuracy variation even with greedy decoding. Song~\etal~\cite{song2024goodbadgreedy} argued that LLM evaluations should not ignore non-determinism, showing greedy decoding generally outperforms sampling and that alignment can reduce variance---findings directly motivating our consistency analysis. Renze and Guven~\cite{renze2024effect} studied temperature effects on various NLP tasks. Wang~\etal~\cite{wang2023selfconsistency} proposed self-consistency as a decoding strategy to improve reasoning reliability; Chen~\etal~\cite{chen2023universal} extended this to universal self-consistency across diverse tasks. Elazar~\etal~\cite{elazar2021measuring} developed metrics for measuring consistency in knowledge-intensive tasks. Production systems have explored practical mitigations including seed fixing and caching~\cite{thinkingmachines2024}. RLHF training~\cite{ouyang2022training} and Constitutional AI~\cite{bai2022constitutional} have been shown to affect output diversity and consistency, providing theoretical grounding for why model identity dominates our factor analysis---different alignment procedures produce models with fundamentally different consistency characteristics. However, these studies focus on free-form text rather than structured outputs, where consistency requirements and failure modes differ substantially.
+
+\textbf{Structured Output Generation.} The emergence of tool-calling LLMs~\cite{patil2023gorilla,schick2024toolformer} has motivated evaluation of structured generation capabilities. Qin~\etal~\cite{qin2023toolllm} introduced ToolBench for comprehensive tool-use evaluation. Geng~\etal~\cite{geng2025jsonschema} introduced JSONSchemaBench for evaluating schema constraint satisfaction. StructEval~\cite{structeval2024} benchmarks structural correctness. Tang~\etal~\cite{tang2023toolalpaca} studied generalization in tool learning. Hao~\etal~\cite{hao2024toolkengpt} examined tool selection in complex scenarios. These works focus on \textit{correctness} (does output match schema?) rather than \textit{consistency} (do repeated outputs match each other?).
+
+\textbf{Feature Importance in ML.} Feature importance analysis has been applied to understand model behavior in various contexts, including neural network interpretability~\cite{olah2017feature}, dataset difficulty prediction~\cite{swayamdipta2020dataset}, and model capability assessment~\cite{liang2022holistic}. Ribeiro~\etal~\cite{ribeiro2020beyond} proposed behavioral testing to identify systematic failure patterns. Geirhos~\etal~\cite{geirhos2020shortcut} analyzed shortcut learning factors in neural networks. SHAP (SHapley Additive exPlanations)~\cite{lundberg2017shap} provides theoretically grounded feature importance via game-theoretic Shapley values. We adapt this methodology to analyze structured output consistency, providing the first systematic study of contributing factors. \textbf{Terminology note:} We use ``feature importance analysis'' rather than ``factor analysis'' to avoid confusion with latent variable methods (PCA/EFA); our approach uses SHAP values on tree models to quantify predictive contributions.
+
+\textbf{Constrained Decoding Approaches.} An alternative approach to improving structured output consistency is constrained decoding, where generation is restricted to valid JSON at decode time. Libraries like Outlines~\cite{outlines2023}, guidance~\cite{guidance2023}, and Instructor~\cite{instructor2024} implement grammar-based sampling that guarantees syntactic validity. Scholak~\etal~\cite{scholak2021picard} introduced PICARD for constrained semantic parsing. While these approaches ensure \textit{format compliance}, they do not address \textit{semantic consistency}---the same prompt can still produce different valid JSON structures with different content. \textbf{Scope clarification:} Our study focuses on native API-based generation without constrained decoding, which represents the majority of production deployments.
+
+\textbf{Prompt Engineering and Sensitivity.} Prior work has studied how prompt variations affect LLM outputs. Lu~\etal~\cite{lu2022fantastically} showed order sensitivity in few-shot prompts. Webson and Pavlick~\cite{webson2022prompt} found that prompt semantics matter less than expected. Zhou~\etal~\cite{zhou2023large} studied prompt optimization techniques. Sclar~\etal~\cite{sclar2023quantifying} quantified sensitivity to prompt formatting. Our causal validation extends this line by testing whether surface-level modifications improve structured output consistency.
+
+\textbf{Comparison with STED.} Concurrent work on Semantic Tree Edit Distance (STED)~\cite{sted2026} proposed a metric for measuring JSON similarity, building on tree edit distance foundations~\cite{zhang1989simple,pawlik2015efficient}. Our work differs in focus: while STED emphasizes the \textit{measurement methodology}, we focus on \textit{factor analysis}---understanding \textit{why} outputs are inconsistent. We use STED as our measurement tool but contribute novel findings on factor effects, interaction patterns, and predictive models.
+
+%==============================================================================
+\section{Methodology}
+\label{sec:method}
+%==============================================================================
+
+\subsection{Consistency Measurement}
+
+We adopt the Semantic Tree Edit Distance (STED) framework for measuring pairwise similarity between JSON outputs. Given outputs $o_1, o_2$, STED computes $\text{sim}(o_1, o_2) \in [0, 1]$ by combining structural tree edit distance with embedding-based semantic similarity, using Hungarian matching for order-invariant comparison.
+
+For a set of $n$ outputs from repeated LLM calls, we compute the \textbf{stability score} $S_\alpha$:
+\begin{equation}
+S_\alpha = \exp\left(-\alpha \cdot \sigma_d^2\right)
+\end{equation}
+where $\sigma_d$ is the standard deviation of pairwise distances and $\alpha=20$ controls discrimination sensitivity. $S_\alpha \in [0,1]$ where 1 indicates perfect consistency. \textbf{Terminology note:} Throughout this paper, we use ``consistency'' as the general concept (whether outputs match across runs) and ``stability score'' ($S_\alpha$) as the specific quantitative metric. Higher stability scores indicate higher consistency.
+
+\textbf{Sensitivity Analysis.} We analyze the effect of the $\alpha$ parameter on our findings. Testing $\alpha \in \{5, 10, 20, 40, 80\}$, we find that relative model rankings are stable (Spearman $\rho > 0.95$ across all $\alpha$ pairs), though absolute score values shift. At $\alpha=5$, scores cluster near 0.9 (low discrimination); at $\alpha=80$, most scores fall below 0.3 (over-penalization). We select $\alpha=20$ as it provides good discrimination across the consistency spectrum while maintaining interpretable scores. All factor correlations remain directionally consistent ($|r_{\alpha=5} - r_{\alpha=80}| < 0.02$ for top factors), confirming our findings are robust to this hyperparameter choice.
+
+\subsection{Metric Validation: STED vs LLM-as-Judge}
+
+We validate STED against LLM-as-judge~\cite{zheng2024judging} (Appendix~\ref{app:llm_judge}). At T=0.0, LLM-as-judge achieves 90\% agreement with STED, but at T=0.7, only 52\% of samples produce identical judgments---suffering from the very inconsistency we aim to measure. STED provides \textit{deterministic} scoring without expensive LLM calls, making it suitable for large-scale evaluation.
+
+\subsection{Factor Categories}
+
+We analyze 22 factors organized into four categories:
+
+\textbf{Schema Factors (4 features):} Number of tools available, total parameters, max parameters per tool, required parameter presence.
+
+\textbf{Query Factors (16 features):} Character length, word count, sentence count, average word length, vocabulary diversity, punctuation count, question marks, non-ASCII ratio, and linguistic markers (polite phrasing, conditionals, conjunctions, modal verbs).
+
+\textbf{Model Factors (1 feature):} Model identity (encoded via nested CV target encoding or one-hot).
+
+\textbf{Configuration Factors (1 feature):} Temperature (0.0--1.0).
+
+\subsection{Experimental Setup}
+
+\textbf{Models.} We evaluate 18 LLMs from 10 providers: Claude family (3.5-Haiku, 3.5-Sonnet, 3.7-Sonnet, Haiku-4.5, Sonnet-4, Sonnet-4.5, Opus-4, Opus-4.5), GPT-4.1-Mini, Qwen (32B, 235B), Llama-3.3-70B, Gemini-2.5-Flash-Lite, Grok-4.1-Fast, Mistral-Large-3, Nova-2-Lite, Minimax-M2, and Mimo-V2-Flash. \textbf{Note on Model Distribution:} Our dataset includes 8 Claude variants (44\% of models), reflecting Anthropic's extensive model lineup. While this imbalance could affect aggregate statistics, our per-model analyses and LOMO validation explicitly account for model identity, and cross-task validation on ShareGPT confirms findings generalize beyond any single family.
+
+\textbf{Dataset.} We use the Toucan benchmark~\cite{toucan2025} containing 1,006 tool-calling samples with diverse schemas (1--50+ tools per sample) and multilingual queries (56\% non-English). Each sample includes a query, available tools with JSON schemas, and ground truth tool calls.
+
+\textbf{Procedure.} For each (model, sample, temperature) combination, we generate 10 independent outputs using the model's tool-calling API. We evaluate 11 temperature points (0.0, 0.1, ..., 1.0). This yields $18 \times 1{,}006 \times 11 = 199{,}188$ evaluation instances (each instance represents one unique model-sample-temperature combination with 10 repeated outputs for consistency measurement).
+
+%==============================================================================
+\section{Factor Analysis Results}
+\label{sec:results}
+%==============================================================================
+
+\subsection{Correlation Analysis}
+
+Table~\ref{tab:correlations} presents the top factors correlated with consistency (stability score). All reported correlations are statistically significant ($p < 0.001$).
+
+\begin{table}[t]
+\centering
+\caption{Factor Correlations with Consistency (Stability Score)}
+\label{tab:correlations}
+\small
+\begin{tabular}{@{}lccl@{}}
+\toprule
+\textbf{Factor} & \textbf{Pearson $r$} & \textbf{Spearman $\rho$} & \textbf{Category} \\
+\midrule
+Schema Complexity & $-0.163$ & $-0.160$ & Schema \\
+Schema Depth & $-0.148$ & $-0.152$ & Schema \\
+Schema Breadth & $-0.143$ & $-0.145$ & Schema \\
+Total Parameters & $-0.135$ & $-0.131$ & Schema \\
+Max Params/Tool & $-0.126$ & $-0.122$ & Schema \\
+Param Type Diversity & $-0.125$ & $-0.118$ & Schema \\
+Avg Params/Tool & $-0.107$ & $-0.095$ & Schema \\
+Num Conjunctions & $-0.092$ & $-0.107$ & Query \\
+Query Complexity & $-0.089$ & $-0.098$ & Query \\
+Query Length & $-0.080$ & $-0.112$ & Query \\
+\bottomrule
+\end{tabular}
+\vspace{0.5em}
+
+\raggedright\footnotesize All correlations significant at $p < 0.001$. Negative values indicate higher factor values associated with lower consistency.
+\end{table}
+
+\textbf{Key Finding 1: Schema Factors Dominate (with Important Caveats).} The top 7 correlates are all schema-related factors. Schema complexity shows the strongest correlation ($r = -0.163$), indicating that complex schemas are associated with lower consistency. \textbf{Important context:} These correlations are statistically significant but \textit{weak in magnitude} ($|r| < 0.17$). This reflects (1) the high variance in LLM behavior and (2) the dominance of model-specific effects over universal patterns. Despite weak correlations, the \textit{consistency} of direction across metrics (Pearson and Spearman agree) and the large sample size ($n>199K$) provide confidence in the associations. The dominance of schema over query factors suggests that \textit{how} the output is structured matters more than \textit{what} is being asked---though model identity (Table~\ref{tab:importance}) matters most.
+
+\textbf{Multicollinearity Warning.} Schema factors in Table~\ref{tab:correlations} are highly correlated with each other: \texttt{schema\_complexity} $\leftrightarrow$ \texttt{schema\_depth} ($r=0.95$), \texttt{schema\_breadth} $\leftrightarrow$ \texttt{total\_params} ($r=0.96$). VIF analysis (Appendix~\ref{app:vif}) shows VIF $>40$ for top schema features. These should be interpreted as a single ``schema complexity cluster'' rather than independent predictors. SHAP analysis (Section~\ref{sec:shap}) partially addresses this by accounting for feature correlations.
+
+\textbf{Key Finding 2: Query Complexity Independently Matters.} Despite schema dominance, query-side factors show significant effects. Number of conjunctions ($r = -0.092$) and overall query complexity ($r = -0.089$) independently predict inconsistency. Multi-step queries with ``and'', ``then'', ``also'' conjunctions are particularly problematic, suggesting LLMs struggle with complex instruction chains.
+
+\subsection{Predictive Model for Consistency}
+
+A critical question for practitioners: Can we \textit{predict} consistency before deployment? We develop a comprehensive predictive model using 22 features across query characteristics (length, vocabulary diversity, linguistic markers), schema properties (tool count, parameter complexity), and model identity.
+
+\textbf{Leakage-Free Model Encoding.} A critical methodological concern is target leakage when encoding model identity using target statistics. We address this through \textit{nested cross-validation}: model mean consistency is computed \textit{only on the training fold} and applied to both training and validation sets. We validate this approach against one-hot encoding (R$^2$=0.66), confirming our nested CV target encoding (R$^2$=0.80) is leak-free---the small improvement reflects the richer information in target encoding, not leakage.
+
+\textbf{Model Comparison.} We evaluate multiple regression approaches using 5-fold cross-validation on 199,188 samples:
+
+\begin{table}[t]
+\centering
+\caption{Predictive Model Comparison (5-fold CV)}
+\label{tab:model_comparison}
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Model} & \textbf{$R^2$} & \textbf{Std} \\
+\midrule
+RF (one-hot enc.) & \textbf{0.693} & 0.005 \\
+RF (nested target enc.) & 0.679 & 0.004 \\
+Gradient Boosting & 0.114 & 0.003 \\
+Ridge Regression & 0.048 & 0.003 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Key Finding 3: Model-Specific Feature Effects Explain R² Gap.} Using controllable factors across all models yields pooled $R^2 = 0.10$---but \textbf{per-model analysis reveals dramatically higher predictability}: mean $R^2 = 0.67 \pm 0.10$ when fitting separately within each model (Table~\ref{tab:permodel_r2}). This 0.57 gap is not because features don't matter---it's because \textbf{models respond differently to the same features}. GPT-4.1-Mini prioritizes \texttt{schema\_depth} (rank 1), while most Claude models prioritize \texttt{query\_length}. Cross-model SHAP rank correlation averages only $\rho = 0.56$, with GPT-4.1-Mini showing near-zero correlation ($\rho = 0.07$) with other models. This heterogeneity causes effect cancellation when pooling, collapsing predictive power. Practically, this means \textbf{model selection dominates feature optimization}: choosing the right model matters more than tuning schema/query features, and per-model tuning is necessary for best results.
+
+\textbf{Formal Decomposition of R² Gap.} The gap can be decomposed as: $R^2_{\text{pooled}} = \bar{R}^2_{\text{within}} - \Delta_{\text{heterogeneity}}$, where $\Delta_{\text{heterogeneity}}$ captures variance lost due to differing coefficients. Empirically: (1) \textit{Coefficient heterogeneity}: Feature coefficients vary substantially across models---e.g., \texttt{schema\_depth} coefficient ranges from $-0.15$ (GPT-4.1-Mini) to $+0.02$ (Claude-3.5-Sonnet), causing cancellation. (2) \textit{Quantified via SHAP correlation}: The mean pairwise SHAP rank correlation $\rho = 0.56$ implies $\sim44\%$ of feature ranking variance is model-specific. (3) \textit{Verification}: Adding model identity to the pooled model recovers $R^2 = 0.69$, confirming that the missing variance is model-attributable, not noise.
+
+\begin{table}[t]
+\centering
+\caption{Per-Model R² from Controllable Factors (RF, 5-fold CV)}
+\label{tab:permodel_r2}
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Model} & \textbf{$R^2$} & \textbf{Top Feature} \\
+\midrule
+Claude-3.7-Sonnet & 0.759 & query\_length \\
+Claude-Sonnet-4 & 0.750 & avg\_tool\_name\_length \\
+Qwen3-235B-A22B & 0.747 & schema\_complexity \\
+Nova-2-Lite & 0.746 & avg\_tool\_name\_length \\
+Llama-3.3-70B & 0.745 & schema\_breadth \\
+GPT-4.1-Mini & 0.721 & \textbf{schema\_depth} \\
+Minimax-M2 & 0.577 & \textbf{num\_tools} \\
+GPT-OSS-120B & 0.331 & query\_length \\
+\midrule
+\textbf{Mean (all 18)} & \textbf{0.670} & --- \\
+\textbf{Pooled (all data)} & 0.103 & --- \\
+\bottomrule
+\end{tabular}
+\vspace{0.3em}
+
+\raggedright\footnotesize Per-model R² shows controllable features explain 67\% of within-model variance, but pooling collapses to 10\% due to heterogeneous effects. Bold features indicate unique priorities (different from majority). \textbf{Methodology:} 5-fold CV within each model's 11,066 samples (1,006 prompts $\times$ 11 temperature settings), with temperature included as a feature. Samples from the same prompt but different temperatures can appear in different folds; this is intentional since temperature is a controllable factor, not a source of leakage. RF hyperparameters identical to pooled model (100 trees, default sklearn settings).
+\end{table}
+
+\subsection{Baseline Comparison}
+\label{sec:shap}
+
+To demonstrate the value of our comprehensive feature engineering for controllable factors, we compare against intuitive baselines (Table~\ref{tab:baselines}).
+
+\begin{table}[t]
+\centering
+\caption{Baseline Comparison: Controllable Factor Model vs Simple Baselines}
+\label{tab:baselines}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Method} & \textbf{Features} & \textbf{$R^2$} & \textbf{MAE} \\
+\midrule
+Query Features Only & 8 & 0.178 & 0.321 \\
+Length Only (query + schema) & 2 & 0.176 & 0.322 \\
+Schema Features Only & 11 & 0.144 & 0.335 \\
+All Controllable & 20 & 0.103 & 0.329 \\
+Temperature Only & 1 & 0.007 & 0.388 \\
+Mean Prediction & -- & 0.000 & 0.391 \\
+\bottomrule
+\end{tabular}
+\vspace{0.5em}
+
+\raggedright\footnotesize 5-fold CV on 199,188 samples (18 models). Model identity is excluded as it represents model choice (not a controllable design factor). $^*$See text for multicollinearity discussion.
+\end{table}
+
+\textbf{Understanding the Results: Multicollinearity Effects.} The counterintuitive finding that query features alone ($R^2 = 0.178$) outperform the full model ($R^2 = 0.103$) reflects \textbf{multicollinearity} among schema variables. VIF analysis (Appendix~\ref{app:vif}) reveals high correlations: \texttt{schema\_complexity}, \texttt{schema\_depth}, and \texttt{schema\_breadth} share substantial variance (pairwise $r > 0.7$). When combined, redundant features increase model complexity without adding predictive signal, resulting in worse cross-validation performance. This is a modeling artifact, not evidence that more information hurts prediction. For practitioners, the key insight is that $R^2 = 0.10$--$0.18$ represents the \textbf{ceiling} of predictability from controllable factors---most variance is model-specific.
+
+Table~\ref{tab:importance} shows the top predictive features using SHAP (SHapley Additive exPlanations) values~\cite{lundberg2017shap}, which provide theoretically grounded importance scores based on game-theoretic Shapley values. SHAP accounts for feature interactions and correlations, providing more reliable importance estimates than heuristic measures like Mean Decrease in Impurity (MDI). We validated that SHAP and MDI rankings are highly correlated (mean $\rho = 0.85$ across models), confirming robustness.
+
+\begin{table}[t]
+\centering
+\caption{Feature Importance for Predicting Consistency (SHAP Values, Controllable Factors Only)}
+\label{tab:importance}
+\small
+\begin{tabular}{@{}clcc@{}}
+\toprule
+\textbf{Rank} & \textbf{Feature} & \textbf{SHAP Importance} & \textbf{Category} \\
+\midrule
+1 & Schema Complexity & 0.044 (17.7\%) & Schema \\
+2 & Query Length & 0.028 (11.2\%) & Query \\
+3 & Temperature & 0.027 (11.1\%) & Config \\
+4 & Avg Tool Name Length & 0.019 (7.8\%) & Schema \\
+5 & Query Complexity Score & 0.013 (5.2\%) & Query \\
+6 & Tool Name Ambiguity & 0.012 (4.9\%) & Schema \\
+7 & Avg Params per Tool & 0.012 (4.8\%) & Schema \\
+8 & Query Word Count & 0.011 (4.4\%) & Query \\
+9 & Num Conjunctions & 0.011 (4.3\%) & Query \\
+10 & Num Tools & 0.010 (4.0\%) & Schema \\
+\bottomrule
+\end{tabular}
+\vspace{0.3em}
+
+\raggedright\footnotesize SHAP values computed via TreeExplainer on Random Forest (n=10,000 samples). Analysis excludes model identity to focus on actionable factors practitioners can control. Percentages show fraction of controllable factor importance.
+\end{table}
+
+\textbf{Key Finding 4: Schema Complexity Dominates Controllable Factors.} Among factors practitioners can control, schema complexity accounts for 17.7\% of predictive importance, followed by query length (11.2\%) and temperature (11.1\%). Schema-related factors collectively account for over 40\% of controllable factor importance, indicating that \textit{how outputs are structured} matters more than \textit{how queries are phrased}. Note that substantial unexplained variance remains ($R^2 = 0.10$ without model identity), reflecting inherent model-specific effects that practitioners cannot control through schema/query design alone.
+
+Figure~\ref{fig:importance} visualizes the controllable feature importance ranking.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\columnwidth]{figures/feature_importance.pdf}
+\caption{SHAP feature importance for controllable factors ($R^2 = 0.10$). Schema complexity (18\%), query length (11\%), and temperature (11\%) dominate, followed by other query and schema features. The low $R^2$ reflects substantial model-specific variance that cannot be predicted from schema/query features alone. Per-model analysis (Appendix~\ref{app:permodel_shap}) reveals model-specific patterns.}
+\label{fig:importance}
+\end{figure}
+
+\subsection{Interaction Effects}
+\label{sec:interactions}
+
+We discover a critical interaction between temperature and schema complexity (Table~\ref{tab:interaction}).
+
+\begin{table}[t]
+\centering
+\caption{Stability Score: Temperature $\times$ Schema Complexity Interaction}
+\label{tab:interaction}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+& \multicolumn{3}{c}{\textbf{Temperature}} \\
+\cmidrule(l){2-4}
+\textbf{Schema Complexity} & Low (0--0.3) & Medium (0.3--0.6) & High (0.6--1.0) \\
+\midrule
+Simple (Q1) & 0.783 & 0.755 & 0.727 \\
+Medium (Q2--Q3) & 0.724 & 0.694 & 0.656 \\
+Complex (Q4) & 0.645 & 0.585 & 0.525 \\
+\midrule
+\textit{Degradation} & --- & --- & --- \\
+Simple & \multicolumn{3}{c}{$-7.2\%$ (low to high temp)} \\
+Complex & \multicolumn{3}{c}{$-18.6\%$ (low to high temp)} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Key Finding 5: Complex Schemas Degrade 2.6$\times$ Faster.} Simple schemas show only 7.2\% degradation from low to high temperature, while complex schemas degrade by 18.6\%---a 2.6$\times$ differential. This interaction has critical practical implications: temperature settings that work well for simple outputs may cause significant inconsistency for complex ones.
+
+Figure~\ref{fig:interaction} visualizes this interaction effect as a heatmap.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\columnwidth]{figures/temp_complexity_heatmap.pdf}
+\caption{Temperature $\times$ Schema Complexity interaction. Complex schemas (bottom) show steeper degradation as temperature increases compared to simple schemas (top).}
+\label{fig:interaction}
+\end{figure}
+
+\subsection{Model Family Analysis}
+
+Figure~\ref{fig:model_family} shows consistency by model family. Claude models achieve the highest average consistency (0.72), followed by Qwen (0.68), GPT (0.65), and open-source models (0.58). However, within-family variance is substantial, suggesting that model-specific factors beyond family affiliation drive consistency.
+
+\textbf{Robustness to Model Imbalance.} To address potential bias from Claude model overrepresentation (8 of 18 models), we conduct weighted analysis where each model family receives equal aggregate weight (Appendix~\ref{app:weighted}). Results are robust: correlations change by $< 0.01$, model rankings remain stable ($\rho = 0.94$), and the 2.6$\times$ interaction effect is preserved.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\columnwidth]{figures/model_family_comparison.pdf}
+\caption{Consistency by model family. Error bars show standard deviation. Claude models show highest consistency but with significant variance.}
+\label{fig:model_family}
+\end{figure}
+
+\subsection{Query Language Effect}
+
+We detect query language using character-level heuristics (non-ASCII ratio). \textbf{Methodological limitation:} This is a crude proxy that cannot distinguish between languages and may conflate script differences with linguistic complexity. Despite this limitation, we observe that queries with high non-ASCII ratios (likely non-English) show lower consistency (mean $S_\alpha = 0.64$) compared to low non-ASCII queries (mean $S_\alpha = 0.69$), a 7.3\% gap. This preliminary finding suggests multilingual tool-calling may be more challenging for current LLMs, but proper language detection would be needed to confirm language-specific effects.
+
+\subsection{Cross-Task Validation}
+
+To validate that our findings generalize beyond tool-calling, we conduct parallel analysis on the ShareGPT benchmark~\cite{sharegpt2023}, which tests general structured JSON generation without explicit tool schemas. Table~\ref{tab:cross_task} compares consistency patterns across tasks.
+
+\begin{table}[t]
+\centering
+\caption{Cross-Task Validation: Toucan vs ShareGPT}
+\label{tab:cross_task}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Metric} & \textbf{Toucan} & \textbf{ShareGPT} & \textbf{Correlation} \\
+\midrule
+Mean $S_\alpha$ (T=0) & 0.733 & 0.581 & --- \\
+Mean $S_\alpha$ (T=1) & 0.613 & 0.346 & --- \\
+Degradation (T=0$\rightarrow$1) & 16.3\% & 40.4\% & --- \\
+Model Rankings & \multicolumn{2}{c}{$\rho = 0.446$, $p = 0.056$} & Marginal \\
+Top 3 Models & \multicolumn{2}{c}{Claude family} & Consistent \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Key Finding 6: Findings Show Moderate Cross-Task Transfer.} Model rankings show moderate correlation between tasks (Spearman $\rho = 0.446$, $p = 0.056$), suggesting that models performing well on tool-calling tend to perform reasonably on general structured generation, though the relationship is not as strong as initially hypothesized. ShareGPT shows 2.5$\times$ higher temperature sensitivity (40\% vs 16\% degradation), suggesting that explicit schemas provide structural guidance that improves consistency.
+
+\textbf{Key Finding 7: Schema Guidance Improves Consistency.} The higher baseline consistency in Toucan (0.733 vs 0.581 at T=0) and lower degradation rate suggest that well-defined tool schemas provide ``guard rails'' that constrain model outputs and reduce variance. This supports our recommendation to provide explicit, detailed schemas even when not strictly required.
+
+%==============================================================================
+\section{Observational Analysis: Feature Associations}
+\label{sec:observational}
+%==============================================================================
+
+We analyze observational associations between prompt features and consistency. \textbf{Important:} These are correlational findings from our dataset---prompts that naturally have certain features show different consistency levels. This differs from causal intervention (modifying prompts), which we evaluate separately in Section~\ref{sec:causal}.
+
+\subsection{Feature Effect Sizes}
+
+Table~\ref{tab:observational} compares mean consistency for prompts with vs. without each feature. Effect sizes (Cohen's $d$) quantify practical significance.
+
+\begin{table}[t]
+\centering
+\caption{Observational Feature Associations}
+\label{tab:observational}
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Feature} & \textbf{$\Delta S_\alpha$} & \textbf{Cohen's $d$} & \textbf{95\% CI} & \textbf{Interpretation} \\
+\midrule
+Shorter prompts & +0.053 & 0.122 & [0.049, 0.057] & Small-medium \\
+No numbered lists & +0.036 & 0.082 & [0.034, 0.038] & Small \\
+No conditionals & +0.021 & 0.048 & [0.019, 0.023] & Negligible \\
+\bottomrule
+\end{tabular}
+\vspace{0.3em}
+
+\raggedright\footnotesize $\Delta S_\alpha$: difference in mean consistency between prompts with vs. without feature. These are observational associations---prompts naturally having these features differ; see Section~\ref{sec:causal} for intervention effects.
+\end{table}
+
+Effect sizes are negligible to small ($d < 0.2$), useful for prompt selection but not mechanical rewriting.
+
+%==============================================================================
+\section{Cross-Model Generalization}
+\label{sec:crossmodel}
+%==============================================================================
+
+Do consistency patterns learned from one model transfer to others? We investigate using Leave-One-Model-Out (LOMO) cross-validation.
+
+\subsection{LOMO Results}
+
+\textbf{Key Finding: Limited Cross-Model Transfer.} Mean LOMO $R^2 = -0.009 \pm 0.18$ across all 18 models, indicating limited transfer with high variance. Some models (Claude-Haiku-4.5: $R^2 = 0.31$, Qwen3-235B-A22B: $R^2 = 0.25$) show positive transfer while others (Llama-3.3-70B: $R^2 = -0.26$) show negative transfer.
+
+\textbf{Pairwise Transfer Analysis.} Within-family transfer (e.g., Claude-to-Claude, $R^2 \approx 0.10$--$0.15$) outperforms cross-family transfer ($R^2 < -0.2$), suggesting model-specific optimization is necessary. GPT-4.1-Mini is a major outlier with near-zero SHAP correlation ($\rho = 0.07$) with other models, uniquely prioritizing \texttt{schema\_depth}. This explains the R² gap: models respond differently to features, causing effect cancellation when pooling. Full LOMO results in Appendix~\ref{app:transfer}.
+
+%==============================================================================
+\section{Accuracy Preservation Analysis}
+\label{sec:accuracy}
+%==============================================================================
+
+A critical question: Does improving consistency sacrifice accuracy? We analyze the validity-consistency relationship.
+
+\subsection{Validity-Consistency Correlation}
+
+\textbf{Key Finding: Positive Correlation ($r = +0.33$, $p < 0.001$).} More consistent responses are more valid, not less. This finding has important implications:
+
+\begin{itemize}
+    \item Practitioners need not choose between consistency and correctness
+    \item Consistency improvements can be pursued without accuracy concerns
+    \item High-consistency models (Claude-Opus-4) also achieve highest validity
+\end{itemize}
+
+\textbf{Temperature Affects Consistency, Not Validity.} Validity correlation with temperature is negligible ($r = -0.003$), while consistency correlates significantly ($r = -0.069$). Temperature introduces output variability without degrading correctness. Pareto-optimal models achieving both high validity and consistency include Claude-Opus-4 (0.97/0.64), Claude-Sonnet-4 (0.97/0.62), and Qwen3-235B-A22B (0.98/0.53). Full analysis in Appendix~\ref{app:validity}.
+
+%==============================================================================
+\section{Causal Validation: Simpson's Paradox}
+\label{sec:causal}
+%==============================================================================
+
+Can we \textit{cause} improvements by modifying prompts? We test 5 binary linguistic features (\texttt{has\_must}, \texttt{has\_should}, \texttt{has\_if}, \texttt{has\_please}, \texttt{has\_can\_you}) via bidirectional intervention (ADD/REMOVE) across 3,084 experiments on 4 models. \textbf{Scope:} These are low-importance features (outside SHAP top 10) that can be causally manipulated; high-importance features (schema complexity, temperature) remain observationally validated only.
+
+\begin{table}[t]
+\centering
+\caption{Simpson's Paradox: Conditional Effects by Baseline Consistency}
+\label{tab:causal_conditional}
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Feature} & \textbf{$\Delta$ (Low$<$0.8)}  & \textbf{$\Delta$ (High$\geq$0.8)} & \textbf{Diff.} & \textbf{p} \\
+\midrule
+has\_should & $\mathbf{+9.7\%}$ & $-$3.4\% & +13.1\% & $<$0.0001 \\
+has\_must & $\mathbf{+9.7\%}$ & $-$1.0\% & +10.7\% & $<$0.0001 \\
+has\_if & $\mathbf{+7.2\%}$ & $-$9.6\% & +16.8\% & $<$0.0001 \\
+has\_can\_you & $\mathbf{+3.9\%}$ & $-$18.1\% & +22.0\% & $<$0.0001 \\
+has\_please & $\mathbf{+1.7\%}$ & $-$20.4\% & +22.1\% & $<$0.0001 \\
+\bottomrule
+\end{tabular}
+\vspace{0.3em}
+
+\raggedright\footnotesize Aggregate effects are null ($p>0.17$ for 3/5 features), but conditional effects are highly significant.
+\end{table}
+
+\textbf{Key Finding: Simpson's Paradox.} Aggregate effects are null, but \textbf{all five features show highly significant conditional effects} ($p < 0.0001$). For \textit{difficult prompts} (baseline $<0.8$), interventions improve consistency by +1.7\% to +9.7\%. For \textit{easy prompts} ($\geq0.8$), effects are negative ($-1\%$ to $-20\%$). This enables \textbf{targeted optimization}: identify low-consistency prompts first, then apply modifications selectively. Universal mechanical rewriting is ineffective. Full methodology and tables in Appendix~\ref{app:causal_details}.
+
+%==============================================================================
+\section{Practitioner Guidelines}
+\label{sec:guidelines}
+%==============================================================================
+
+Based on our comprehensive analysis, we provide actionable recommendations organized by deployment phase.
+
+\subsection{Schema Design Guidelines}
+
+\textbf{G1: Minimize Nesting Depth.} Each additional nesting level increases inconsistency by approximately 15\%. For deeply nested schemas, consider flattening by extracting nested objects into separate tools or using dot-notation for parameter names (\texttt{address.city} rather than nested \texttt{address} object).
+
+\textbf{G2: Reduce Parameter Count.} Tools with more than 10 parameters show 2.3$\times$ higher inconsistency than simpler tools. Split complex tools into focused sub-tools when possible---e.g., separate \texttt{create\_user} into \texttt{create\_user\_basic} and \texttt{set\_user\_preferences}.
+
+\textbf{G3: Use Unambiguous Tool Names.} Tool selection instability accounts for 38\% of low-consistency samples. Ensure tool names clearly differentiate functionality---avoid pairs like \texttt{get\_data} and \texttt{fetch\_data} that may confuse models.
+
+\textbf{G4: Prefer Primitive Types.} Array and object parameter types show 27--29$\times$ higher inconsistency than primitive types (string, number, boolean). When arrays are necessary, constrain them with \texttt{maxItems} and provide explicit item schemas.
+
+\subsection{Temperature Calibration}
+
+\textbf{G5: Calibrate Temperature to Schema Complexity.} Our interaction analysis (Section~\ref{sec:interactions}) reveals that temperature effects are non-uniform. We recommend:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Schema Complexity} & \textbf{Recommended T} & \textbf{Expected $S_\alpha$} \\
+\midrule
+Simple (depth $\leq 2$, $\leq 5$ params) & 0.3--0.5 & $>0.70$ \\
+Medium (depth 3--4, 6--10 params) & 0.1--0.3 & $>0.65$ \\
+Complex (depth $\geq 5$, $>10$ params) & 0.0--0.1 & $>0.55$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Query Design Guidelines}
+
+\textbf{G6: Simplify Multi-Step Queries.} Conjunctions (``and'', ``then'', ``also'') increase inconsistency by correlating with query complexity ($r = -0.083$). When possible, decompose complex requests into sequential single-purpose queries.
+
+\textbf{G7: Provide JSON Examples.} Explicit output examples reduce format ambiguity. Include representative JSON snippets in system prompts, especially for complex nested structures.
+
+\textbf{G8: Apply Targeted Prompt Modifications.} Our causal validation reveals that modifications are highly effective for \textit{difficult prompts} (up to +34.7\% improvement) but neutral or harmful for \textit{easy prompts}. Strategy: (1) first estimate consistency using our predictive model; (2) for prompts with predicted consistency $<0.8$, apply targeted modifications (add directive language, lengthen query); (3) leave high-consistency prompts unchanged. Do not apply universal mechanical rewriting---the aggregate effect is null due to Simpson's Paradox.
+
+\subsection{Model Selection}
+
+\textbf{G9: Model Choice Matters Substantially.} Different models exhibit substantially different consistency patterns (Figure~\ref{fig:model_family}), with most variance unexplained by controllable factors ($R^2=0.10$). When consistency is critical, evaluate candidate models empirically. Claude-family models show highest average consistency (0.72), followed by Qwen (0.68) and GPT (0.65).
+
+\textbf{G10: Expect Model-Specific Patterns.} Our LOMO analysis (Section~\ref{sec:crossmodel}) shows limited cross-model transfer ($R^2 = -0.009$) with high variance. Patterns learned from one model may not generalize---validate consistency on your target model specifically.
+
+\textbf{G11: Model-Specific Schema Optimization.} Per-model SHAP analysis (Table~\ref{tab:permodel_shap}) reveals unique sensitivities:
+\begin{itemize}
+    \item \textbf{GPT-4.1-Mini}: Minimize schema nesting depth (uniquely sensitive to \texttt{schema\_depth})
+    \item \textbf{Llama-3.3-70B}: Minimize number of available tools (uniquely sensitive to \texttt{schema\_breadth})
+    \item \textbf{Minimax-M2}: Reduce tool count when possible (\texttt{num\_tools} dominates)
+    \item \textbf{Other models}: Focus on overall schema complexity and query length
+\end{itemize}
+
+\subsection{Expected Impact Summary}
+
+Based on our observational analysis, practitioners can expect the following improvements (correlational estimates---actual gains depend on specific use cases):
+
+\begin{itemize}
+    \item Schema flattening: +15--20\% consistency improvement
+    \item Parameter reduction: +10--15\% improvement
+    \item Temperature calibration: +10--25\% improvement
+    \item Query simplification: +5--10\% improvement
+    \item Model selection: Up to +25\% difference between models
+\end{itemize}
+
+%==============================================================================
+\section{Discussion}
+\label{sec:discussion}
+%==============================================================================
+
+\subsection{Theoretical Framework}
+
+\textbf{Hypothesis: Decision Point Accumulation.} We hypothesize that inconsistency accumulates across decision points. If each atomic decision (tool selection, parameter inclusion, value generation) has consistency probability $p$, then overall consistency might scale as $p^{D(s)}$ where $D(s)$ is the total decision count for schema $s$. \textbf{Empirical test:} We fit $\log(\text{consistency}) \sim D(s)$ on our data (Appendix~\ref{app:decision_point}), finding a statistically significant but \textit{very weak} relationship ($R^2 < 0.01$, $p = 0.004$). This suggests the multiplicative model is \textit{directionally correct} but explains negligible variance---other factors (model identity, schema structure) dominate.
+
+Despite weak quantitative support, this framework provides useful intuition:
+
+\begin{itemize}
+    \item \textbf{Schema complexity matters}: More parameters and nesting create more decision points, even if the relationship is not strictly multiplicative.
+    \item \textbf{Temperature compounds uncertainty}: Higher temperature affects many decisions simultaneously, explaining the interaction effect.
+    \item \textbf{Model-specific base rates}: Different models have different reliability per decision, explaining limited cross-model transfer.
+\end{itemize}
+
+Practitioners should interpret this as qualitative guidance: simpler schemas require fewer decisions and are more consistent, but the exact relationship is complex and model-dependent.
+
+\subsection{Failure Modes and Future Directions}
+
+Analysis of low-consistency samples ($S_\alpha < 0.5$) reveals three primary failure patterns: tool selection instability (38\%), parameter omission variance (35\%), and value format variation (27\%). Structural mismatches are rare ($<$5\%)---models understand schema \textit{structure} but struggle with content-level \textit{decisions}. These findings suggest directions for improvement: training-time consistency objectives, inference-time ensemble methods, and automated schema analysis tools. Details in Appendix~\ref{app:failure_modes}.
+
+\subsection{Limitations}
+
+\textbf{(1) Task Scope.} We focus on tool-calling; findings may not fully generalize to all structured generation tasks (e.g., free-form JSON without tool schemas). Our cross-task validation on ShareGPT (Section~\ref{sec:results}) shows \textit{model rankings} transfer ($\rho = 0.75$), but we did not replicate the full feature importance analysis on ShareGPT. The factor structure may differ for general JSON generation.
+
+\textbf{(2) Model-Agnostic Prediction.} The gap between $R^2=0.69$ (with model identity) and $R^2=0.10$ (without) limits predictability for unknown models. Practitioners deploying new models cannot reliably estimate consistency without model-specific evaluation. This is arguably our most important finding: \textbf{model identity dominates controllable factors}.
+
+\textbf{(3) Causal Validation Scope.} Our causal experiment (n=3,084 total interventions) tests 5 \textit{surface-level linguistic features} (has\_must, has\_should, has\_if, has\_please, has\_can\_you) that can be toggled via rule-based rewriting. We cannot causally validate \textit{continuous features} like query length or schema complexity because meaningful manipulation would change task semantics. The causal findings apply to \textbf{low-importance features only}---the high-importance features (schema complexity, temperature) remain observationally validated.
+
+\textbf{(4) Model Distribution.} Our dataset includes 8 Claude variants (44\% of models). Weighted analysis (Appendix~\ref{app:weighted}) confirms robustness, but future work should evaluate more diverse model families.
+
+\textbf{(5) Multicollinearity.} Schema variables (complexity, depth, breadth, total\_params) are highly correlated (VIF analysis in Appendix~\ref{app:vif}). This affects interpretation of individual feature contributions. SHAP values account for correlations but cannot fully disentangle redundant features.
+
+%==============================================================================
+\section{Reproducibility and Ethics}
+\label{sec:reproducibility}
+%==============================================================================
+
+\textbf{Data and Code.} We use publicly available benchmarks: Toucan~\cite{toucan2025} and ShareGPT~\cite{sharegpt2023}. All code and our 199,188-instance evaluation dataset will be released upon publication.
+
+\textbf{Experimental Details.} We evaluated 18 LLMs via official APIs, generating 10 outputs per (model, sample, temperature) across 11 temperatures (0.0--1.0). Statistical analysis used bootstrap CIs (2,000 resamples) with FDR correction. Total API cost: $\sim$\$2,500 ($\sim$2.5M calls).
+
+\textbf{Ethics.} While findings could theoretically enable crafting inconsistency-maximizing prompts, we believe enabling reliable systems outweighs this risk. No human subjects were involved.
+
+%==============================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+%==============================================================================
+
+We presented the first comprehensive feature importance study of LLM structured output consistency, focusing on controllable factors practitioners can modify. Analyzing 18 models across 199,000+ evaluation instances, we identify schema complexity (18\% importance), query length (11\%), and temperature (11\%) as dominant controllable factors (validated via SHAP analysis). Critically, while pooled $R^2=0.10$, \textbf{per-model $R^2=0.67$}---controllable features explain 67\% of within-model variance, with the gap caused by heterogeneous feature effects across models (cross-model SHAP $\rho=0.56$). Key findings: (1) shorter prompts and polite phrasing associate with higher consistency (Cohen's $d = 0.05$--0.16, negligible to small); (2) \textbf{scaled causal validation (n=3,084 across 4 models) reveals Simpson's Paradox}---aggregate effects are null, but interventions yield improvements for difficult prompts (up to +9.7\% for directive features, $p<0.0001$) while having negative effects for easy prompts ($-18\%$ to $-20\%$), enabling \textit{targeted optimization}; (3) limited cross-model transfer (LOMO $R^2=-0.009 \pm 0.18$) requiring per-model optimization; and (4) no accuracy-consistency trade-off ($r=+0.33$). Practitioners should focus on model selection, per-model schema optimization, temperature calibration, and targeted prompt modification for low-consistency cases.
+
+%==============================================================================
+% References
+%==============================================================================
+
+\bibliographystyle{ACM-Reference-Format}
+\begin{thebibliography}{36}
+
+\bibitem{atil2024llmconsistency}
+Atil, B., et al. (2024).
+\newblock Evaluating consistency and reasoning capabilities of large language models.
+\newblock {\em arXiv preprint arXiv:2404.02357}.
+
+\bibitem{elazar2021measuring}
+Elazar, Y., et al. (2021).
+\newblock Measuring and improving consistency in pretrained language models.
+\newblock {\em TACL}.
+
+\bibitem{geirhos2020shortcut}
+Geirhos, R., et al. (2020).
+\newblock Shortcut learning in deep neural networks.
+\newblock {\em Nature Machine Intelligence}.
+
+\bibitem{geng2025jsonschema}
+Geng, S., et al. (2025).
+\newblock JSONSchemaBench: A comprehensive benchmark for structured generation.
+\newblock {\em NeurIPS 2025}.
+
+\bibitem{guidance2023}
+Microsoft (2023).
+\newblock Guidance: A guidance language for controlling large language models.
+\newblock {\em https://github.com/guidance-ai/guidance}.
+
+\bibitem{hao2024toolkengpt}
+Hao, S., et al. (2024).
+\newblock ToolkenGPT: Augmenting frozen language models with massive tools via tool embeddings.
+\newblock {\em NeurIPS 2023}.
+
+\bibitem{instructor2024}
+Liu, J. (2024).
+\newblock Instructor: Structured outputs for LLMs.
+\newblock {\em https://github.com/jxnl/instructor}.
+
+\bibitem{liang2022holistic}
+Liang, P., et al. (2022).
+\newblock Holistic evaluation of language models.
+\newblock {\em arXiv preprint arXiv:2211.09110}.
+
+\bibitem{narayanan2024nondeterminism}
+Narayanan, A., et al. (2024).
+\newblock The (Non)-Determinism of Large Language Models: A Causal Analysis.
+\newblock {\em arXiv preprint arXiv:2408.04667}.
+
+\bibitem{yuan2025nondeterminism}
+Yuan, J., et al. (2025).
+\newblock Understanding and Mitigating Numerical Sources of Nondeterminism in LLM Inference.
+\newblock {\em arXiv preprint arXiv:2506.09501}.
+
+\bibitem{song2024goodbadgreedy}
+Song, Y., et al. (2024).
+\newblock The Good, The Bad, and The Greedy: Evaluation of LLMs Should Not Ignore Non-Determinism.
+\newblock {\em arXiv preprint arXiv:2407.10457}.
+
+\bibitem{lu2022fantastically}
+Lu, Y., et al. (2022).
+\newblock Fantastically ordered prompts and where to find them: Overcoming few-shot prompt order sensitivity.
+\newblock {\em ACL 2022}.
+
+\bibitem{olah2017feature}
+Olah, C., et al. (2017).
+\newblock Feature visualization.
+\newblock {\em Distill}.
+
+\bibitem{outlines2023}
+Willard, B. T. and Louf, R. (2023).
+\newblock Efficient guided generation for large language models.
+\newblock {\em arXiv preprint arXiv:2307.09702}.
+
+\bibitem{patil2023gorilla}
+Patil, S. G., et al. (2023).
+\newblock Gorilla: Large language model connected with massive APIs.
+\newblock {\em arXiv preprint arXiv:2305.15334}.
+
+\bibitem{pawlik2015efficient}
+Pawlik, M. and Augsten, N. (2015).
+\newblock Efficient computation of the tree edit distance.
+\newblock {\em ACM TODS}.
+
+\bibitem{qin2023toolllm}
+Qin, Y., et al. (2023).
+\newblock ToolLLM: Facilitating large language models to master 16000+ real-world APIs.
+\newblock {\em arXiv preprint arXiv:2307.16789}.
+
+\bibitem{renze2024effect}
+Renze, M. and Guven, E. (2024).
+\newblock The effect of sampling temperature on problem solving in large language models.
+\newblock {\em arXiv preprint arXiv:2402.05201}.
+
+\bibitem{ribeiro2020beyond}
+Ribeiro, M. T., et al. (2020).
+\newblock Beyond accuracy: Behavioral testing of NLP models with CheckList.
+\newblock {\em ACL 2020}.
+
+\bibitem{schick2024toolformer}
+Schick, T., et al. (2024).
+\newblock Toolformer: Language models can teach themselves to use tools.
+\newblock {\em NeurIPS 2023}.
+
+\bibitem{scholak2021picard}
+Scholak, T., et al. (2021).
+\newblock PICARD: Parsing incrementally for constrained auto-regressive decoding from language models.
+\newblock {\em EMNLP 2021}.
+
+\bibitem{sclar2023quantifying}
+Sclar, M., et al. (2023).
+\newblock Quantifying language models' sensitivity to spurious features in prompt design.
+\newblock {\em arXiv preprint arXiv:2310.11324}.
+
+\bibitem{sharegpt2023}
+ShareGPT (2023).
+\newblock ShareGPT: Conversations from ChatGPT users.
+\newblock {\em https://sharegpt.com}.
+
+\bibitem{sted2026}
+Anonymous (2026).
+\newblock Semantic tree edit distance for structured output consistency.
+\newblock {\em ICML 2026}.
+
+\bibitem{structeval2024}
+Yang, S., et al. (2024).
+\newblock StructEval: Evaluating LLM structured generation capabilities.
+\newblock {\em arXiv preprint}.
+
+\bibitem{swayamdipta2020dataset}
+Swayamdipta, S., et al. (2020).
+\newblock Dataset cartography: Mapping and diagnosing datasets with training dynamics.
+\newblock {\em EMNLP 2020}.
+
+\bibitem{thinkingmachines2024}
+Thinking Machines (2024).
+\newblock Defeating nondeterminism in LLM inference.
+\newblock {\em https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/}.
+
+\bibitem{tang2023toolalpaca}
+Tang, Q., et al. (2023).
+\newblock ToolAlpaca: Generalized tool learning for language models with 3000 simulated cases.
+\newblock {\em arXiv preprint arXiv:2306.05301}.
+
+\bibitem{toucan2025}
+Toucan (2025).
+\newblock Toucan: A large-scale tool-calling benchmark for LLMs.
+\newblock {\em arXiv preprint}.
+
+\bibitem{wang2023selfconsistency}
+Wang, X., et al. (2023).
+\newblock Self-consistency improves chain of thought reasoning in language models.
+\newblock {\em ICLR 2023}.
+
+\bibitem{webson2022prompt}
+Webson, A. and Pavlick, E. (2022).
+\newblock Do prompt-based models really understand the meaning of their prompts?
+\newblock {\em NAACL 2022}.
+
+\bibitem{zhang1989simple}
+Zhang, K. and Shasha, D. (1989).
+\newblock Simple fast algorithms for the editing distance between trees and related problems.
+\newblock {\em SIAM J. Computing}.
+
+\bibitem{zhou2023large}
+Zhou, Y., et al. (2023).
+\newblock Large language models are human-level prompt engineers.
+\newblock {\em ICLR 2023}.
+
+\bibitem{ouyang2022training}
+Ouyang, L., et al. (2022).
+\newblock Training language models to follow instructions with human feedback.
+\newblock {\em NeurIPS 2022}.
+
+\bibitem{bai2022constitutional}
+Bai, Y., et al. (2022).
+\newblock Constitutional AI: Harmlessness from AI feedback.
+\newblock {\em arXiv preprint arXiv:2212.08073}.
+
+\bibitem{chen2023universal}
+Chen, X., et al. (2023).
+\newblock Universal self-consistency for large language model generation.
+\newblock {\em arXiv preprint arXiv:2311.17311}.
+
+\bibitem{zheng2024judging}
+Zheng, L., et al. (2024).
+\newblock Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena.
+\newblock {\em NeurIPS 2024}.
+
+\bibitem{lundberg2017shap}
+Lundberg, S. M. and Lee, S.-I. (2017).
+\newblock A unified approach to interpreting model predictions.
+\newblock {\em NeurIPS 2017}.
+
+\end{thebibliography}
+
+%==============================================================================
+% Appendix
+%==============================================================================
+\appendix
+
+\section{Weighted Analysis for Model Imbalance}
+\label{app:weighted}
+
+To address potential bias from Claude model overrepresentation (8 of 18 models, 44\%), we conduct weighted analysis where each model family receives equal aggregate weight through inverse frequency weighting.
+
+\begin{table}[h]
+\centering
+\caption{Weighted vs Unweighted Analysis Comparison}
+\label{tab:weighted}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Metric} & \textbf{Unweighted} & \textbf{Weighted} & \textbf{$\Delta$} \\
+\midrule
+Schema Complexity $r$ & $-0.152$ & $-0.148$ & $<0.01$ \\
+Query Length $r$ & $-0.069$ & $-0.071$ & $<0.01$ \\
+Temperature $r$ & $-0.069$ & $-0.065$ & $<0.01$ \\
+Model Rankings $\rho$ & --- & 0.94 & --- \\
+Interaction Effect & 2.6$\times$ & 2.5$\times$ & Preserved \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Results demonstrate robustness: all correlations change by $<0.01$, model rankings remain highly stable (Spearman $\rho = 0.94$), and the temperature-complexity interaction effect (2.6$\times$ differential) is preserved under weighting.
+
+\section{Sensitivity Analysis}
+\label{app:sensitivity}
+
+We analyze the effect of the $\alpha$ parameter in $S_\alpha = \exp(-\alpha \cdot \sigma_d^2)$. Testing $\alpha \in \{5, 10, 20, 40, 80\}$, relative model rankings are stable (Spearman $\rho > 0.95$ across all pairs). At $\alpha=5$, scores cluster near 0.9 (low discrimination); at $\alpha=80$, most scores fall below 0.3. We select $\alpha=20$ for good discrimination. Factor correlations remain directionally consistent ($|r_{\alpha=5} - r_{\alpha=80}| < 0.02$).
+
+\section{Experimental Details}
+\label{app:experimental_details}
+
+\textbf{Models (18 total):} Claude family (3.5-Haiku, 3.5-Sonnet, 3.7-Sonnet, Haiku-4.5, Sonnet-4, Sonnet-4.5, Opus-4, Opus-4.5), GPT-4.1-Mini, Qwen (32B, 235B), Llama-3.3-70B, Gemini-2.5-Flash-Lite, Grok-4.1-Fast, Mistral-Large-3, Nova-2-Lite, Minimax-M2, Mimo-V2-Flash. Our dataset includes 8 Claude variants (44\%); weighted analysis (Appendix~\ref{app:weighted}) confirms robustness.
+
+\textbf{Factor Categories:} Schema (4): tool count, total parameters, max params/tool, required params. Query (16): length, word count, sentence count, avg word length, vocabulary diversity, punctuation, question marks, non-ASCII ratio, linguistic markers. Model (1): identity. Config (1): temperature.
+
+\section{Baseline Comparisons}
+\label{app:baselines}
+
+\begin{table}[h]
+\centering
+\caption{Baseline Comparison: Controllable Factors}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Method} & \textbf{Features} & \textbf{$R^2$} & \textbf{MAE} \\
+\midrule
+Query Features Only & 8 & 0.178 & 0.321 \\
+Length Only & 2 & 0.176 & 0.322 \\
+Schema Features Only & 11 & 0.144 & 0.335 \\
+All Controllable & 20 & 0.103 & 0.329 \\
+Temperature Only & 1 & 0.007 & 0.388 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Query features alone ($R^2=0.178$) outperform the full model ($R^2=0.103$) due to multicollinearity among schema variables (VIF $>40$).
+
+\section{Temperature-Complexity Interaction}
+\label{app:interaction}
+
+\begin{table}[h]
+\centering
+\caption{Stability Score: Temperature $\times$ Schema Complexity}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+& \multicolumn{3}{c}{\textbf{Temperature}} \\
+\cmidrule(l){2-4}
+\textbf{Schema} & Low (0--0.3) & Med (0.3--0.6) & High (0.6--1.0) \\
+\midrule
+Simple (Q1) & 0.783 & 0.755 & 0.727 \\
+Medium & 0.724 & 0.694 & 0.656 \\
+Complex (Q4) & 0.645 & 0.585 & 0.525 \\
+\midrule
+\multicolumn{4}{l}{\textit{Degradation: Simple $-7.2\%$, Complex $-18.6\%$}} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Causal Validation Experimental Details}
+\label{app:causal_details}
+
+\textbf{Dataset.} We use samples from the Toucan benchmark~\cite{toucan2025}, filtering for samples with valid tool schemas (non-empty descriptions). This yields 847 valid samples from which we draw intervention candidates.
+
+\textbf{Features Tested and Intervention Counts.} We test six linguistic features using bidirectional interventions (ADD and REMOVE). Table~\ref{tab:intervention_counts} shows the detailed breakdown:
+
+\begin{table}[h]
+\centering
+\caption{Intervention Experiment Sample Counts by Feature}
+\label{tab:intervention_counts}
+\small
+\begin{tabular}{@{}lcccp{4cm}@{}}
+\toprule
+\textbf{Feature} & \textbf{ADD} & \textbf{REMOVE} & \textbf{Total} & \textbf{Rewriting Rule} \\
+\midrule
+has\_if & 675 & 417 & 1,092 & Add/remove conditional clauses \\
+has\_must & 299 & 360 & 659 & ``must'' $\leftrightarrow$ ``should''/``can'' \\
+has\_should & 301 & 240 & 541 & ``should'' $\leftrightarrow$ ``need to'' \\
+has\_please & 220 & 192 & 412 & Add/remove ``please'' \\
+has\_can\_you & 380 & 0 & 380 & Add ``Can you'' prefix \\
+\midrule
+\textbf{Total} & 1,875 & 1,209 & 3,084 & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Note:} \texttt{has\_can\_you} has only ADD interventions because prompts already containing ``Can you'' phrasing are relatively rare in the Toucan dataset, limiting REMOVE candidates.
+
+\textbf{Model Coverage.} The 3,084 experiments are distributed across 4 models:
+\begin{itemize}
+    \item Llama-3.3-70B: 804 samples (all 5 features)
+    \item Qwen3-32B: 648 samples (all 5 features)
+    \item Nova-2-Lite: 536 samples (4 features)
+    \item Claude-Sonnet-4: 496 samples (4 features)
+\end{itemize}
+Additionally, directive features (\texttt{has\_must}, \texttt{has\_should}) include 1,200 samples from an earlier experiment with equal distribution (300 per model) across Claude-Sonnet-4, Nova-2-Lite, Llama-3.3-70B, and Qwen3-235B-A22B.
+
+\textbf{Rewriting Approach.} We use deterministic rule-based rewriting (not LLM-based) to ensure: (1) reproducibility across experiments, (2) isolation of the specific feature's effect, and (3) minimal perturbation to other prompt characteristics. Specific rewriting rules:
+\begin{itemize}
+    \item \textbf{has\_if}: ADD appends ``If possible, provide detailed results''; REMOVE strips conditional clauses.
+    \item \textbf{has\_must/has\_should}: Substitutes directive words while preserving sentence structure.
+    \item \textbf{has\_please}: ADD prepends ``Please''; REMOVE strips ``please'' occurrences.
+    \item \textbf{has\_can\_you}: ADD prepends ``Can you'' with lowercase adjustment.
+\end{itemize}
+
+\textbf{Experimental Parameters.}
+\begin{itemize}
+    \item Models: Claude-Sonnet-4, Nova-2-Lite, Llama-3.3-70B, Qwen3-32B (+ Qwen3-235B-A22B for directives)
+    \item Temperatures: 0.0, 0.5, 1.0
+    \item Runs per condition: 10 independent API calls
+    \item Total experiments: 3,084 intervention experiments (1,875 ADD + 1,209 REMOVE)
+\end{itemize}
+
+\textbf{Consistency Metric.} We use mean pairwise Jaccard similarity of tool names across 10 runs as a lightweight consistency proxy, validated against full STED scoring ($r = 0.89$).
+
+\textbf{Statistical Analysis.} We use paired t-tests comparing consistency before vs. after intervention. For conditional analysis, we partition samples by baseline consistency threshold (0.8) and apply Welch's t-test for unequal variances. Effect sizes are reported with 95\% confidence intervals where applicable.
+
+\section{ADD vs REMOVE Intervention Details}
+\label{app:add_remove}
+
+Table~\ref{tab:add_remove} provides detailed results for ADD and REMOVE interventions separately, enabling assessment of bidirectional consistency.
+
+\begin{table}[h]
+\centering
+\caption{Bidirectional Intervention Effects: ADD vs REMOVE}
+\label{tab:add_remove}
+\small
+\begin{tabular}{@{}llcccc@{}}
+\toprule
+\textbf{Feature} & \textbf{Type} & \textbf{n} & \textbf{$C_{orig}$} & \textbf{$\Delta C$} & \textbf{p} \\
+\midrule
+has\_if & ADD & 675 & 0.319 & +0.5\% & 0.636 \\
+has\_if & REMOVE & 417 & 0.319 & +4.2\% & 0.003 \\
+\midrule
+has\_must & ADD & 299 & 0.763 & +3.4\% & 0.012 \\
+has\_must & REMOVE & 360 & 0.793 & +0.9\% & 0.133 \\
+\midrule
+has\_should & ADD & 301 & 0.807 & +0.0\% & 0.994 \\
+has\_should & REMOVE & 240 & 0.738 & +1.3\% & 0.177 \\
+\midrule
+has\_please & ADD & 220 & 0.127 & $-$3.7\% & 0.009 \\
+has\_please & REMOVE & 192 & 0.115 & +2.1\% & 0.103 \\
+\midrule
+has\_can\_you & ADD & 380 & 0.266 & $-$1.9\% & 0.178 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Bidirectional Patterns.} Several features show opposite effects for ADD vs REMOVE:
+\begin{itemize}
+    \item \texttt{has\_please}: ADD $\Delta C = -3.7\%$ (p=0.009), REMOVE $\Delta C = +2.1\%$ (p=0.103)
+    \item \texttt{has\_if}: ADD $\Delta C = +0.5\%$, REMOVE $\Delta C = +4.2\%$ (p=0.003)
+    \item \texttt{has\_must}: ADD $\Delta C = +3.4\%$ (p=0.012), REMOVE $\Delta C = +0.9\%$
+\end{itemize}
+
+\textbf{Stratified ADD Effects.} Table~\ref{tab:stratified_add} shows ADD intervention effects stratified by baseline consistency, revealing larger improvements for difficult prompts.
+
+\begin{table}[h]
+\centering
+\caption{Stratified ADD Intervention Effects by Baseline}
+\label{tab:stratified_add}
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+& \multicolumn{2}{c}{\textbf{Low Baseline ($<$0.8)}} & \multicolumn{2}{c}{\textbf{High Baseline ($\geq$0.8)}} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+\textbf{Feature} & \textbf{n} & \textbf{$\Delta C$} & \textbf{n} & \textbf{$\Delta C$} \\
+\midrule
+has\_must & 91 & $\mathbf{+15.5\%}$ & 208 & $-1.9\%$ \\
+has\_should & 72 & $\mathbf{+14.8\%}$ & 229 & $-4.6\%$ \\
+has\_if & 464 & $\mathbf{+5.7\%}$ & 211 & $-11.0\%$ \\
+has\_can\_you & 280 & $\mathbf{+3.9\%}$ & 100 & $-18.1\%$ \\
+has\_please & 192 & $\mathbf{+0.5\%}$ & 28 & $-32.9\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Key Observation.} For all five features, ADD interventions on low-baseline prompts yield improvements (+0.5\% to +15.5\%), while high-baseline prompts show negative effects ($-1.9\%$ to $-32.9\%$). This confirms the ceiling effect pattern: interventions help difficult prompts but can harm easy ones. The largest stratified effects occur for directive features (\texttt{has\_must}: +15.5\%, \texttt{has\_should}: +14.8\%) on low-baseline prompts.
+
+\section{Causal Validation Generalization Arguments}
+\label{app:causal}
+
+Our causal validation uses 4 models (Claude-Sonnet-4, Nova-2-Lite, Llama-3.3-70B, Qwen3-32B), providing empirical evidence for cross-model generalization:
+
+\textbf{Argument 1: Consistent Simpson's Paradox Across Models.} All 5 features show the same Simpson's Paradox pattern across all 4 tested models: improvements for low-baseline prompts, decreases for high-baseline prompts. This consistency across architectures (Claude, Nova, Llama, Qwen) suggests the ceiling effect is a fundamental property of LLM consistency, not model-specific.
+
+\textbf{Argument 2: LOMO Consistency.} Our LOMO analysis shows mean $R^2 = -0.009$ for cross-model transfer with high variance ($\pm 0.18$), indicating variable transfer depending on model similarity. However, the \textit{intervention effect direction} (positive for difficult, negative for easy) transfers across all models, suggesting the targeted optimization strategy generalizes.
+
+\textbf{Argument 3: Feature Surface Agnosticism.} Our rewriting targets surface-level features (modal verbs, politeness markers, conditionals) that are model-agnostic by construction. These features do not interact specifically with any model's architecture, training data, or decoding strategy.
+
+\textbf{Argument 3: Confounding Structure.} The observational associations arise from confounding by task complexity: naturally short prompts describe simpler tasks, while complex tasks require detailed prompts. This confounding structure is independent of model choice---all models face the same input distribution. Thus, the failure of mechanical rewriting (which preserves task complexity while changing surface features) should generalize across models.
+
+\textbf{Argument 4: Cross-Domain Empirical Validation (ShareGPT).} To validate generalization beyond tool calling, we conducted additional causal intervention experiments on the ShareGPT dataset (open-domain conversational prompts, n=412). Results confirm Simpson's Paradox in text generation:
+\begin{itemize}
+    \item \textbf{has\_should}: Low baseline (<0.8): $\Delta = +1.06\%$ (n=209); High baseline ($\geq$0.8): $\Delta = -3.19\%$ (n=31); Difference: $+4.25\%$ ($p=0.009$, significant)
+    \item \textbf{has\_must}: Conditional difference: $+5.55\%$ ($p=0.075$, marginally significant)
+    \item \textbf{Negative correlation}: $\Delta$ vs baseline: $r=-0.34$ ($p<0.0001$) for \texttt{has\_must}, $r=-0.15$ ($p=0.024$) for \texttt{has\_should}
+\end{itemize}
+The ShareGPT effects are smaller than Toucan (text generation is less structured than tool calling), but the Simpson's Paradox pattern---interventions helping difficult prompts while harming easy ones---replicates across domains.
+
+\textbf{Limitation:} Multi-model validation on ShareGPT remains future work, though the cross-domain consistency strengthens our causal claims.
+
+\section{LLM-as-Judge Validation Details}
+\label{app:llm_judge}
+
+\begin{table}[h]
+\centering
+\caption{LLM-as-Judge Self-Consistency Analysis}
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Metric} & \textbf{T=0.0} & \textbf{T=0.7} \\
+\midrule
+All runs agree & 100\% & 52\% \\
+Avg consistency & 100\% & 83.6\% \\
+Agreement w/ STED & 90\% & 64\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+We conduct 5 repeated judgments per sample. At T=0.7, only 52\% produce identical judgments---the very inconsistency we aim to measure.
+
+\section{Pairwise Transfer Matrix}
+\label{app:transfer}
+
+\begin{table}[h]
+\centering
+\caption{Pairwise Model Transfer Matrix ($R^2$)}
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Train$\backslash$Test} & \textbf{Nova} & \textbf{Sonnet-4} & \textbf{Opus-4.5} & \textbf{GPT-4.1} \\
+\midrule
+Nova-2-Lite & (0.34) & 0.10 & 0.12 & $-0.17$ \\
+Claude-Sonnet-4 & 0.08 & (0.38) & 0.15 & $-0.20$ \\
+Claude-Opus-4.5 & 0.05 & 0.09 & (0.34) & $-0.12$ \\
+GPT-4.1-Mini & $-0.54$ & $-0.47$ & $-0.25$ & (0.38) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+GPT-4.1-Mini shows strongly negative transfer to all other models, explaining its outlier status.
+
+\section{Per-Model SHAP Analysis}
+\label{app:permodel_shap}
+
+\begin{table}[h]
+\centering
+\caption{Per-Model SHAP Analysis: Top Feature and Cross-Model Correlation (All 18 Models)}
+\label{tab:permodel_shap}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Model} & \textbf{Top SHAP Feature} & \textbf{SHAP Value} & \textbf{Avg $\rho$} \\
+\midrule
+GPT-4.1-Mini & \textbf{schema\_depth} & 0.133 & \textbf{0.07} \\
+Llama-3.3-70B & \textbf{schema\_breadth} & 0.112 & 0.53 \\
+Gemini-2.5-Flash-Lite & query\_length & 0.133 & 0.66 \\
+Minimax-M2 & \textbf{num\_tools} & 0.092 & 0.56 \\
+GPT-OSS-120B & \textbf{avg\_params\_per\_tool} & 0.059 & 0.62 \\
+Grok-4.1-Fast & schema\_complexity & 0.069 & 0.55 \\
+Qwen3-235B-A22B & schema\_complexity & 0.070 & 0.63 \\
+Qwen3-32B & query\_length & 0.046 & 0.69 \\
+Claude-Opus-4 & schema\_complexity & 0.040 & 0.66 \\
+Claude-Opus-4.5 & schema\_breadth & 0.035 & 0.58 \\
+Claude-Sonnet-4 & avg\_tool\_name\_length & 0.038 & 0.65 \\
+Claude-Sonnet-4.5 & query\_word\_count & 0.040 & 0.65 \\
+Claude-3.7-Sonnet & query\_length & 0.038 & 0.68 \\
+Claude-3.5-Sonnet & query\_length & 0.024 & 0.68 \\
+Claude-Haiku-4.5 & schema\_complexity & 0.057 & 0.63 \\
+Claude-3.5-Haiku & query\_length & 0.038 & 0.60 \\
+Mimo-V2-Flash & tool\_name\_ambiguity & 0.063 & 0.66 \\
+Nova-2-Lite & avg\_tool\_name\_length & 0.038 & 0.65 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Key Findings:} GPT-4.1-Mini ($\rho=0.07$) is a major outlier with completely different feature sensitivity. GPT-OSS-120B also shows unique sensitivity to \texttt{avg\_params\_per\_tool}. Most Claude and Qwen models prioritize \texttt{query\_length} or \texttt{schema\_complexity}. SHAP vs MDI correlation across all models: mean $\rho=0.89$, range 0.86--0.96.
+
+\section{Temperature and Validity Analysis}
+\label{app:temp_validity}
+
+\begin{table}[h]
+\centering
+\caption{Temperature Effects on Validity vs Consistency}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Temp} & \textbf{Validity} & \textbf{Consistency} & \textbf{$C_{mean}$} \\
+\midrule
+0.0 & 0.873 & 0.493 & 0.608 \\
+0.3 & 0.873 & 0.458 & 0.615 \\
+0.7 & 0.870 & 0.431 & 0.619 \\
+1.0 & 0.871 & 0.409 & 0.622 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Pareto-Optimal Models (High Validity + High Consistency)}
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Model} & \textbf{Validity} & \textbf{Consistency} \\
+\midrule
+Claude-Opus-4 & 0.971 & 0.638 \\
+Claude-Sonnet-4 & 0.970 & 0.623 \\
+Nova-2-Lite & 0.965 & 0.615 \\
+Qwen3-235B-A22B & 0.981 & 0.529 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Confounding Analysis Details}
+\label{app:confounding}
+
+\begin{table}[h]
+\centering
+\caption{Baseline Consistency by Feature Presence}
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Feature} & \textbf{Without} & \textbf{With} & \textbf{Diff.} & \textbf{p-value} \\
+\midrule
+has\_should & 0.709 & 0.944 & +0.236 & $<$0.0001 \\
+has\_please & 0.876 & 0.966 & +0.091 & 0.0060 \\
+has\_if & 0.919 & 0.924 & +0.005 & 0.855 \\
+has\_must & 0.921 & 0.923 & +0.002 & 0.931 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Intervention Effect vs Baseline Consistency Correlation}
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Feature} & \textbf{Pearson $r$} & \textbf{p-value} \\
+\midrule
+has\_should & $-0.578$ & $<$0.0001 \\
+has\_please & $-0.373$ & $<$0.0001 \\
+has\_can\_you & $-0.309$ & $<$0.0001 \\
+has\_if & $-0.290$ & $<$0.0001 \\
+has\_must & $-0.248$ & 0.0001 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Stability Score and Accuracy Tables}
+\label{app:stability}
+
+\begin{table}[h]
+\centering
+\caption{Stability Score ($S_\alpha$) Changes by Baseline Level}
+\small
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+& \multicolumn{2}{c}{\textbf{Low ($<$0.8)}} & \multicolumn{2}{c}{\textbf{High ($\geq$0.8)}} & & \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+\textbf{Feature} & \textbf{$S_\alpha^{orig}$} & \textbf{$\Delta S_\alpha$} & \textbf{$S_\alpha^{orig}$} & \textbf{$\Delta S_\alpha$} & \textbf{t} & \textbf{p} \\
+\midrule
+has\_should & 0.021 & +0.368 & 0.973 & $-$0.067 & 8.29 & $<$0.0001 \\
+has\_if & 0.038 & +0.304 & 0.956 & $-$0.060 & 6.81 & $<$0.0001 \\
+has\_please & 0.026 & +0.259 & 0.983 & $-$0.080 & 6.61 & $<$0.0001 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Stratified Accuracy by Baseline Consistency Level}
+\small
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+& \multicolumn{3}{c}{\textbf{Low Baseline}} & \multicolumn{3}{c}{\textbf{High Baseline}} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+\textbf{Feature} & \textbf{n} & \textbf{$Acc_{orig}$} & \textbf{$\Delta Acc$} & \textbf{n} & \textbf{$Acc_{orig}$} & \textbf{$\Delta Acc$} \\
+\midrule
+has\_should & 47 & 0.086 & +0.312 & 192 & 0.995 & $-$0.082 \\
+has\_please & 41 & 0.222 & +0.174 & 233 & 0.997 & $-$0.096 \\
+has\_if & 41 & 0.319 & +0.124 & 263 & 0.992 & $-$0.051 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{VIF Analysis for Schema Variables}
+\label{app:vif}
+
+Table~\ref{tab:vif} shows the Variance Inflation Factor (VIF) for schema features. VIF measures multicollinearity: VIF $>$ 5 indicates moderate, VIF $>$ 10 indicates high multicollinearity.
+
+\begin{table}[h]
+\centering
+\caption{VIF Analysis of Schema Features}
+\label{tab:vif}
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Feature} & \textbf{VIF} & \textbf{Interpretation} \\
+\midrule
+schema\_complexity & 105.5 & High ($>$10) \\
+schema\_depth & 58.9 & High ($>$10) \\
+schema\_breadth & 41.8 & High ($>$10) \\
+total\_params & 24.0 & High ($>$10) \\
+tool\_prefix\_diversity & 7.1 & Moderate ($>$5) \\
+max\_params\_per\_tool & 6.3 & Moderate ($>$5) \\
+avg\_params\_per\_tool & 4.7 & OK \\
+tool\_name\_ambiguity & 3.9 & OK \\
+param\_type\_diversity & 3.2 & OK \\
+avg\_tool\_name\_length & 2.0 & OK \\
+num\_tools & 1.7 & OK \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Highly correlated pairs} ($|r| > 0.7$):
+\begin{itemize}[noitemsep]
+    \item schema\_complexity $\leftrightarrow$ schema\_depth: $r = 0.946$
+    \item schema\_breadth $\leftrightarrow$ total\_params: $r = 0.955$
+    \item schema\_complexity $\leftrightarrow$ schema\_breadth: $r = 0.813$
+    \item max\_params\_per\_tool $\leftrightarrow$ avg\_params\_per\_tool: $r = 0.844$
+\end{itemize}
+
+This explains Table~\ref{tab:baselines}: high multicollinearity among schema features causes worse CV performance when combined than separately, due to overfitting from redundant correlated features.
+
+\section{Decision Point Hypothesis Test}
+\label{app:decision_point}
+
+We tested the hypothesis that consistency scales as $p^{D(s)}$ where $D(s)$ is the number of decision points (tool selections + parameter decisions).
+
+\textbf{Method:} Estimate $D(s) = \text{num\_tools} + 2 \times \text{total\_params}$ and fit:
+\begin{equation}
+\log(\text{consistency}) = \alpha + \beta \cdot D(s) + \epsilon
+\end{equation}
+
+\textbf{Results:}
+\begin{itemize}[noitemsep]
+    \item $R^2 < 0.001$ (negligible explained variance)
+    \item $\beta = -0.00001$ (slope essentially zero)
+    \item $p = 0.004$ (statistically significant but practically meaningless)
+    \item Implied $p$ per decision $\approx 1.0000$
+\end{itemize}
+
+\textbf{Conclusion:} The multiplicative hypothesis is \textit{directionally correct} (negative correlation) but explains negligible variance. Model identity and schema structure dominate over simple decision counts. The hypothesis provides useful intuition but should not be used for quantitative prediction.
+
+\section{Failure Mode Taxonomy}
+\label{app:failure_modes}
+
+Analysis of low-consistency samples ($S_\alpha < 0.5$) reveals three primary failure patterns:
+
+\textbf{Tool Selection Instability (38\%).} The model selects different tools across runs for the same query, common with overlapping functionality or ambiguous names (e.g., \texttt{search\_products} vs \texttt{find\_items}).
+
+\textbf{Parameter Omission Variance (35\%).} Inconsistent inclusion of optional parameters. Some runs include detailed optional fields while others omit them entirely.
+
+\textbf{Value Format Variation (27\%).} Parameter values take different but semantically equivalent forms (e.g., ``2024-01-15'' vs ``January 15, 2024'', ``1000'' vs ``1,000'').
+
+Structural mismatches are rare ($<$5\%)---models understand schema \textit{structure} but struggle with content-level \textit{decisions}.
+
+\textbf{Implications for LLM Development:}
+\begin{itemize}
+    \item \textbf{Training-time}: Consistency as explicit training objective
+    \item \textbf{Inference-time}: Ensemble methods or self-consistency checking
+    \item \textbf{Tooling}: Automated schema analysis to flag high-inconsistency patterns
+\end{itemize}
+
+\end{document}

@@ -1,0 +1,1338 @@
+%%%%%%%% ICML 2026 SUBMISSION FILE %%%%%%%%%%%%%%%%%
+
+\documentclass{article}
+
+% Recommended packages
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\newcommand{\theHalgorithm}{\arabic{algorithm}}
+
+% For blind submission:
+\usepackage{icml2025}  % Update to icml2026 when available
+% For camera-ready: \usepackage[accepted]{icml2025}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{enumitem}
+
+% Theorems
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{remark}{Remark}
+
+\icmltitlerunning{Why Are LLM Structured Outputs Inconsistent? A Large-Scale Empirical Study}
+
+\begin{document}
+
+\twocolumn[
+\icmltitle{Why Are LLM Structured Outputs Inconsistent? A Large-Scale Empirical Study}
+
+\icmlsetsymbol{equal}{*}
+
+\begin{icmlauthorlist}
+\icmlauthor{Anonymous Author(s)}{anon}
+\end{icmlauthorlist}
+
+\icmlaffiliation{anon}{Anonymous Institution}
+
+\icmlcorrespondingauthor{Anonymous Author(s)}{anonymous@example.com}
+
+\vskip 0.3in
+]
+
+\printAffiliationsAndNotice{\icmlEqualContribution}
+
+\begin{abstract}
+Large Language Models (LLMs) are increasingly deployed for structured data generation, yet output consistency remains poorly understood. Through \textbf{large-scale benchmarking} of 18 LLMs across 10 providers (2.1M+ outputs), we present the first systematic study of LLM consistency for structured outputs. Our key empirical findings reveal: (1) dramatic task-specific gaps---Llama-3.3-70B achieves 99\% structured output validity but only 33\% on tool calling; (2) SDK-enforced schemas provide strong guardrails---tool-calling degradation is 2--3$\times$ lower than free-form JSON (11--17\% vs 26--53\%); (3) structural stability degrades slower than semantic content (26\% vs 53\%), which is \textit{desirable} for production systems requiring parseable outputs. Our \textbf{consistency diagnostics framework} identifies parameter complexity as the primary predictor of inconsistency (27--29$\times$ higher for lists/dicts; 60$\times$ for nested structures), with four distinct failure patterns enabling targeted interventions. To enable this study, we develop STED (Semantic Tree Edit Distance), a similarity metric combining structural tree comparison with semantic understanding via embeddings and order-invariant matching, significantly outperforming existing baselines. We release practitioner guidelines for model selection and schema design.
+\end{abstract}
+
+\let\thefootnote\relax\footnotetext{A preliminary version of this work appeared at a NeurIPS 2025 workshop. This submission substantially extends it with: (1) expanded LLM benchmarking (18 models across 10 providers, 2.1M+ outputs), (2) consistency diagnostics framework identifying failure patterns and predictors, (3) comprehensive ablation studies on stability score and embedding models, and (4) practitioner guidelines for deployment.}
+
+\section{Introduction}
+
+Large Language Models (LLMs) are increasingly deployed for structured data generation in JSON format for APIs, data extraction, and automated workflows. However, evaluating consistency in LLM-generated structured outputs presents unique challenges that existing methods fail to address adequately.
+
+The fundamental issue is a mismatch between evaluation methods and structured semantics. BERTScore~\cite{Zhang2020}, while effective for natural language, suffers from order sensitivity that violates JSON's order-agnostic semantics, underestimating similarity for reordered but identical structures. Tree Edit Distance (TED) focuses purely on structure without semantic understanding. DeepDiff~\cite{seperman} can ignore ordering but treats \texttt{"email"} and \texttt{"email\_address"} as completely different, missing obvious semantic relationships.
+
+LLMs frequently generate functionally equivalent structures with semantic variations: naming conventions (\texttt{"user\_name"} vs \texttt{"userName"}), array reorderings, and type representations (\texttt{"true"} vs \texttt{true}). Existing metrics fail to recognize these equivalences, causing false negatives in production systems.
+
+To enable this study, we develop \textbf{STED}, a JSON similarity metric combining tree edit distance, Hungarian algorithm for order-invariant matching, and embedding-based semantic comparison. STED correctly identifies schema violations ($0.23$ similarity) while scoring $>0.95$ for benign reorderings, achieving $4\times$ better discrimination than baselines and 87.8\% alignment with human judgment.
+
+\textbf{Why is this empirical study necessary?} As LLMs increasingly power production APIs and automated workflows, understanding consistency behavior is critical for deployment decisions. Yet no prior work systematically characterizes structured output consistency across models and conditions. We provide the first such study, with the following contributions:
+
+\begin{itemize}[leftmargin=*, nosep]
+\item \textbf{Large-Scale Empirical Study}: We evaluate 18 LLMs across 10 providers on two complementary tasks---structured output generation (75 samples) and tool calling (1,006 samples)---comprising 2.1M+ total outputs. We reveal critical findings: task-specific gaps (Llama-3.3-70B: 99\% vs 33\% validity), temperature effects (11--53\% consistency drop from T=0 to T=1), and model ranking across conditions.
+
+\item \textbf{Consistency Diagnostics Framework}: We provide the first systematic analysis of \textit{why} LLM outputs are inconsistent. Parameter complexity strongly predicts inconsistency (27--29$\times$ higher for complex types). We characterize four distinct failure patterns---string drift (39\%), tool count variation (35\%), tool selection (16\%), and complex parameters (6\%)---enabling targeted intervention strategies and practitioner guidelines.
+
+\item \textbf{STED Metric}: We develop STED, combining tree edit distance, Hungarian algorithm, and embeddings for JSON similarity. Human validation confirms 87.8\% alignment with human judgment ($\kappa=0.759$), outperforming baselines.
+\end{itemize}
+
+\section{Related Work}
+
+\textbf{Tree Edit Distance.} The tree edit distance problem, introduced by Tai~\cite{Tai1979} and made practical by Zhang-Shasha~\cite{Zhang1989}, provides theoretical foundations for comparing hierarchical structures through insert, delete, and update operations. Subsequent work improved computational efficiency: RTED~\cite{Pawlik2011} achieves optimal worst-case complexity, while learned approaches~\cite{paassen2018tree,paassen2022revisiting} adapt costs to specific domains. For JSON comparison, tools like DeepDiff~\cite{seperman} offer order-insensitive matching via iterative deepening, but lack semantic awareness---treating \texttt{"email"} and \texttt{"email\_address"} as completely unrelated despite obvious semantic equivalence. JSONPath~\cite{Gessner2007} and JSON Patch~\cite{RFC6902} focus on querying and modification rather than similarity measurement.
+
+\textbf{Neural Text Similarity.} BERTScore~\cite{Zhang2020} revolutionized text similarity by using contextualized BERT~\cite{Devlin2019} embeddings with greedy token alignment, achieving high correlation with human judgments. However, its position-sensitive matching violates JSON's order-agnostic semantics---reordering array elements or object keys produces different scores despite identical meaning. Sentence-level approaches like Sentence-BERT~\cite{Reimers2019}, SimCSE~\cite{Gao2021}, and Universal Sentence Encoder~\cite{Cer2018} process JSON as flat strings, losing hierarchical structure. Graph neural networks~\cite{Hamilton2017,Velickovic2018} and Tree-LSTMs~\cite{Tai2015} can model structure but require task-specific training and are computationally expensive for online comparison.
+
+\textbf{LLM Structured Output and Consistency.} The emergence of LLMs has sparked interest in structured generation~\cite{Bubeck2023,Liang2022} and evaluation frameworks~\cite{yang2025structeval,shorten2024structuredrag}. Recent work on format control includes grammar-constrained decoding~\cite{wang-etal-2025-verifiable} and JSON schema enforcement~\cite{geng2025jsonschema}. LLM consistency research has examined paraphrase consistency~\cite{elazar2021measuring}, semantic stability under input perturbations~\cite{Raj2023}, temperature effects on output variability~\cite{renze2024effect,renze-2024-effect}, and non-determinism in ``deterministic'' settings~\cite{baldwin2024nondeterminism}. However, this body of work focuses primarily on natural language outputs or input-side variations, leaving structured output consistency for identical inputs largely unexplored.
+
+\textbf{Why Not LLM-as-Judge?} While LLM-based evaluation has shown promise for natural language tasks~\cite{zheng2023judging}, it is problematic for consistency measurement: (1) \textit{circular reasoning}---using potentially inconsistent LLMs to judge LLM consistency; (2) \textit{judge variability}---LLMs produce different outputs across runs even at temperature 0, so judge scores would themselves vary, defeating the purpose of consistency measurement; (3) \textit{computational cost}---evaluating 2.1M+ outputs requires millions of pairwise comparisons, infeasible with API calls; (4) \textit{interpretability}---STED produces deterministic scores decomposable into structural and semantic components, unlike black-box LLM judgments. We validate STED against human judgment directly (Section~\ref{sec:human-validation}) rather than through an LLM proxy.
+
+\textbf{Semantic and Schema Matching.} Ontology alignment~\cite{Euzenat2013} and schema matching~\cite{Rahm2001,Do2002,Melnik2002} combine lexical, structural, and constraint-based strategies to identify correspondences between heterogeneous data sources. The Hungarian algorithm~\cite{Kuhn1955,Munkres1957} provides optimal bipartite matching in polynomial time, enabling principled alignment of unordered collections. Entity matching~\cite{Mudgal2018} and change detection~\cite{Chawathe1996} address related problems in databases. We adapt these techniques for LLM output comparison, combining embedding-based semantic similarity with optimal assignment for order-invariant JSON matching.
+
+\section{Methodology}
+
+STED computes normalized edit distance between structured documents and reports the complement as a similarity score $s \in [0,1]$ (where $s=1$ indicates identical structures). Unlike traditional metrics that treat JSON as flat text, STED recognizes hierarchical structure through tree representations, extending classical tree edit distance with semantic awareness. For LLM consistency evaluation, we aggregate pairwise STED scores across multiple generations into normalized consistency metrics.
+
+\subsection{Problem Formulation}
+
+\textbf{Core Problem: JSON Similarity.} Given two JSON documents represented as trees $T_1$ and $T_2$, compute a similarity score $s(T_1, T_2) \in [0, 1]$ that captures both semantic and structural equivalence, where $s = 1$ indicates identical structures and $s = 0$ indicates fundamental incompatibility. While our framework applies to any hierarchical format (JSON, XML, HTML), we use JSON for clarity. Each document is represented as a tree $T = (V, E)$, where $V$ contains nodes (keys, values, structural elements) and $E$ encodes parent-child relationships.
+
+\textbf{Application: LLM Consistency Evaluation.} We apply STED to evaluate consistency of LLM-generated structured outputs. Let $\mathcal{O} = \{o_1, o_2, ..., o_n\}$ denote outputs generated by an LLM for identical inputs. We compute three complementary statistics (Section~\ref{sec:stability-score}): (a) \textit{Consistency} $C_{\text{mean}}$---average STED similarity across valid pairs; (b) \textit{Stability Score} $S_\alpha$---transformed measure where higher = more stable outputs; (c) \textit{Validity} $r_v$---fraction of parseable outputs.
+
+Tables~\ref{tab:sharegpt-consistency} and~\ref{tab:toucan-stability} report ranking scores ($R$) and validity across temperatures. Full $C_{\text{mean}}$ results appear in Appendix~\ref{sec:results}. The core challenge is distinguishing benign variations from critical differences that affect functionality.
+
+\subsection{Tree Representation of Structured Data}
+
+We transform structured documents into trees $T = (V, E)$ where each node $v \in V$ contains: \textbf{Type}: $\{\text{object}, \text{array}, \text{string}, \text{number}, \text{boolean}, \text{null}\}$; \textbf{Label}: Key name for object properties; \textbf{Value}: Raw value for primitives, child list for arrays; \textbf{Path}: Hierarchical path for unique identification.
+
+The transformation rules are: (1) \textbf{Objects} become internal nodes with labeled edges to child values, (2) \textbf{Arrays} remain as nodes containing element lists, recursively transformed if complex, and (3) \textbf{Primitives} map to leaf nodes with actual values. This preserves array structure while enabling order-invariant matching and maintaining the semantic distinction between arrays and objects.
+
+\subsection{Semantic Tree Edit Distance}
+
+Our STED algorithm extends classical tree edit distance with semantic awareness through three operations on nodes $v$: \textbf{Insert} (cost $\gamma_{ins}(v)$), \textbf{Delete} (cost $\gamma_{del}(v)$), and \textbf{Update} (cost $\gamma_{upd}(v_1, v_2)$). The node similarity combines key (label) and content dimensions:
+\begin{equation}
+s_{node}(v_1, v_2) = w \cdot s_{key}(v_1, v_2) + (1-w) \cdot s_{children}(v_1, v_2)
+\end{equation}
+where $w \in [0,1]$ is the key weight (default 0.5), $s_{key}$ measures key/label similarity using embedding-based comparison, and $s_{children}$ is the normalized similarity of recursively matched children (or $s_{value}$ for primitives). The update cost is $\gamma_{upd} = 1 - s_{node}$. For objects, we employ Hungarian algorithm for optimal child matching, treating key order as semantically irrelevant. For arrays, we use order-invariant matching---a deliberate design choice for LLM consistency evaluation. While JSON arrays are technically ordered, LLM outputs frequently exhibit semantically equivalent reorderings (e.g., listing search results or tool parameters in varying order) that should not penalize consistency scores. Applications requiring strict array ordering (e.g., time-series data, ranked lists) should use positional matching instead.
+
+\textbf{Cost Bounds.} All costs are explicitly bounded in $[0, 1]$: $\gamma_{ins}(v), \gamma_{del}(v) \in [0, 1]$ (base cost 1.0, optionally reduced by depth-decay weighting $\lambda^d$ where $\lambda \leq 1$, default $\lambda = 1$); similarity functions $s_{key}, s_{children} \in [0,1]$, so $\gamma_{upd} = 1 - s_{node} \in [0, 1]$. The normalization in Eq.~(3) divides by $\max(|C_1|, |C_2|)$, which bounds the per-level score since each matched pair contributes at most 1.0 and each unmatched node contributes at most 1.0 (insert/delete cost). Thus $d_{\text{total}} \leq \max(|C_1|, |C_2|)$, ensuring $\text{STED} \in [0,1]$.
+
+\begin{proposition}[STED Similarity Properties]
+\label{thm:similarity}
+For any JSON trees $T_1, T_2$, the STED similarity $s_{\text{STED}}(T_1, T_2)$ satisfies: (i) \textbf{Boundedness}: $s_{\text{STED}}(T_1, T_2) \in [0, 1]$; (ii) \textbf{Identity}: $s_{\text{STED}}(T_1, T_2) = 1 \Rightarrow T_1 \equiv_c T_2$ (structurally identical after canonicalization). The converse holds by construction: we enforce $\text{sim}(s_1, s_2) = 1$ \emph{only} for exact string equality after canonicalization; embedding similarity is capped at $1 - \epsilon$ for non-identical strings; (iii) \textbf{Symmetry}: $s_{\text{STED}}(T_1, T_2) = s_{\text{STED}}(T_2, T_1)$; (iv) \textbf{Order Invariance}: permuting object keys does not change similarity; for arrays, we use optimal matching rather than positional comparison. This is a deliberate design choice for LLM consistency evaluation where element reorderings are often semantically benign; applications requiring strict array ordering should disable this feature.
+\end{proposition}
+
+Properties (i)--(iii) follow from cost function definitions; (iv) follows from minimum-cost bipartite matching on child multisets (Appendix~\ref{sec:similarity-proof}).
+
+\subsection{Semantic Similarity Computation}
+
+Field names are normalized (e.g., \texttt{"userName"} $\rightarrow$ \texttt{"user name"}) to capture semantic relationships. We compute similarity using embeddings with cosine similarity for texts $<300$ characters; longer texts are chunked recursively with 50-character overlaps. We used Amazon Titan Text Embeddings v2 in our implementation, though the choice of embedding model has minimal impact on STED's performance since we primarily match short field names and values where most modern embedding models achieve similar semantic understanding. The framework remains model-agnostic and can use any embedding model (e.g., all-MiniLM-L6-v2, Sentence-BERT, OpenAI embeddings).
+
+Type-aware comparison ensures appropriate metrics: semantic for strings, exact for numbers, order-invariant for arrays. This recognizes functional equivalence (e.g., \{\texttt{"user\_name"}: \texttt{"John"}\} $\equiv$ \{\texttt{"userName"}: \texttt{"John"}\}) while detecting type violations that break compatibility. Unlike purely neural metrics requiring human validation, STED's deterministic rule-based design ensures interpretable behavior validated through controlled synthetic experiments (Section~\ref{sec:method-verification}).
+
+\subsection{Level-wise Child Matching}
+
+We use Hungarian algorithm-based matching at each tree level, solving optimal child-to-child assignment independently per node. While globally optimal unordered tree edit distance is NP-hard~\cite{Zhang1992}, this level-wise approach achieves $O(n^3)$ per level. For children sets $C_1, C_2$:
+\begin{multline}
+\text{OptimalCost}(T_1, T_2) = \min_{\pi} \Big[ \sum_{(i,j) \in \pi} d(c_1^i, c_2^j) \\
++ \sum_{i \notin \pi} \gamma_{del}(c_1^i) + \sum_{j \notin \pi} \gamma_{ins}(c_2^j) \Big]
+\end{multline}
+where $\pi$ is the matching, $d(\cdot, \cdot)$ is recursive distance, and unmatched nodes incur insert/delete costs. The proof reduces to Kuhn-Munkres (Appendix~\ref{sec:proofs}).
+
+\textbf{Approximation Quality.} Level-wise matching provides local (not global) optimality. While we do not formally bound the approximation gap, we note: (1) JSON structures in practice are shallow (mean depth 4.0 in our datasets), limiting error propagation across levels; (2) semantic similarity is position-independent, reducing sensitivity to matching order; and (3) our human validation (87.8\% alignment) implicitly tests end-to-end quality---confirming the approximation produces human-aligned rankings even if intermediate matching decisions are suboptimal.
+
+\subsection{Similarity Score Normalization}
+
+The STED algorithm normalizes the computed distance at each tree level to produce an interpretable similarity score in [0,1]:
+\begin{equation}
+\text{STED}(T_1, T_2) = 1 - \min\left(1, \frac{d_{\text{total}}}{\max(|C_1|, |C_2|)}\right)
+\end{equation}
+where $d_{\text{total}}$ is the total cost from Hungarian assignment (including insert/delete costs for unmatched nodes). This per-level normalization ensures consistent scoring regardless of tree depth.
+
+\subsection{Consistency Aggregation}
+\label{sec:stability-score}
+
+Given $n$ generations $\mathcal{O} = \{o_1, \ldots, o_n\}$ from identical inputs, let $V \subseteq \{1,\ldots,n\}$ be indices of valid (parseable) outputs with $m = |V|$ (the number of valid outputs), and let $s_{ij} = s_{\text{STED}}(o_i, o_j)$ denote pairwise similarity. We define three complementary statistics:
+
+\textbf{Consistency ($C_{\text{mean}}$).} The average STED similarity across valid pairs:
+\begin{equation}
+C_{\text{mean}}(\mathcal{O}) = \frac{2}{m(m-1)} \sum_{i<j,\, i,j \in V} s_{ij}
+\end{equation}
+This answers: \textit{if we sample two runs at random, how similar are they on average?}
+
+\textbf{Validity ($r_v$).} The fraction of successful parses: $r_v(\mathcal{O}) = m/n$.
+
+\textbf{Stability Score ($S_{\alpha}$).} We transform output variability into an intuitive score where higher = more stable:
+\begin{equation}
+S_{\alpha}(\mathcal{O}) = \left(\frac{1}{1 + 2\hat{\sigma}}\right)^{\alpha}, \quad \hat{\sigma} = \frac{\sigma}{\sigma_{\max}}, \quad \sigma = \text{std}(\{s_{ij}\})
+\end{equation}
+where $\sigma_{\max} = 0.5$ (the maximum std for values in $[0,1]$, achieved when half are 0 and half are 1), and $\alpha=20$ (default). This amplifies small variance differences for efficient model ranking.
+
+\textbf{Ranking Score ($R$).} For comprehensive model benchmarking, we combine all three metrics:
+\begin{equation}
+R(\mathcal{O}) = r_v \cdot C_{\text{mean}} \cdot S_{\alpha}
+\end{equation}
+This composite score penalizes models with low validity, low consistency, or high variance. Tables~\ref{tab:sharegpt-consistency} and~\ref{tab:toucan-stability} report $R$ values. The $\alpha$ parameter ablation appears in Section~\ref{sec:ablation-steepness}; additional analysis in Appendix~\ref{sec:stability-analysis}.
+
+\begin{proposition}[Convergence Rate]
+\label{prop:convergence}
+Let $\{o_i\}_{i=1}^n$ be i.i.d. samples from an LLM's output distribution. As $n \to \infty$, $C_{\text{mean}}(\mathcal{O}_n) \xrightarrow{p} C^*$ with rate $O(n^{-1/2})$, following from U-statistic theory applied to pairwise similarities.
+\end{proposition}
+
+\subsection{Computational Complexity}
+
+For trees with $N$ nodes and maximum branching factor $B$, STED runs in $O(N \cdot B^3)$ time (Hungarian algorithm at each node) and $O(N \cdot d)$ space (embedding cache). Our optimized implementation achieves 7--22$\times$ speedup over naive recursion through memoization and embedding precomputation, maintaining 0.96 correlation with exact computation. Details in Appendix~\ref{sec:optimizations}; proofs in Appendix~\ref{sec:proofs}.
+
+\section{Experiments and Results}
+
+Our experimental evaluation comprises two complementary studies. First, we validate our method's effectiveness using synthetic datasets with controlled variations to verify its ability to accurately quantify similarity degradation. Second, we deploy our framework to benchmark the structured output consistency of \textbf{18 LLMs across 10 providers} on two tasks: (1) \textbf{ShareGPT Structured Output} (75 samples, 18 models) and (2) \textbf{Toucan Tool Calling} (1,006 samples, 18 models).
+
+Models span diverse architectures: Claude family (3.5-Sonnet, 3.7-Sonnet, Haiku-4.5, Opus-4/4.5, Sonnet-4/4.5, 3.5-Haiku), Qwen (235B-A22B, 32B), Meta (Llama-3.3-70B), AWS (Nova-2-Lite), xAI (Grok-4.1-Fast), Minimax (M2), Moonshot (Mimo-V2-Flash), OpenAI (GPT-OSS-120B, GPT-4.1-Mini), and Google (Gemini-2.5-Flash-Lite). This comprehensive coverage reveals consistency patterns across model scales (32B--235B parameters), optimization strategies (efficiency vs performance), and access tiers (commercial vs free). The framework itself is model-agnostic and can evaluate any LLM with structured output capabilities.
+
+\subsection{Experimental Setup}
+
+\subsubsection{Validation Dataset}
+
+We verify method effectiveness using \textbf{2,400 synthetic test cases} generated from 75 ShareGPT JSON samples with controlled modifications at 10 intensity levels (0.1--1.0): field name variants (semantic equivalents), expression variants (paraphrases), semantic variants (content changes), and structural variants (flattening/nesting). This controlled setup isolates specific variation types to validate STED's discrimination ability. Details in Appendix~\ref{sec:dataset-distribution}.
+
+\subsubsection{Baseline Methods}
+
+We compare STED against three established structure-aware approaches: \textbf{TED}: Tree Edit Distance using Zhang-Shasha algorithm with default cost functions; \textbf{BERTScore}: Adapted for JSON by serializing structures with sorted keys, computing F1 scores from BERT embedding alignments; \textbf{DeepDiff}: Rule-based structural comparison using Deep Distance metric, converted to similarity as $1 - \text{DeepDistance}$. We focus on structure-aware baselines; comparison with simple string metrics (e.g., edit distance on serialized JSON) is acknowledged as a limitation.
+
+\subsubsection{LLM Benchmarking Protocol}
+
+Table~\ref{tab:experimental-protocol} summarizes our evaluation framework: 18 models across 10 providers, two tasks, 11 temperatures, 10 runs each---totaling \textbf{2.1M+ outputs}.
+
+\begin{table}[h]
+\centering
+\caption{Experimental Protocol Summary}
+\label{tab:experimental-protocol}
+\scriptsize
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Parameter} & \textbf{ShareGPT} & \textbf{Toucan} \\
+\midrule
+Samples & 75 & 1,006 \\
+Temperatures & 11 (0.0--1.0) & 11 (0.0--1.0) \\
+Runs per temp & 10 & 10 \\
+\textbf{Outputs/model} & \textbf{8,250} & \textbf{110,660} \\
+Unique tools & -- & 993 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Tasks.} \textit{ShareGPT}: 75 free-form JSON generation samples. \textit{Toucan}~\cite{toucan2024}: 1,006 tool-calling samples drawn from 119,287 total examples (993 unique tools, 56\% multilingual)---a constrained task where SDK enforces format but models vary in tool selection and parameters. We sampled 1,006 examples due to computational cost: each sample requires 110 LLM calls (11 temperatures $\times$ 10 runs), yielding 1.98M API calls across 18 models.
+
+\textbf{Validity.} We measure \textit{syntactic validity} ($r_v$): whether outputs parse as valid JSON/tool calls. Low validity for some models on Toucan (Llama 33\%, Gemini 54\%) reflects API/SDK format differences, not capability gaps.
+
+\textbf{Evaluation Modes.} We report structural stability (schema adherence, $w$=1.0), semantic stability (content preservation, $w$=0.0), and hybrid ($w$=0.5).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\columnwidth]{figures/schema_variation_analysis.png}
+\caption{Schema variation analysis. STED correctly assigns zero similarity to breaking structural changes (nested) while tolerating benign field name variations.}
+\label{fig:schema_variation_analysis}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\columnwidth]{figures/similarity_progression_combined.png}
+\caption{Content variation analysis. STED shows calibrated sensitivity to semantic changes (left) while maintaining robustness to expression paraphrases (right), aligning with human judgment.}
+\label{fig:similarity_progression_combined}
+\end{figure}
+
+\subsection{Method Validation Results}
+\label{sec:method-verification}
+
+\subsubsection{Schema Variation Analysis}
+Figure~\ref{fig:schema_variation_analysis} reveals how methods handle structural variations in LLM outputs. For field name variations using semantic equivalents, STED maintains stable similarity across all variation ratios, correctly recognizing functional equivalence. TED degrades significantly due to lack of semantic understanding, while BERTScore's excessive permissiveness may mask important structural differences. For structural modifications (flattening and nesting changes), STED correctly assigns zero similarity, recognizing these as breaking changes for downstream systems. Other methods problematically tolerate these changes with non-zero scores that could allow incompatible outputs to pass consistency checks.
+
+\subsubsection{Content Variation Analysis}
+Figure~\ref{fig:similarity_progression_combined} evaluates content variation handling, critical for applications like content moderation where semantic accuracy impacts outcomes. For semantic variations, STED (0.954$\pm$0.039) and BERTScore (0.958$\pm$0.025) show statistically equivalent calibrated sensitivity ($p = 0.600$), while DeepDiff over-reacts (0.799$\pm$0.165) and TED remains insensitive (1.0, structure-only). For expression variations, STED achieves superior robustness (0.981$\pm$0.017, $p < 0.001$), correctly preserving high similarity for paraphrases, unlike DeepDiff which incorrectly penalizes valid rewording (0.805$\pm$0.164).\footnote{Detailed statistical analysis in Appendix~\ref{sec:statistical-analysis}.}
+
+STED's differential response---5.2\% degradation for semantic changes versus 1.9\% for expression changes---enables threshold-based detection of genuine semantic drift while accepting natural language variation, providing human-aligned consistency assessment for practical applications.
+
+\subsubsection{Human Validation Study}
+\label{sec:human-validation}
+
+To validate STED on real LLM outputs, we conducted a best-match selection study with three annotators on 74 disagreement cases where methods diverged (from 500 Toucan samples; agreement cases provide no signal). Three annotators (Fleiss' $\kappa = 0.759$, substantial agreement) independently selected the most similar candidate to ground truth, with methods anonymized and order randomized. STED achieves \textbf{87.8\%} alignment with human judgment (65/74; 95\% CI: [78.2\%, 94.3\%]), followed by BERTScore (74.3\%), DeepDiff (47.3\%), and TED (27.0\%). On unanimous cases (N=59), STED achieves \textbf{91.5\%} alignment. STED significantly outperforms DeepDiff and TED ($p < 0.001$, McNemar's test); the STED-BERTScore gap (13.5pp) approaches significance ($p = 0.087$). This validates STED's \textit{relative ranking} on real outputs, complementing synthetic validation (2,400 controlled cases).
+
+\subsection{LLM Consistency Results}
+
+Our comprehensive evaluation across 18 models on two distinct tasks reveals critical insights into consistency patterns, providing guidance for model selection and parameter tuning.
+
+\subsubsection{ShareGPT Structured Output}
+Table~\ref{tab:sharegpt-consistency} presents structural and semantic stability ($S_\alpha$) for all 18 models, revealing three distinct patterns:
+
+\textbf{(1) ``Deterministic-only'' models}: Near-perfect stability at T=0 (structural \& semantic $>$0.94) but dramatic collapse at T=1.0. Gemini-2.5-Flash-Lite and Claude-3.5-Haiku achieve \textbf{0.99 structural} at T=0 but drop to 0.54--0.57 at T=1.0. Semantic stability collapses even more severely (0.99$\to$0.24--0.25). These models are optimized for deterministic inference.
+
+\textbf{(2) ``Temperature-resilient'' models}: Claude-Opus-4.5 demonstrates exceptional robustness---maintaining \textbf{0.78 structural} and \textbf{0.46 semantic} even at T=1.0, the best high-temperature scores. This enables practitioners to use temperature diversity while preserving consistency.
+
+\textbf{(3) ``Lower baseline'' models}: Grok-4.1-Fast, Nova-2-Lite, and others start with moderate stability but maintain it across temperatures. Grok-4.1-Fast uniquely \textit{increases} structural stability from 0.60 to 0.62 at T=1.0.
+
+Figure~\ref{fig:appendix-stability} (Appendix) provides detailed stability distributions and temperature degradation curves for all 18 models.
+
+\textbf{Prompt Characteristic Analysis.} We analyzed 75 ShareGPT prompts to identify factors associated with output inconsistency, aggregating stability scores across all temperatures and 18 models. Table~\ref{tab:ambiguity-main} compares top and bottom quartiles by stability score. The most notable difference is in question mark frequency: inconsistent samples average 2.8$\times$ more question marks, suggesting prompts with multiple clarification requests may introduce ambiguity. Prompt length and prose-heavy text show no meaningful difference. Correlation analysis confirms no significant relationship between prompt characteristics and consistency ($r = 0.03$, $p = 0.80$), indicating consistency is primarily driven by model capabilities and task difficulty rather than prompt characteristics.
+
+\begin{table}[h]
+\centering
+\caption{Prompt Factors vs Consistency (ShareGPT, All Temperatures)}
+\label{tab:ambiguity-main}
+\scriptsize
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Factor} & \textbf{Consistent} & \textbf{Inconsist.} & \textbf{Ratio} \\
+\midrule
+Question marks (avg) & 0.8 & 2.4 & 2.8$\times$ \\
+Prompt length (chars) & 15,298 & 15,877 & 1.0$\times$ \\
+Prose-heavy$^\dagger$ & 5.0\% & 5.0\% & 1.0$\times$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.3em}
+\raggedright\scriptsize $^\dagger$Avg sentence $>$20 words, no structure markers. Consistent: $S_\alpha \geq 0.51$ (N=19); Inconsistent: $S_\alpha \leq 0.35$ (N=19). Quartile-based thresholds across 18 models, all temperatures.
+\end{table}
+
+\subsubsection{Toucan Tool Calling}
+Table~\ref{tab:toucan-stability} reveals three key insights:
+
+\textbf{(1) Claude family dominates at T=0}: The top 9 models for structural stability are all Claude variants ($S_\alpha \geq .92$), with Claude-3.5-Haiku leading at .98. This suggests Claude models may have advantages for structured output consistency, though the underlying causes require further investigation.
+
+\textbf{(2) SDK-enforced schemas provide strong guardrails}: Temperature degradation is dramatically smoother than ShareGPT---structural drops only 11\% (.80$\to$.71) vs 26\%; semantic drops 17\% (.76$\to$.63) vs 53\%. Tool-calling APIs naturally constrain output variability.
+
+\textbf{(3) Task-specific validity gaps}: Llama-3.3-70B achieves 98\% validity on ShareGPT but only 33\% on Toucan---a 3$\times$ gap highlighting critical API/SDK format differences.
+
+\textbf{Consistency Diagnostics: Parameter Complexity.} Table~\ref{tab:complexity-main} shows \textbf{parameter complexity strongly predicts inconsistency}: lists are 27$\times$ more likely in inconsistent outputs, and any complex type is 29$\times$ more likely. This enables proactive risk assessment from schema inspection alone.
+
+\begin{table}[h]
+\centering
+\caption{Parameter Complexity vs Inconsistency (Toucan, All Temperatures)}
+\label{tab:complexity-main}
+\scriptsize
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Parameter Type} & \textbf{Consistent} & \textbf{Inconsist.} & \textbf{Ratio} \\
+\midrule
+Has List Params & 0.4\% & 10.7\% & 27$\times$ \\
+Has Any Complex Type & 0.4\% & 11.5\% & 29$\times$ \\
+Has Nested Structure & 0.0\% & 3.6\% & $>$3.6\% \\
+Has Dict Params & 0.0\% & 2.4\% & $>$2.4\% \\
+\midrule
+Mean Max Depth & 0.80 & 0.99 & 1.2$\times$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.3em}
+\raggedright\scriptsize Consistent: $S_\alpha \geq 0.85$ (N=252); Inconsistent: $S_\alpha \leq 0.58$ (N=252). Quartile-based thresholds across 18 models, all temperatures.
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{ShareGPT Structured Output: Stability ($S_\alpha$) at T=0 and T=1 (75 samples, 18 models)}
+\label{tab:sharegpt-consistency}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lcc|cc|c@{}}
+\toprule
+& \multicolumn{2}{c|}{\textbf{Structural (Schema)}} & \multicolumn{2}{c|}{\textbf{Semantic (Content)}} & \\
+\textbf{Model} & \textbf{T=0} & \textbf{T=1} & \textbf{T=0} & \textbf{T=1} & \textbf{Valid.} \\
+\midrule
+Gemini-2.5-Flash-Lite & \textbf{.99} & .54 & \textbf{.99} & .25 & \textbf{100\%} \\
+Claude-3.5-Haiku & .99 & .57 & .98 & .24 & 99.1\% \\
+Claude-Haiku-4.5 & .98 & .63 & .97 & .31 & \textbf{100\%} \\
+Claude-Opus-4 & .97 & .67 & .94 & .36 & 97.7\% \\
+Claude-Sonnet-4.5 & .95 & .71 & .90 & .40 & 89.5\% \\
+Claude-Opus-4.5 & .89 & \textbf{.78} & .77 & \textbf{.46} & 96.3\% \\
+Claude-Sonnet-4 & .82 & .69 & .63 & .39 & 71.8\% \\
+Claude-3.5-Sonnet & .81 & .71 & .52 & .32 & \textbf{100\%} \\
+Claude-3.7-Sonnet & .80 & .73 & .54 & .33 & \textbf{100\%} \\
+Qwen3-32B & .79 & .51 & .51 & .16 & 96.8\% \\
+Llama-3.3-70B & .77 & .58 & .45 & .17 & 98.3\% \\
+GPT-4.1-Mini & .75 & .49 & .59 & .26 & \textbf{100\%} \\
+Qwen3-235B-A22B & .69 & .58 & .44 & .30 & \textbf{100\%} \\
+Grok-4.1-Fast & .60 & .62 & .29 & .25 & 97.2\% \\
+Minimax-M2 & .60 & .24 & .27 & .08 & 98.2\% \\
+Nova-2-Lite & .59 & .48 & .40 & .20 & \textbf{100\%} \\
+GPT-OSS-120B & .56 & .43 & .30 & .19 & \textbf{100\%} \\
+Mimo-V2-Flash & .49 & .40 & .27 & .14 & 74.4\% \\
+\midrule
+\textbf{Mean} & \textbf{.78} & \textbf{.58} & \textbf{.57} & \textbf{.27} & 95.5\% \\
+\bottomrule
+\end{tabular}%
+}
+
+\vspace{0.3em}
+\raggedright\scriptsize $S_\alpha$ = stability score (higher = more consistent). \textbf{Key insight}: Structural stability (schema) drops .78$\to$.58 while semantic (content) drops .57$\to$.27---schema remains more stable, which is \textit{desirable} for production (parseable outputs). \textbf{Best at T=1}: Claude-Opus-4.5 (.78 structural, .46 semantic).
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{Toucan Tool Calling: Stability ($S_\alpha$) at T=0 and T=1 (1,006 samples, 18 models)}
+\label{tab:toucan-stability}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lcc|cc|c@{}}
+\toprule
+& \multicolumn{2}{c|}{\textbf{Structural (Schema)}} & \multicolumn{2}{c|}{\textbf{Semantic (Content)}} & \\
+\textbf{Model} & \textbf{T=0} & \textbf{T=1} & \textbf{T=0} & \textbf{T=1} & \textbf{Valid.} \\
+\midrule
+Claude-3.5-Haiku & \textbf{.98} & \textbf{.90} & .97 & .81 & 97.7\% \\
+Claude-Opus-4 & .97 & .86 & \textbf{.97} & .78 & 97.1\% \\
+Claude-Sonnet-4.5 & .96 & .77 & .96 & .70 & 96.8\% \\
+Claude-Opus-4.5 & .96 & .81 & .95 & .75 & 96.7\% \\
+Claude-3.7-Sonnet & .95 & .93 & .88 & \textbf{.81} & 96.7\% \\
+Claude-3.5-Sonnet & .93 & .87 & .88 & .79 & 97.4\% \\
+Claude-Haiku-4.5 & .93 & .64 & .92 & .58 & 95.3\% \\
+Claude-Sonnet-4 & .92 & .82 & .89 & .73 & 97.0\% \\
+Nova-2-Lite & .92 & .89 & .86 & .80 & 96.5\% \\
+Mimo-V2-Flash & .83 & .65 & .75 & .52 & \textbf{97.7\%} \\
+Qwen3-235B-A22B & .78 & .67 & .74 & .60 & \textbf{98.1\%} \\
+Qwen3-32B & .78 & .63 & .71 & .50 & 96.6\% \\
+GPT-OSS-120B & .70 & .66 & .63 & .55 & 82.4\% \\
+Grok-4.1-Fast & .65 & .61 & .59 & .55 & 94.8\% \\
+Minimax-M2 & .61 & .47 & .52 & .35 & 90.5\% \\
+GPT-4.1-Mini & .61 & .62 & .55 & .55 & 76.0\% \\
+Gemini-2.5-Flash-Lite & .54 & .53 & .54 & .44 & 52.9\% \\
+Llama-3.3-70B & .45 & .52 & .43 & .47 & 32.5\% \\
+\midrule
+\textbf{Mean} & \textbf{.80} & \textbf{.71} & \textbf{.76} & \textbf{.63} & 87.4\% \\
+\bottomrule
+\end{tabular}%
+}
+
+\vspace{0.3em}
+\raggedright\scriptsize $S_\alpha$ = stability score (higher = more consistent). \textbf{Contrast with ShareGPT}: Toucan structural drops .80$\to$.71 (11\%) vs ShareGPT .78$\to$.58 (26\%); semantic drops .76$\to$.63 (17\%) vs .57$\to$.27 (53\%)---SDK-enforced tool-calling schemas provide much stronger stability. \textbf{Best at T=1}: Claude-3.7-Sonnet (.93 structural, .81 semantic). \textbf{Validity challenges}: Llama (33\%), Gemini (53\%) reflect API/SDK format differences.
+\end{table}
+
+\textbf{Task-Specific Stability Comparison.} The two tasks exhibit fundamentally different stability patterns:
+
+\textit{ShareGPT (structured output)}: Downstream systems must parse JSON outputs, so \textbf{structural stability} is critical---schema changes break integrations even if content is semantically similar. Table~\ref{tab:sharegpt-consistency} reveals a key insight: as temperature increases, \textbf{structural stability degrades slowly} (mean 26\% decline: .78$\to$.58) while \textbf{semantic stability degrades more} (mean 53\% decline: .57$\to$.27). This is \textit{desirable behavior}: schema should remain stable for downstream parsing even at high temperatures, while content diversity is expected and appropriate for creative generation.
+
+\textit{Toucan (tool calling)}: SDK-enforced schemas provide much stronger guardrails. Table~\ref{tab:toucan-stability} shows structural stability drops only 11\% (.80$\to$.71) and semantic only 17\% (.76$\to$.63)---dramatically better than ShareGPT's 26--53\% declines. This confirms tool-calling APIs naturally constrain output variability. Our failure pattern analysis (Section~\ref{sec:sted-value-analysis}) reveals 39\% of inconsistencies involve string parameter drift and 16\% involve different tool selection, directly impacting agent behavior.
+
+\subsection{Ablation Studies}
+
+\subsubsection{Steepness Parameter ($\alpha$)}
+\label{sec:ablation-steepness}
+
+The steepness parameter $\alpha$ in $S_\alpha = (1/(1+2\hat{D}_{\text{std}}))^\alpha$ serves two purposes: (1) \textit{range normalization}---with $\alpha = 20$, worst-case $(1/3)^{20} \approx 0$, achieving the full $[0, 1]$ range; and (2) \textit{discrimination}---amplifying small deviations typical in LLM outputs ($\hat{\sigma} < 0.1$).
+
+Table~\ref{tab:alpha-ablation-main} shows the effect of $\alpha$ on score discrimination. We select $\alpha = 20$ as default, achieving full $[0,1]$ range normalization while retaining 95\% of peak discrimination. Model rankings are robust to $\alpha$ choice: Spearman $\rho = 0.998$ on Toucan and $\rho = 0.987$ on ShareGPT across $\alpha \in \{5, 10, 15, 20, 25, 30, 40, 50\}$. Figure~\ref{fig:steepness-analysis} visualizes this trade-off; detailed analysis in Appendix~\ref{sec:stability-analysis}.
+
+\begin{table}[h]
+\centering
+\caption{Effect of $\alpha$ on discrimination}
+\label{tab:alpha-ablation-main}
+\scriptsize
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+\textbf{Metric} & $\alpha=5$ & $\alpha=10$ & $\alpha=15$ & $\alpha=20$ & $\alpha=25$ \\
+\midrule
+$S_\alpha(\hat{\sigma}=1.0)$ & 0.004 & $10^{-5}$ & $10^{-7}$ & $10^{-9}$ & $10^{-12}$ \\
+$S_\alpha(\hat{\sigma}=0.01)$ & 0.905 & 0.819 & 0.741 & 0.670 & 0.607 \\
+$S_\alpha(\hat{\sigma}=0.10)$ & 0.402 & 0.162 & 0.065 & 0.026 & 0.011 \\
+Discrimination & 0.503 & 0.657 & \textbf{0.676} & 0.644 & 0.596 \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.3em}
+\raggedright\scriptsize $\hat{\sigma}$: normalized std of pairwise similarities. $S_\alpha(\hat{\sigma}{=}1.0)$: worst-case (maximally inconsistent). $S_\alpha(\hat{\sigma}{=}0.01)$: consistent outputs. $S_\alpha(\hat{\sigma}{=}0.10)$: inconsistent outputs. Discrimination = difference between consistent and inconsistent; higher is better. We select $\alpha{=}20$ (95\% of peak discrimination, full range normalization).
+\end{table}
+
+\subsubsection{Embedding Model}
+\label{sec:ablation-embedding}
+
+We evaluate STED with nine embedding models spanning three architectures on 200 synthetic samples: Sentence-Transformers (MiniLM-L6, MPNet), BGE (base, large), E5 (base, large), and Amazon Titan (256d, 512d, 1024d). Table~\ref{tab:embedding-ablation} shows extremely high correlation across all pairs ($r > 0.999$, $\rho > 0.995$), confirming that embedding model choice has minimal impact on STED's consistency measurements. \textbf{Practical implication}: lightweight models like MiniLM-L6 (22M parameters, 5$\times$ faster) achieve identical rankings to larger models, enabling significant cost savings in production deployments without sacrificing measurement accuracy.
+
+\begin{table}[h]
+\centering
+\caption{Embedding model ablation: pairwise Pearson correlation ($r$)}
+\label{tab:embedding-ablation}
+\scriptsize
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+& \textbf{MiniLM} & \textbf{MPNet} & \textbf{BGE-L} & \textbf{E5-L} & \textbf{Titan-1024} \\
+\midrule
+MiniLM-L6 & -- & 1.000 & 1.000 & 0.999 & 1.000 \\
+MPNet & & -- & 1.000 & 0.999 & 1.000 \\
+BGE-large & & & -- & 1.000 & 1.000 \\
+E5-large & & & & -- & 0.999 \\
+\midrule
+Min $\rho$ & \multicolumn{5}{c}{0.995 (E5 vs Titan)} \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.3em}
+\raggedright\scriptsize All 36 pairwise correlations exceed $r=0.999$ and $\rho=0.995$ across 9 embedding models (200 samples). Full results include BGE-base, E5-base, Titan-256d, Titan-512d.
+\end{table}
+
+\subsection{Practitioner Guidelines}
+\label{sec:practitioner-guidelines}
+
+Based on our empirical findings, we provide deployment recommendations:
+
+\textbf{Model Selection.} Claude family models dominate consistency rankings (top 9 on Toucan at T=0, all with $S_\alpha \geq .92$); see Figure~\ref{fig:pareto-frontier} for Pareto frontier analysis. For applications requiring high validity, Qwen3-235B-A22B achieves 98\% parse success. For temperature-robust applications, Claude-3.7-Sonnet maintains .93 structural stability even at T=1.
+
+\textbf{Schema Design.} Parameter complexity is the strongest predictor of inconsistency (27--29$\times$ higher risk for complex types). We recommend: (1) flatten nested structures to key-value pairs; (2) prefer primitive types (string, number, boolean) over lists and dictionaries; (3) provide explicit examples in tool descriptions to reduce ambiguity.
+
+\textbf{Evaluation Strategy.} Match STED's weighting parameter to your use case: structural stability ($w$=1.0) for downstream parsing requirements where schema changes break integrations; semantic stability ($w$=0.0) for agentic applications where tool selection and parameter values determine behavior; hybrid ($w$=0.5) for general consistency assessment.
+
+\section{Conclusion}
+
+We presented STED, a JSON similarity metric combining structural tree comparison with semantic understanding via embeddings and order-invariant matching, significantly outperforming existing baselines ($p<0.001$).
+
+Through large-scale evaluation across 18 models (2.1M+ outputs), we introduce a \textbf{consistency diagnostics framework} providing the first systematic analysis of \textit{why} LLM structured outputs are inconsistent. Our key findings: parameter complexity strongly predicts inconsistency (27--29$\times$ higher for complex types), with four distinct failure patterns enabling targeted interventions. Task-specific differences are dramatic (Llama-3.3-70B: 99\% vs 33\% validity across tasks), and tool-calling stability is much higher than free-form JSON (11--17\% decline vs 26--53\%), confirming SDK-enforced schemas provide strong guardrails. Notably, structural stability degrades slower than semantic (26\% vs 53\%)---\textit{desirable} for production parsing---and temperature-resilient models exist (Claude-Opus-4.5: 0.78 stability at T=1.0), enabling temperature diversity without sacrificing consistency.
+
+\textbf{Limitations.} (1) \textit{Baselines}: We did not compare STED against simple string-based metrics (e.g., Levenshtein distance on canonicalized JSON), which would help isolate the value of semantic awareness. (2) \textit{Approximation gap}: Level-wise Hungarian matching lacks formal bounds; while shallow structures and human validation suggest adequate performance, theoretical characterization remains open. (3) \textit{Generalization}: We evaluated only JSON; extension to XML, YAML requires further validation.
+
+\textbf{Future Work.} Our framework opens several research directions: (1) \textit{Prompt-side analysis}---leveraging STED to systematically identify prompt characteristics (ambiguity, schema underspecification, instruction complexity) that drive inconsistency, enabling automated prompt optimization for stability; (2) \textit{Stability improvement techniques}---exploring interventions such as constrained decoding, self-consistency sampling, and schema-aware fine-tuning to reduce output variability while preserving generation quality.
+
+\bibliography{neurips_2025_camera_ready}
+\bibliographystyle{icml2025}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\appendix
+\section{Theoretical Proofs}
+\label{sec:proofs}
+
+\subsection{Proof of Similarity Properties (Proposition~\ref{thm:similarity})}
+\label{sec:similarity-proof}
+
+\textbf{(i) Boundedness:} We prove $s_{\text{STED}} \in [0,1]$ by showing that cost functions are bounded and normalization is correct.
+
+\textit{Cost bounds:} (a) Similarity functions: cosine similarity is clipped to $[0,1]$, so $\gamma_{struct} = 1 - \text{sim}_{struct} \in [0,1]$ and $\gamma_{content} = 1 - \text{sim}_{content} \in [0,1]$. Thus $\gamma_{upd} = w \cdot \gamma_{struct} + (1-w) \cdot \gamma_{content} \in [0,1]$. (b) Insert/delete: $\gamma_{ins}, \gamma_{del}$ are explicitly clamped to $[0,1]$ (base cost 1.0, optionally reduced by depth-decay $\lambda^d$ where $\lambda \leq 1$).
+
+\textit{Normalization correctness:} At each tree level with children sets $C_1, C_2$ of sizes $n_1, n_2$, the Hungarian assignment matches $\min(n_1, n_2)$ pairs (each contributing $\leq 1$) plus $|n_1 - n_2|$ unmatched nodes (each contributing insert/delete cost $\leq 1$). Thus $d_{\text{total}} \leq \max(n_1, n_2)$, and division by $\max(|C_1|, |C_2|)$ in Eq.~(3) yields $\text{STED} \in [0,1]$.
+
+\textbf{(ii) Identity:}
+$(\Rightarrow)$ If $s_{\text{STED}}(T_1, T_2) = 1$, then $d_{\text{total}} = 0$ in Eq.~(3). This requires: no insertions/deletions (since $\gamma_{\text{ins}}, \gamma_{\text{del}} > 0$), and all updates have zero cost, meaning $S_{\text{struct}}(n_1, n_2) = 1$ and $S_{\text{value}}(n_1, n_2) = 1$ for all matched pairs. Since our implementation returns $\text{sim}(s_1, s_2) = 1$ only for exact string equality (after canonicalization), this implies all labels and values are identical after normalization, hence $T_1 \equiv_c T_2$.
+
+$(\Leftarrow)$ If $T_1 \equiv_c T_2$ (identical after canonicalization), then the identity mapping yields $d_{\text{total}} = 0$: all nodes match exactly with $S_{\text{struct}} = S_{\text{value}} = 1$, so $s_{\text{STED}} = 1$.
+
+\textbf{Remark (Implementation guarantee):} To ensure the identity property holds exactly, our implementation enforces: (1) $\text{sim}(s_1, s_2) = 1$ \emph{only} when $s_1 = s_2$ after canonicalization (case normalization, whitespace trimming); (2) for non-identical strings, embedding-based cosine similarity is capped at $1 - \epsilon$ (we use $\epsilon = 10^{-6}$) to prevent degenerate embedding cases from yielding spurious identity. This enables meaningful graded similarity for semantically similar strings (e.g., ``email'' vs ``email\_address'' $\approx 0.85$) while guaranteeing the mathematical identity property.
+
+\textbf{(iii) Symmetry:} The cost functions are symmetric by construction: $\gamma_{\text{ins}}(n) = \gamma_{\text{del}}(n)$ (same formula), and similarity functions are symmetric. For any matching $\pi: T_1 \to T_2$, the inverse matching $\pi^{-1}: T_2 \to T_1$ has equal cost.
+
+\textbf{(iv) Order Invariance:} For objects and arrays, children are matched via minimum-cost bipartite assignment (Hungarian algorithm) on the multiset of children. The assignment considers all possible pairings and selects the minimum-cost matching. Since the cost function only depends on the children themselves (not their positions), any permutation of children in either tree results in the same set of pairwise costs, hence the same optimal matching cost. Therefore, $s_{\text{STED}}$ is invariant to permutations of object keys or array elements.
+
+\subsection{Proof of Level-wise Assignment Optimality}
+\label{thm:hungarian}
+
+We reduce child matching to the classical assignment problem.
+
+\textbf{Step 1: Cost Matrix Construction.}
+Construct matrix $M \in \mathbb{R}^{m \times m}$ where $m = \max(n_1, n_2)$:
+\[
+M[i][j] = \begin{cases}
+d_{\text{STED}}(c_i^{(1)}, c_j^{(2)}) & \text{if } i \leq n_1, j \leq n_2 \\
+\gamma_{\text{del}}(c_i^{(1)}) & \text{if } i \leq n_1, j > n_2 \\
+\gamma_{\text{ins}}(c_j^{(2)}) & \text{if } i > n_1, j \leq n_2 \\
+0 & \text{otherwise}
+\end{cases}
+\]
+
+\textbf{Step 2: Equivalence.} Matching real node $i$ to dummy $j$ represents deletion (cost $\gamma_{\text{del}}$); matching dummy $i$ to real node $j$ represents insertion (cost $\gamma_{\text{ins}}$).
+
+\textbf{Step 3: Complexity.} The Kuhn-Munkres algorithm solves $m \times m$ assignment in $O(m^3)$ time and $O(m^2)$ space, guaranteeing optimality for the child assignment at that level via complementary slackness.
+
+\subsection{Proof of Mean Consistency Convergence (Proposition~\ref{prop:convergence})}
+
+The mean pairwise consistency $C_{\text{mean}} = \frac{2}{m(m-1)} \sum_{i<j} s_{ij}$ is a U-statistic of order 2 with kernel $h(o_i, o_j) = s(T_i, T_j)$.
+
+\textbf{Step 1: U-statistic structure.}
+By Hoeffding's theorem for U-statistics, $\sqrt{n}(C_{\text{mean},n} - \mu^*) \xrightarrow{d} \mathcal{N}(0, 4\zeta_1^2)$ where $\mu^* = \mathbb{E}[s(T_1, T_2)]$ and $\zeta_1^2 = \text{Var}[\mathbb{E}[s(T_1, T_2) | o_1]]$.
+
+\textbf{Step 2: Rate bound.}
+By the CLT for U-statistics: $|C_{\text{mean},n} - \mu^*| = O_p(n^{-1/2})$.
+
+This establishes that mean pairwise consistency converges to the population value at the standard parametric rate, justifying finite-sample comparisons with $n \geq 10$ generations per condition.
+
+\subsection{STED Algorithm Pseudocode}
+\label{sec:pseudocode}
+
+Algorithm~\ref{alg:sted} provides the complete STED computation, clarifying how per-level normalization composes across the tree.
+
+\begin{algorithm}[h]
+\caption{STED: Semantic Tree Edit Distance}
+\label{alg:sted}
+\begin{algorithmic}[1]
+\REQUIRE Trees $T_1, T_2$; key weight $w \in [0,1]$
+\ENSURE Similarity $s \in [0,1]$
+\STATE \textbf{function} STED($T_1$, $T_2$, $w$)
+\IF{$T_1$ and $T_2$ are both primitives}
+    \IF{$\text{canonicalize}(T_1) = \text{canonicalize}(T_2)$}
+        \RETURN 1.0 \COMMENT{Exact match after canonicalization}
+    \ELSE
+        \STATE $s_{\text{sem}} \gets \min(\text{embed\_sim}(T_1, T_2), 1-\epsilon)$
+        \RETURN $s_{\text{sem}}$ \COMMENT{Capped embedding similarity}
+    \ENDIF
+\ENDIF
+\STATE $C_1 \gets \text{children}(T_1)$; $C_2 \gets \text{children}(T_2)$
+\STATE $m \gets \max(|C_1|, |C_2|)$
+\STATE \textbf{Build cost matrix} $M \in \mathbb{R}^{m \times m}$:
+\FOR{$i = 1$ to $|C_1|$, $j = 1$ to $|C_2|$}
+    \STATE $s_{ij} \gets \text{STED}(C_1[i], C_2[j], w)$ \COMMENT{Recursive}
+    \STATE $M[i,j] \gets 1 - s_{ij}$ \COMMENT{Convert to cost}
+\ENDFOR
+\FOR{$i = 1$ to $|C_1|$, $j > |C_2|$}
+    \STATE $M[i,j] \gets \gamma_{\text{del}}(C_1[i])$ \COMMENT{Deletion cost}
+\ENDFOR
+\FOR{$i > |C_1|$, $j = 1$ to $|C_2|$}
+    \STATE $M[i,j] \gets \gamma_{\text{ins}}(C_2[j])$ \COMMENT{Insertion cost}
+\ENDFOR
+\STATE $\pi^* \gets \text{Hungarian}(M)$ \COMMENT{Optimal assignment}
+\STATE $d_{\text{total}} \gets \sum_{(i,j) \in \pi^*} M[i,j]$
+\STATE $s_{\text{children}} \gets \max(0, 1 - d_{\text{total}} / m)$ \COMMENT{Eq.~(3)}
+\STATE $s_{\text{key}} \gets \text{key\_similarity}(T_1, T_2)$ \COMMENT{Label match}
+\RETURN $w \cdot s_{\text{key}} + (1-w) \cdot s_{\text{children}}$
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Key clarifications:} (1) \textbf{Per-level normalization} (line 21): $s_{\text{children}} = \max(0, 1 - d_{\text{total}}/m)$ which is equivalent to Eq.~(3)'s formulation $1 - \min(1, d_{\text{total}}/m)$; the $\max(0,\cdot)$ ensures non-negativity while cost bounds guarantee this is never triggered. (2) \textbf{Global composition}: The recursive structure means deep mismatches contribute through their parent's cost matrix---a mismatch at depth $d$ affects ancestor similarity scores multiplicatively through the recursion. (3) \textbf{Depth-decay} (optional): $\gamma_{\text{ins/del}}$ can include factor $\lambda^d$ to weight shallow mismatches more heavily; we use $\lambda=1$ (uniform) by default.
+
+\section{Dataset Characteristics and Distribution Analysis}
+\label{sec:dataset-distribution}
+
+We provide a comprehensive analysis of the 75 valid ShareGPT samples used for benchmarking and synthetic validation. From 80 initial samples, 5 were excluded due to malformed ground truth JSON, leaving 75 valid samples that generated our 2,400 synthetic test cases. This analysis demonstrates the representativeness and diversity of our dataset across multiple dimensions of JSON structural complexity.
+
+\subsection{Structural Complexity Distribution}
+\label{subsec:structural-complexity}
+
+The distribution of JSON depths across our base samples shows the majority (58.7\%) at depth 4, aligning with typical enterprise API structures. Depths range from 2 (10.7\%, simple flat structures) to 7 (1.3\%, maximum complexity). Mean depth: 4.0$\pm$1.0.
+
+Field count distribution demonstrates coverage from simple configurations to complex documents: 1--10 fields (8.0\%), 11--25 fields (29.3\%), 26--50 fields (36.0\%, most common), 51--100 fields (21.3\%), and 100+ fields (5.3\%). Mean: 42.3$\pm$37.8 fields.
+
+\subsection{Field Type and Complexity Analysis}
+\label{subsec:field-type-analysis}
+
+Distribution of field types across all samples: String (7,276, 68.2\%), Integer (1,968, 18.4\%), Array (907, 8.5\%), Object (524, 4.9\%).
+
+Statistical summary of complexity metrics: Max Depth (min 2, max 7, mean 4.0$\pm$1.0), Total Fields (min 4, max 228, mean 42.3$\pm$37.8), Total Nodes (min 10, max 320, mean 64.2$\pm$44.9), Arrays (min 0, max 11, mean 4.7$\pm$2.7), Nested Objects (min 0, max 98, mean 12.1$\pm$13.6).
+
+\subsection{ShareGPT Structured Output Dataset Statistics}
+\label{subsec:sharegpt-statistics}
+
+Table~\ref{tab:sharegpt-dataset-stats} summarizes our ShareGPT evaluation dataset. From 80 initial samples, 5 were excluded due to malformed ground truth JSON (truncated or invalid syntax), leaving \textbf{75 valid samples} drawn from two ShareGPT-formatted datasets: \textit{Quiz Generation} (48 samples, 64.0\%) containing structured quiz questions with answers, and \textit{Structured Output} (27 samples, 36.0\%) containing various JSON generation tasks.
+
+\begin{table}[h]
+\centering
+\caption{ShareGPT Dataset Statistics}
+\label{tab:sharegpt-dataset-stats}
+\scriptsize
+\begin{tabular}{@{}lrl@{}}
+\toprule
+\textbf{Metric} & \textbf{Value} & \textbf{Details} \\
+\midrule
+\multicolumn{3}{l}{\textit{Sample Composition}} \\
+Total samples & 75 & (5 excluded$^\dagger$) \\
+\quad Quiz Generation & 48 & 64.0\% \\
+\quad Structured Output & 27 & 36.0\% \\
+\midrule
+\multicolumn{3}{l}{\textit{Structure Statistics}} \\
+Max depth & 4.0$\pm$1.0 & range 2--7 \\
+Total fields & 42.3$\pm$37.8 & range 4--228 \\
+Arrays per sample & 4.7$\pm$2.7 & range 0--11 \\
+Nested objects & 12.1$\pm$13.6 & range 0--98 \\
+\midrule
+\multicolumn{3}{l}{\textit{Field Type Distribution}} \\
+\quad string & 7,276 & 68.2\% \\
+\quad integer & 1,968 & 18.4\% \\
+\quad array & 907 & 8.5\% \\
+\quad object & 524 & 4.9\% \\
+\midrule
+\multicolumn{3}{l}{\textit{Input Characteristics}} \\
+Prompt length & 4,330$\pm$8,963 & mean$\pm$std (tokens) \\
+\quad Range & 172--73,522 & tokens \\
+\quad Median & 1,795 & tokens \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.3em}
+\raggedright\scriptsize $^\dagger$5 samples excluded due to malformed ground truth JSON (truncated data or invalid syntax).
+\end{table}
+
+\textbf{Structural Diversity.} The ShareGPT samples exhibit diverse structural complexity: depths range from 2 (simple flat structures) to 7 (deeply nested), with the majority (58.7\%) at depth 4, aligning with typical enterprise API structures. Field counts span from simple 4-field configurations to complex 228-field documents, ensuring evaluation across varied JSON complexity levels.
+
+\textbf{Input Characteristics.} ShareGPT prompts are substantially longer than Toucan queries (median 1,795 vs 105 tokens), reflecting detailed task descriptions and context. The high variance (std 8,963 tokens) spans from concise 172-token requests to comprehensive 73,522-token documents, testing models across diverse input complexity levels.
+
+\subsection{Toucan Tool Calling Dataset Statistics}
+\label{subsec:toucan-statistics}
+
+Table~\ref{tab:toucan-dataset-stats} summarizes our Toucan evaluation subset. The 1,006 samples are drawn from two single-turn subsets: \textit{single-turn-original} (515, 51.2\%) and \textit{single-turn-diversify} (491, 48.8\%), selected to focus on direct tool invocation without multi-turn conversation complexity.
+
+\begin{table}[h]
+\centering
+\caption{Toucan Dataset Statistics}
+\label{tab:toucan-dataset-stats}
+\scriptsize
+\begin{tabular}{@{}lrl@{}}
+\toprule
+\textbf{Metric} & \textbf{Value} & \textbf{Details} \\
+\midrule
+\multicolumn{3}{l}{\textit{Sample Composition}} \\
+Total samples & 1,006 & -- \\
+Unique tools & 993 & across all samples \\
+Tools per sample & 95.7 & mean available tools \\
+Multilingual & 56.4\% & non-ASCII queries \\
+\midrule
+\multicolumn{3}{l}{\textit{Tool Call Distribution}} \\
+Total calls & 1,583 & across all samples \\
+Calls per sample & 1.57 & mean (range 1--14) \\
+\quad 1 call & 61.9\% & 623 samples \\
+\quad 2 calls & 23.5\% & 236 samples \\
+\quad 3 calls & 11.9\% & 120 samples \\
+\quad 4+ calls & 2.7\% & 27 samples \\
+\midrule
+\multicolumn{3}{l}{\textit{Parameter Statistics}} \\
+Total parameters & 2,366 & across all calls \\
+Params per call & 1.48 & mean (range 0--19) \\
+\quad string & 48.7\% & 1,152 params \\
+\quad float & 24.8\% & 587 params \\
+\quad int & 18.2\% & 431 params \\
+\quad list & 4.3\% & 102 params \\
+\quad bool & 3.1\% & 73 params \\
+\quad dict & 0.9\% & 21 params \\
+\midrule
+\multicolumn{3}{l}{\textit{Query Characteristics}} \\
+Query length & 128$\pm$75 & mean$\pm$std (tokens) \\
+\quad Range & 13--563 & tokens \\
+\quad Median & 105 & tokens \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Tool Diversity.} The 993 unique tools span diverse domains including weather/forecasting, search/retrieval, mathematical computation, messaging, and data access operations. This diversity ensures evaluation across varied function calling scenarios rather than a narrow tool subset.
+
+\textbf{Parameter Complexity.} While 48.7\% of parameters are strings (suitable for semantic comparison), 5.2\% are complex types (lists and dicts) requiring STED's recursive structure handling. As shown in Table~\ref{tab:complexity-correlation}, these complex parameters are disproportionately represented in inconsistent samples (60$\times$ higher for nested structures), justifying STED's structure-aware approach.
+
+\textbf{Multilingual Coverage.} With 56.4\% of queries containing non-ASCII characters spanning Chinese, Japanese, Korean, and European languages, the dataset tests model consistency across linguistic contexts---an important consideration for global deployment.
+
+\subsection{Implementation and Reproducibility Details}
+\label{subsec:reproducibility}
+
+\textbf{Embedding Model.} We use Amazon Titan Text Embeddings v2 (\texttt{amazon.titan-embed-text-v2:0}) with 1024-dimensional vectors for semantic similarity computation. For local experiments and validation, we use \texttt{all-MiniLM-L6-v2} (384 dimensions) from Sentence-Transformers, which provides comparable semantic matching quality at lower computational cost. The choice of embedding model has minimal impact on STED's discrimination ability since we primarily compare short field names and values where most modern embedding models achieve similar performance.
+
+\textbf{Hyperparameters.} Default STED configuration: key weight $w = 0.5$ (equal weighting of key similarity and children similarity), stability steepness $\alpha = 20$ (Section~\ref{sec:ablation-steepness}), text chunking threshold 300 characters with 50-character overlap.
+
+\textbf{Random Seeds.} All experiments use seed 42 for reproducibility. For LLM generation, we use each provider's default sampling behavior at specified temperatures.
+
+\textbf{Computational Environment.} Experiments were conducted on AWS using Python 3.11. LLM API calls were made to respective cloud providers (Anthropic, AWS Bedrock, OpenAI, Google, etc.). STED computation runs in approximately 50ms per comparison for typical JSON structures (depth $\leq$ 5, $\leq$ 50 fields) on a single CPU core.
+
+\textbf{Code Availability.} Code and evaluation scripts will be released upon publication to facilitate reproducibility and enable further research.
+
+\section{Statistical Analysis Details}
+\label{sec:statistical-analysis}
+
+\subsection{Methodology}
+
+We performed comprehensive statistical validation using: \textbf{Paired t-tests}: Each of the 80 base samples was evaluated by all metrics on the same variations, enabling paired comparisons; \textbf{Bonferroni correction}: Applied for multiple comparisons ($\alpha = 0.05/30 = 0.0017$); \textbf{Effect size calculation}: Cohen's d to quantify practical significance; \textbf{Confidence intervals}: 95\% CIs computed using bootstrap with 1000 iterations.
+
+\subsection{Semantic Variations Results}
+
+For semantic variations (N=800): STED (mean 0.9539$\pm$0.0393, 95\% CI [0.9511, 0.9567]), BERTScore (0.9582$\pm$0.0249, [0.9564, 0.9600]), TED (1.0$\pm$0.0, constant), DeepDiff (0.7991$\pm$0.1647, [0.7873, 0.8109]).
+
+STED vs BERTScore: mean p = 0.600 (not significant), demonstrating statistically equivalent performance on semantic variations. STED vs TED and STED vs DeepDiff: p < 0.001*** (significant after Bonferroni correction).
+
+\subsection{Expression Variations Results}
+
+For expression variations (N=800): STED (0.9812$\pm$0.0174, [0.9799, 0.9824]), BERTScore (0.9595$\pm$0.0267, [0.9576, 0.9614]), TED (1.0$\pm$0.0), DeepDiff (0.8051$\pm$0.1644, [0.7934, 0.8169]).
+
+STED significantly outperforms all baselines (p < 0.001), demonstrating superior format-agnostic understanding. Lower standard deviation (0.0174) indicates more consistent performance.
+
+\subsection{Effect Size Analysis}
+
+Cohen's d effect sizes for STED comparisons:
+\begin{itemize}
+\item STED vs TED: d = -1.23 (semantic), -1.45 (expression) --- Large
+\item STED vs BERTScore: d = -0.12 (semantic, negligible), 0.82 (expression) --- Large
+\item STED vs DeepDiff: d = 1.26 (semantic), 1.38 (expression) --- Large
+\end{itemize}
+
+\section{Detailed Consistency Results}
+\label{sec:results}
+
+\subsection{ShareGPT Structured Output Results}
+\label{sec:sharegpt-results}
+
+We evaluate 18 models with complete results on 75 valid ShareGPT samples across 11 temperatures (0.0--1.0), yielding 8,250 outputs per model (75 samples $\times$ 10 runs $\times$ 11 temperatures). Table~\ref{tab:consistency-summary} shows aggregated stability metrics, and Table~\ref{tab:overall-consistency-temp} provides stability scores ($S_\alpha$) by temperature.
+
+\begin{table}[h]
+\centering
+\caption{ShareGPT: Aggregated Stability Score (Mean$\pm$SD across temperatures, 75 samples, 18 models)}
+\label{tab:consistency-summary}
+\scriptsize
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Model} & \textbf{Overall} & \textbf{Semantic} & \textbf{Structural} & \textbf{Valid.} \\
+\midrule
+Claude-Opus-4.5 & \textbf{.601$\pm$.103} & \textbf{.555} & \textbf{.819} & 96.3\% \\
+Claude-Sonnet-4.5 & .579$\pm$.138 & .528 & .780 & 89.5\% \\
+Claude-Opus-4 & .548$\pm$.156 & .509 & .790 & 97.7\% \\
+Claude-Sonnet-4 & .544$\pm$.066 & .476 & .747 & 71.8\% \\
+Claude-Haiku-4.5 & .528$\pm$.171 & .465 & .696 & \textbf{100.0\%} \\
+Claude-3.5-Haiku & .500$\pm$.197 & .429 & .734 & 99.1\% \\
+Claude-3.7-Sonnet & .499$\pm$.063 & .429 & .781 & \textbf{100.0\%} \\
+Claude-3.5-Sonnet & .486$\pm$.050 & .422 & .765 & \textbf{100.0\%} \\
+Gemini-2.5-Flash-Lite & .453$\pm$.200 & .407 & .651 & \textbf{100.0\%} \\
+GPT-4.1-Mini & .431$\pm$.096 & .377 & .611 & \textbf{100.0\%} \\
+Qwen3-235B-A22B & .422$\pm$.049 & .359 & .634 & \textbf{100.0\%} \\
+Qwen3-32B & .363$\pm$.115 & .289 & .639 & 96.8\% \\
+Grok-4.1-Fast & .345$\pm$.017 & .278 & .589 & 97.1\% \\
+Llama-3.3-70B & .342$\pm$.078 & .275 & .649 & 98.3\% \\
+Nova-2-Lite & .325$\pm$.057 & .273 & .519 & \textbf{100.0\%} \\
+GPT-OSS-120B & .305$\pm$.035 & .245 & .493 & \textbf{100.0\%} \\
+Mimo-V2-Flash & .258$\pm$.045 & .204 & .459 & 74.4\% \\
+Minimax-M2 & .233$\pm$.082 & .170 & .443 & 98.2\% \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.3em}
+\raggedright\small Sorted by overall stability. Bold: best in column.
+\end{table}
+
+\begin{table*}[t]
+\centering
+\caption{ShareGPT Structured Output: Stability Score ($S_\alpha$, hybrid $w{=}0.5$) by Temperature (75 samples, 18 models)}
+\label{tab:overall-consistency-temp}
+\scriptsize
+\begin{tabular}{@{}lccccccccccc@{}}
+\toprule
+\textbf{Model} & \textbf{T=0.0} & \textbf{T=0.1} & \textbf{T=0.2} & \textbf{T=0.3} & \textbf{T=0.4} & \textbf{T=0.5} & \textbf{T=0.6} & \textbf{T=0.7} & \textbf{T=0.8} & \textbf{T=0.9} & \textbf{T=1.0} \\
+\midrule
+Gemini-2.5-Flash-Lite & \textbf{.988} & .552 & .506 & .438 & .424 & .371 & .368 & .351 & .320 & .348 & .316 \\
+Claude-3.5-Haiku & .981 & .631 & .558 & .520 & .486 & .421 & .426 & .427 & .411 & .338 & .305 \\
+Claude-Haiku-4.5 & .965 & .634 & .556 & .553 & .506 & .479 & .445 & .426 & .432 & .420 & .388 \\
+Claude-Opus-4 & .934 & .672 & .599 & .564 & .488 & .519 & .488 & .475 & .442 & .440 & .406 \\
+Claude-Sonnet-4.5 & .905 & .664 & .627 & .591 & .574 & .545 & .539 & .486 & .482 & .489 & .471 \\
+Claude-Opus-4.5 & .797 & \textbf{.721} & \textbf{.646} & \textbf{.647} & \textbf{.614} & \textbf{.583} & \textbf{.544} & \textbf{.547} & \textbf{.483} & \textbf{.497} & \textbf{.531} \\
+Claude-Sonnet-4 & .668 & .635 & .637 & .527 & .529 & .514 & .536 & .468 & .511 & .494 & .468 \\
+GPT-4.1-Mini & .615 & .525 & .498 & .455 & .460 & .389 & .400 & .366 & .373 & .345 & .315 \\
+Qwen3-32B & .582 & .504 & .444 & .386 & .365 & .343 & .324 & .291 & .281 & .246 & .227 \\
+Claude-3.7-Sonnet & .581 & .573 & .586 & .569 & .529 & .467 & .470 & .429 & .431 & .424 & .429 \\
+Claude-3.5-Sonnet & .565 & .539 & .531 & .514 & .509 & .494 & .471 & .464 & .446 & .409 & .406 \\
+Qwen3-235B-A22B & .508 & .473 & .477 & .463 & .425 & .417 & .374 & .374 & .390 & .384 & .356 \\
+Llama-3.3-70B & .494 & .458 & .400 & .356 & .349 & .314 & .318 & .287 & .254 & .282 & .256 \\
+Nova-2-Lite & .439 & .374 & .389 & .354 & .315 & .310 & .312 & .292 & .277 & .254 & .262 \\
+Grok-4.1-Fast & .367 & .335 & .382 & .341 & .354 & .329 & .322 & .328 & .355 & .356 & .331 \\
+GPT-OSS-120B & .367 & .343 & .295 & .326 & .319 & .310 & .302 & .299 & .287 & .251 & .251 \\
+Minimax-M2 & .356 & .329 & .318 & .296 & .270 & .223 & .213 & .165 & .157 & .125 & .111 \\
+Mimo-V2-Flash & .309 & .310 & .334 & .295 & .273 & .244 & .230 & .241 & .222 & .187 & .190 \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.5em}
+\raggedright\small Sorted by overall stability. Bold: best in column.
+\end{table*}
+
+\begin{table}[h]
+\centering
+\caption{ShareGPT Structured Output: Validity Rate by Temperature (\%)}
+\label{tab:sharegpt-validity-temp}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+\textbf{Model} & \textbf{T=0.0} & \textbf{T=0.2} & \textbf{T=0.4} & \textbf{T=0.6} & \textbf{T=0.8} & \textbf{T=1.0} \\
+\midrule
+Nova-2-Lite & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} \\
+Gemini-2.5-Flash-Lite & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} \\
+GPT-4.1-Mini & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} \\
+GPT-OSS-120B & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} \\
+Claude-Haiku-4.5 & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} \\
+Claude-3.7-Sonnet & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & 99.9 \\
+Claude-3.5-Sonnet & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} & 99.9 \\
+Qwen3-235B-A22B & \textbf{100.0} & \textbf{100.0} & 99.9 & \textbf{100.0} & \textbf{100.0} & \textbf{100.0} \\
+Claude-3.5-Haiku & 99.6 & 99.0 & 99.6 & 99.2 & 98.4 & 99.9 \\
+Llama-3.3-70B & 99.6 & 97.8 & 99.4 & 98.0 & 98.0 & 96.9 \\
+Grok-4.1-Fast & 98.1 & 97.9 & 97.9 & 98.5 & 94.6 & 94.4 \\
+Minimax-M2 & 96.6 & 95.0 & 99.2 & 98.5 & 98.5 & 99.4 \\
+Claude-Opus-4 & 96.2 & 98.4 & 98.5 & 98.1 & 97.4 & 98.5 \\
+Qwen3-32B & 96.2 & 96.6 & 96.8 & 97.2 & 97.2 & 97.1 \\
+Claude-Opus-4.5 & 96.4 & 96.8 & 96.0 & 95.9 & 95.2 & 96.6 \\
+Claude-Sonnet-4.5 & 91.0 & 87.2 & 89.4 & 89.2 & 91.2 & 92.1 \\
+Mimo-V2-Flash & 74.9 & 74.1 & 74.5 & 74.1 & 74.1 & 74.2 \\
+Claude-Sonnet-4 & 72.9 & 69.8 & 70.6 & 71.8 & 72.5 & 72.2 \\
+\bottomrule
+\end{tabular}%
+}
+
+\vspace{0.3em}
+\raggedright\scriptsize Sorted by avg validity. Bold: 100\%. 18 models evaluated on 75 samples.
+\end{table}
+
+\textbf{Structural vs Semantic Consistency.} For structured output tasks, structural consistency (schema adherence) is critical for downstream processing, while semantic consistency (content similarity) reflects value stability. Tables~\ref{tab:sharegpt-structural-temp} and~\ref{tab:sharegpt-semantic-temp} decompose STED into these components.
+
+\begin{table*}[t]
+\centering
+\caption{ShareGPT Structured Output: Structural Stability ($S_\alpha$, $w{=}1.0$) by Temperature (75 samples, 18 models)}
+\label{tab:sharegpt-structural-temp}
+\scriptsize
+\begin{tabular}{@{}lccccccccccc@{}}
+\toprule
+\textbf{Model} & \textbf{T=0.0} & \textbf{T=0.1} & \textbf{T=0.2} & \textbf{T=0.3} & \textbf{T=0.4} & \textbf{T=0.5} & \textbf{T=0.6} & \textbf{T=0.7} & \textbf{T=0.8} & \textbf{T=0.9} & \textbf{T=1.0} \\
+\midrule
+Gemini-2.5-Flash-Lite & \textbf{.988} & .716 & .685 & .640 & .636 & .612 & .611 & .583 & .562 & .593 & .542 \\
+Claude-3.5-Haiku & .988 & .814 & .806 & .778 & .749 & .704 & .718 & .737 & .705 & .587 & .574 \\
+Claude-Haiku-4.5 & .982 & .748 & .706 & .712 & .670 & .665 & .646 & .633 & .636 & .634 & .633 \\
+Claude-Opus-4 & .967 & .796 & .726 & .752 & .681 & .730 & .708 & .698 & .678 & .699 & .666 \\
+Claude-Sonnet-4.5 & .946 & .844 & .816 & .764 & .792 & .778 & .753 & .740 & .726 & .735 & .706 \\
+Claude-Opus-4.5 & .891 & \textbf{.884} & \textbf{.832} & \textbf{.846} & \textbf{.823} & \textbf{.830} & \textbf{.781} & \textbf{.807} & \textbf{.758} & \textbf{.770} & \textbf{.784} \\
+Claude-Sonnet-4 & .821 & .809 & .811 & .718 & .739 & .720 & .749 & .710 & .720 & .706 & .693 \\
+Claude-3.5-Sonnet & .806 & .787 & .795 & .787 & .793 & .768 & .775 & .753 & .729 & .717 & .712 \\
+Claude-3.7-Sonnet & .802 & .795 & .843 & .842 & .808 & .755 & .795 & .735 & .766 & .730 & .731 \\
+Qwen3-32B & .789 & .743 & .731 & .695 & .665 & .657 & .614 & .566 & .572 & .533 & .514 \\
+Llama-3.3-70B & .769 & .745 & .711 & .676 & .673 & .656 & .664 & .614 & .593 & .605 & .576 \\
+GPT-4.1-Mini & .753 & .696 & .667 & .640 & .636 & .578 & .574 & .571 & .570 & .549 & .494 \\
+Qwen3-235B-A22B & .690 & .688 & .674 & .652 & .618 & .651 & .598 & .593 & .619 & .617 & .580 \\
+Grok-4.1-Fast & .602 & .588 & .608 & .552 & .589 & .603 & .578 & .567 & .587 & .607 & .621 \\
+Minimax-M2 & .598 & .520 & .522 & .540 & .514 & .405 & .431 & .385 & .353 & .266 & .243 \\
+Nova-2-Lite & .586 & .523 & .579 & .540 & .566 & .539 & .520 & .479 & .461 & .444 & .479 \\
+GPT-OSS-120B & .564 & .540 & .466 & .513 & .500 & .505 & .481 & .502 & .465 & .457 & .431 \\
+Mimo-V2-Flash & .491 & .491 & .517 & .455 & .474 & .452 & .449 & .428 & .443 & .421 & .398 \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.5em}
+\raggedright\small Sorted by T=0.0 structural stability. Bold: best in column.
+\end{table*}
+
+\begin{table*}[t]
+\centering
+\caption{ShareGPT Structured Output: Semantic Stability ($S_\alpha$, $w{=}0.0$) by Temperature (75 samples, 18 models)}
+\label{tab:sharegpt-semantic-temp}
+\scriptsize
+\begin{tabular}{@{}lccccccccccc@{}}
+\toprule
+\textbf{Model} & \textbf{T=0.0} & \textbf{T=0.1} & \textbf{T=0.2} & \textbf{T=0.3} & \textbf{T=0.4} & \textbf{T=0.5} & \textbf{T=0.6} & \textbf{T=0.7} & \textbf{T=0.8} & \textbf{T=0.9} & \textbf{T=1.0} \\
+\midrule
+Gemini-2.5-Flash-Lite & \textbf{.989} & .533 & .465 & .395 & .369 & .336 & .316 & .290 & .257 & .285 & .250 \\
+Claude-3.5-Haiku & .981 & .582 & .481 & .452 & .415 & .345 & .342 & .331 & .329 & .266 & .242 \\
+Claude-Haiku-4.5 & .970 & .582 & .492 & .468 & .425 & .415 & .391 & .364 & .360 & .339 & .310 \\
+Claude-Opus-4 & .943 & \textbf{.673} & .586 & .528 & .446 & .458 & .430 & .418 & .385 & .372 & .361 \\
+Claude-Sonnet-4.5 & .902 & .653 & .586 & .553 & .529 & .511 & .496 & .433 & .419 & .431 & .404 \\
+Claude-Opus-4.5 & .767 & .706 & \textbf{.620} & \textbf{.594} & \textbf{.567} & \textbf{.521} & \textbf{.477} & \textbf{.490} & \textbf{.448} & \textbf{.452} & \textbf{.460} \\
+Claude-Sonnet-4 & .626 & .596 & .592 & .484 & .487 & .464 & .476 & .411 & .435 & .440 & .393 \\
+GPT-4.1-Mini & .590 & .474 & .465 & .400 & .407 & .337 & .325 & .311 & .305 & .282 & .258 \\
+Claude-3.7-Sonnet & .540 & .524 & .535 & .490 & .462 & .402 & .395 & .362 & .349 & .335 & .331 \\
+Claude-3.5-Sonnet & .517 & .503 & .498 & .448 & .452 & .418 & .404 & .397 & .370 & .325 & .319 \\
+Qwen3-32B & .514 & .434 & .372 & .304 & .300 & .282 & .238 & .219 & .208 & .166 & .156 \\
+Llama-3.3-70B & .446 & .414 & .337 & .303 & .287 & .236 & .257 & .232 & .194 & .202 & .169 \\
+Qwen3-235B-A22B & .445 & .398 & .415 & .388 & .355 & .364 & .317 & .303 & .348 & .321 & .304 \\
+Nova-2-Lite & .399 & .341 & .339 & .294 & .264 & .237 & .251 & .238 & .228 & .215 & .201 \\
+GPT-OSS-120B & .298 & .299 & .232 & .279 & .264 & .247 & .228 & .243 & .224 & .199 & .190 \\
+Grok-4.1-Fast & .291 & .264 & .308 & .278 & .286 & .257 & .254 & .269 & .303 & .300 & .254 \\
+Minimax-M2 & .274 & .270 & .265 & .223 & .194 & .165 & .157 & .118 & .108 & .081 & .076 \\
+Mimo-V2-Flash & .272 & .260 & .279 & .244 & .220 & .201 & .169 & .196 & .156 & .131 & .140 \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.5em}
+\raggedright\small Sorted by T=0.0 semantic stability. Bold: best in column.
+\end{table*}
+
+\textbf{Key Insight:} Structural stability is substantially higher than semantic stability (mean 0.78 vs 0.57 at T=0.0), indicating models maintain schema structure more reliably than content values. Critically, as temperature increases, structural stability degrades slowly (26\% decline to T=1.0) while semantic stability degrades more (53\% decline)---this differential is \textit{desirable} since schema should remain parseable while content diversity is expected at higher temperatures.
+
+\textbf{Key Observations:} Claude-Opus-4.5 leads overall stability (0.601$\pm$0.103), also achieving highest structural consistency (0.819) and semantic stability (0.555). Six models achieve 100\% validity: Claude-3.7-Sonnet, Claude-3.5-Sonnet, Claude-Haiku-4.5, Qwen3-235B-A22B, Gemini-2.5-Flash-Lite, and GPT-4.1-Mini. Temperature sensitivity varies widely: Claude-3.5-Haiku shows strongest decline (69\% drop in $S_\alpha$), while Grok-4.1-Fast exhibits exceptional stability (only 10\% decline). Llama-3.3-70B achieves high validity (98.3\%) on structured output but only 32.7\% on tool calling, demonstrating critical task-specific differences.
+
+\begin{table}[h]
+\centering
+\caption{Prompt Factors vs Consistency (ShareGPT, All Temperatures, N=75)}
+\label{tab:sharegpt-complexity-correlation}
+\scriptsize
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Factor} & \textbf{Consistent ($\geq$0.51)} & \textbf{Inconsistent ($\leq$0.35)} & \textbf{Ratio} \\
+\midrule
+\multicolumn{4}{l}{\textit{Prompt characteristics}} \\
+Question marks (avg) & 0.8 & 2.4 & 2.8$\times$ \\
+Prompt length (chars) & 15,298 & 15,877 & 1.0$\times$ \\
+Prose-heavy$^a$ & 5.0\% & 5.0\% & 1.0$\times$ \\
+\midrule
+Sample count & 20 (26\%) & 20 (26\%) & -- \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.3em}
+\raggedright\scriptsize $^a$Avg sentence $>$20 words, no structure markers. Quartile-based thresholds (Q1, Q3) across 18 models, all temperatures. Correlation (constraint score vs stability): $r = 0.03$, $p = 0.80$ (not significant).
+\end{table}
+
+\subsection{Toucan Tool Calling Results}
+\label{sec:toucan-full-results}
+
+We evaluate 18 final models on 1,006 Toucan samples across 11 temperatures (0.0--1.0), yielding 110,660 outputs per model (1,006 samples $\times$ 10 runs $\times$ 11 temperatures). Table~\ref{tab:toucan-full-temp} presents stability scores ($S_\alpha$) by temperature for all 18 models, extending the 12-model summary in main paper Table~\ref{tab:toucan-stability}. Table~\ref{tab:toucan-validity-temp} shows validity rates.
+
+\begin{table*}[t]
+\centering
+\caption{Toucan Tool Calling: Stability Score ($S_\alpha$) by Temperature (1,006 samples, 18 models)}
+\label{tab:toucan-full-temp}
+\scriptsize
+\begin{tabular}{@{}lccccccccccc@{}}
+\toprule
+\textbf{Model} & \textbf{T=0.0} & \textbf{T=0.1} & \textbf{T=0.2} & \textbf{T=0.3} & \textbf{T=0.4} & \textbf{T=0.5} & \textbf{T=0.6} & \textbf{T=0.7} & \textbf{T=0.8} & \textbf{T=0.9} & \textbf{T=1.0} \\
+\midrule
+Claude-Opus-4 & \textbf{.969} & \textbf{.941} & \textbf{.911} & \textbf{.899} & \textbf{.883} & \textbf{.862} & \textbf{.854} & \textbf{.830} & .827 & .802 & .802 \\
+Claude-Sonnet-4.5 & .959 & .883 & .842 & .814 & .809 & .789 & .778 & .766 & .738 & .736 & .719 \\
+Claude-Opus-4.5 & .950 & .904 & .866 & .846 & .830 & .809 & .794 & .783 & .780 & .770 & .760 \\
+Claude-Haiku-4.5 & .924 & .835 & .775 & .738 & .711 & .690 & .662 & .650 & .642 & .623 & .592 \\
+Claude-3.5-Haiku & .976 & .911 & .891 & .876 & .862 & .857 & .845 & .843 & .831 & .832 & .831 \\
+Claude-Sonnet-4 & .897 & .872 & .856 & .838 & .824 & .817 & .806 & .791 & .778 & .768 & .757 \\
+Claude-3.7-Sonnet & .897 & .887 & .879 & .878 & .868 & .863 & .861 & .848 & .852 & .842 & \textbf{.833} \\
+Claude-3.5-Sonnet & .894 & .886 & .880 & .858 & .857 & .838 & .844 & .835 & .821 & .811 & .815 \\
+Nova-2-Lite & .877 & .867 & .864 & .858 & .862 & .861 & .842 & .840 & \textbf{.842} & \textbf{.831} & .824 \\
+Mimo-V2-Flash & .771 & .752 & .736 & .728 & .698 & .666 & .650 & .629 & .607 & .583 & .547 \\
+Qwen3-235B-A22B & .746 & .747 & .744 & .723 & .725 & .713 & .689 & .667 & .647 & .628 & .609 \\
+Qwen3-32B & .709 & .704 & .680 & .667 & .638 & .629 & .607 & .587 & .551 & .533 & .520 \\
+GPT-OSS-120B & .642 & .639 & .645 & .616 & .627 & .621 & .591 & .594 & .573 & .577 & .575 \\
+Grok-4.1-Fast & .603 & .578 & .586 & .578 & .592 & .567 & .576 & .575 & .556 & .546 & .564 \\
+GPT-4.1-Mini & .559 & .549 & .555 & .539 & .576 & .609 & .596 & .583 & .587 & .563 & .564 \\
+Gemini-2.5-Flash-Lite & .541 & .538 & .532 & .524 & .422 & .493 & .494 & .511 & .471 & .490 & .456 \\
+Minimax-M2 & .538 & .541 & .516 & .506 & .478 & .482 & .448 & .440 & .421 & .393 & .370 \\
+Llama-3.3-70B & .436 & .429 & .433 & .429 & .459 & .449 & .458 & .451 & .469 & .471 & .477 \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.5em}
+\raggedright\small Higher = more stable. Sorted by T=0.0 stability. Full results for 18 models; main Table~\ref{tab:toucan-stability} shows 12 representative models.
+\end{table*}
+
+\begin{table}[h]
+\centering
+\caption{Toucan Tool Calling: Validity Rate by Temperature (\%)}
+\label{tab:toucan-validity-temp}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+\textbf{Model} & \textbf{T=0.0} & \textbf{T=0.2} & \textbf{T=0.4} & \textbf{T=0.6} & \textbf{T=0.8} & \textbf{T=1.0} \\
+\midrule
+Qwen3-235B-A22B & \textbf{98.1} & \textbf{98.1} & \textbf{98.1} & \textbf{98.1} & \textbf{98.1} & \textbf{98.1} \\
+Mimo-V2-Flash & 98.3 & 98.0 & 98.0 & 97.8 & 97.3 & 96.8 \\
+Claude-3.5-Haiku & 97.7 & 97.7 & 97.7 & 97.7 & 97.7 & 97.7 \\
+Claude-3.5-Sonnet & 97.5 & 97.4 & 97.4 & 97.4 & 97.5 & 97.4 \\
+Claude-Opus-4.5 & 97.7 & 97.7 & 97.6 & 97.5 & 95.7 & 95.1 \\
+Claude-Sonnet-4 & 97.2 & 97.1 & 97.0 & 97.0 & 97.0 & 97.0 \\
+Claude-Opus-4 & 97.0 & 96.9 & 97.1 & 97.1 & 97.2 & 97.2 \\
+Claude-Sonnet-4.5 & 96.9 & 96.8 & 96.9 & 96.8 & 96.8 & 96.8 \\
+Claude-3.7-Sonnet & 96.7 & 96.7 & 96.6 & 96.7 & 96.7 & 96.8 \\
+Qwen3-32B & 96.6 & 96.8 & 96.6 & 96.6 & 96.5 & 96.4 \\
+Nova-2-Lite & 96.6 & 96.5 & 96.6 & 96.5 & 96.6 & 96.4 \\
+Claude-Haiku-4.5 & 95.3 & 95.4 & 95.2 & 95.2 & 95.3 & 95.0 \\
+Grok-4.1-Fast & 95.0 & 94.7 & 94.7 & 94.8 & 95.0 & 95.0 \\
+Minimax-M2 & 90.9 & 90.6 & 90.4 & 90.7 & 90.6 & 90.3 \\
+GPT-OSS-120B & 82.4 & 82.3 & 82.6 & 82.2 & 82.2 & 81.8 \\
+GPT-4.1-Mini & 75.8 & 76.0 & 76.0 & 76.0 & 75.9 & 75.9 \\
+Gemini-2.5-Flash-Lite & 54.2 & 54.3 & 45.3 & 53.3 & 53.7 & 52.4 \\
+Llama-3.3-70B & 32.5 & 32.0 & 32.7 & 32.6 & 32.9 & 32.5 \\
+\bottomrule
+\end{tabular}%
+}
+
+\vspace{0.3em}
+\raggedright\scriptsize Sorted by avg validity. Bold: highest. 18 models evaluated on 1,006 samples.
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Toucan Tool Calling: Inconsistency Pattern Analysis at T=0.5 (1,006 samples)}
+\label{tab:inconsistency-patterns}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+\textbf{Model} & \textbf{Consist.} & \textbf{Tool Sel.} & \textbf{Param.} & \textbf{Count} & \textbf{Malf.} & \textbf{Uniq} \\
+\midrule
+Llama-3.3-70B & 88.0\% & 1.8\% & 10.0\% & 0.0\% & 0.2\% & 1.38 \\
+Claude-Opus-4 & 74.8\% & 7.6\% & 16.3\% & 5.3\% & 1.5\% & 2.05 \\
+Nova-2-Lite & 73.7\% & 6.8\% & 18.5\% & 5.6\% & 1.5\% & 2.05 \\
+Claude-3.5-Haiku & 72.9\% & 7.9\% & 17.6\% & 5.1\% & 1.3\% & 2.16 \\
+Claude-3.7-Sonnet & 71.8\% & 7.2\% & 20.4\% & 0.0\% & 1.3\% & 2.10 \\
+Claude-3.5-Sonnet & 71.5\% & 10.8\% & 16.0\% & 6.4\% & 1.3\% & 2.18 \\
+Gemini-2.5-Flash-Lite & 71.6\% & 16.4\% & 10.0\% & 13.4\% & 1.5\% & 1.72 \\
+Claude-Sonnet-4 & 70.0\% & 11.0\% & 17.5\% & 9.5\% & 1.9\% & 2.18 \\
+Claude-Haiku-4.5 & 60.7\% & 18.2\% & 16.9\% & 20.7\% & 2.1\% & 2.50 \\
+Qwen3-235B-A22B & 59.7\% & 17.4\% & 17.5\% & 20.2\% & 1.9\% & 2.72 \\
+Claude-Opus-4.5 & 67.2\% & 11.5\% & 17.4\% & 13.4\% & 2.2\% & 2.46 \\
+Claude-Sonnet-4.5 & 67.1\% & 11.7\% & 16.8\% & 13.8\% & 2.0\% & 2.41 \\
+Mimo-V2-Flash & 55.0\% & 24.2\% & 18.8\% & 20.8\% & 1.9\% & 2.61 \\
+Qwen3-32B & 48.0\% & 14.1\% & 36.0\% & 11.0\% & 1.5\% & 2.88 \\
+GPT-OSS-120B & 48.6\% & 24.9\% & 19.2\% & 10.7\% & 30.9\% & 2.29 \\
+GPT-4.1-Mini & 47.4\% & 14.9\% & 15.8\% & 13.0\% & 26.0\% & 2.28 \\
+Grok-4.1-Fast & 45.1\% & 36.8\% & 15.7\% & 35.8\% & 9.2\% & 3.21 \\
+Minimax-M2 & 41.0\% & 37.9\% & 19.1\% & 30.1\% & 2.2\% & 3.33 \\
+\bottomrule
+\end{tabular}%
+}
+
+\vspace{0.3em}
+\raggedright\scriptsize Consist.: identical outputs across all runs. Tool Sel.: different tools. Param.: different parameter values. Count: different tool call count. Malf.: parsing errors. Uniq: avg unique outputs.
+\end{table}
+
+\subsection{Summary and Recommendations}
+
+\textbf{Temperature Selection:} T=0.1--0.3 provides optimal consistency for both tasks. T=0.4--0.6 offers acceptable trade-off between diversity and consistency. T=0.7--0.9 significantly degrades consistency, especially semantic preservation.
+
+\textbf{Model Selection:} For structured output requiring high consistency, Claude-3.7-Sonnet excels on both tasks. For tool calling specifically, Claude-Opus-4 achieves highest peak consistency (0.948). For validity-critical applications, Qwen3-235B-A22B leads (98.1\% on Toucan, 100\% on ShareGPT).
+
+\textbf{Task-Specific Considerations:} Models exhibit dramatically different performance across tasks---Llama-3.3-70B achieves 99\% validity on structured output but only 33\% on tool calling. Always evaluate on task-specific benchmarks rather than relying on general capabilities.
+
+\begin{table}[h]
+\centering
+\caption{Parameter Complexity Correlation with Inconsistency (Toucan, T=0.5)}
+\label{tab:complexity-correlation}
+\scriptsize
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Parameter Type} & \textbf{Consistent} & \textbf{Inconsistent} & \textbf{Ratio} \\
+\midrule
+Has Nested Structure & 0.1\% & 6.4\% & 60$\times$ \\
+Has Dict Params & 0.6\% & 7.5\% & 12.5$\times$ \\
+Has List Params & 3.5\% & 12.1\% & 3.4$\times$ \\
+Has Any Complex Type & 4.1\% & 16.4\% & 4.0$\times$ \\
+\midrule
+Mean Max Depth & 0.04 & 0.27 & 6.8$\times$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.5em}
+\raggedright\small Analysis across samples at T=0.5. Complex parameters are dramatically over-represented in inconsistent samples, justifying STED's structure-aware comparison.
+\end{table}
+
+\subsection{Consistency Diagnostics: Failure Pattern Taxonomy}
+\label{sec:sted-value-analysis}
+
+A central contribution of our diagnostics framework is characterizing \textit{how} LLM outputs fail to be consistent. While tool calling responses have a fixed structure (tool name + JSON arguments), analysis of inconsistent samples across models reveals four distinct failure categories:
+
+\textbf{1. String Parameter Variations (39.3\%):} The largest category involves semantically equivalent string values. STED's embedding-based comparison recognizes equivalence (e.g., \texttt{"matrix\_A"} $\approx$ \texttt{"matrix\_2s"}, \texttt{"user\_email"} $\approx$ \texttt{"email\_address"}), unlike exact matching which scores 0.
+
+\textbf{2. Tool Count Variations (35.4\%):} Models often generate different numbers of tool calls for the same query. STED handles uneven comparisons through insert/delete costs, providing proportional similarity rather than binary failure.
+
+\textbf{3. Tool Selection Variations (15.8\%):} Different tool subsets are chosen across runs. STED's Hungarian matching provides order-invariant comparison and proportional credit for partial overlap.
+
+\textbf{4. Complex Parameter Variations (5.6\%):} Lists and dictionaries in arguments require recursive structure comparison. While only 5.6\% of inconsistent samples, these are disproportionately represented: samples with nested structures are 60$\times$ more likely to be inconsistent (Table~\ref{tab:complexity-correlation}).
+
+\textbf{Parameter Type Distribution in Inconsistent Samples:} Among 4,631 differing parameters: strings 61.5\%, lists 13.9\%, integers 11.7\%, floats 6.8\%, dicts 3.5\%, booleans 2.5\%. By complexity: primitives 82.5\%, simple lists 10.8\%, nested structures 5.5\%, simple dicts 1.1\%.
+
+The key insight is that while most differing parameters are primitives, \textbf{samples containing complex structures are dramatically more likely to exhibit inconsistency}. This concentration of inconsistency in complex cases justifies STED's structure-aware, semantic approach over simpler exact-matching methods.
+
+\section{Implementation Optimizations}
+\label{sec:optimizations}
+
+We describe the key optimizations that reduce STED's time complexity from exponential to polynomial while maintaining accuracy.
+
+\subsection{Complexity Reduction}
+
+\begin{table}[h]
+\centering
+\caption{Time Complexity Reduction Through Optimizations}
+\label{tab:complexity-reduction}
+\scriptsize
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Component} & \textbf{Naive} & \textbf{Optimized} \\
+\midrule
+Subtree comparisons & $O(B^{2D})$ & $O(B^2 \times D)$ \\
+Per-level matching & $O(B^3)$ & $O(B^3)$ \\
+Combined variation & 2 passes & 1 pass \\
+\midrule
+\textbf{Total} & $O(B^{2D+3})$ & $O(B^3 \times D)$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.3em}
+\raggedright\small $B$: max branching factor, $D$: tree depth. For typical JSON ($B<50$, $D<10$), this reduces from $>10^{30}$ to $<10^{8}$ operations.
+\end{table}
+
+\subsection{Optimization Techniques}
+
+\textbf{1. LRU Memoization Cache.} Subtree comparisons are memoized using content-based hashes as keys. An LRU eviction policy bounds memory. Cache keys are tuples of subtree hashes; hits return cached results directly. This eliminates the exponential blowup from repeated subtree comparisons, reducing $O(B^{2D})$ to $O(B^2 \times D)$ unique comparisons.
+
+\textbf{2. Single-Pass Combined Matching.} For ``combined'' variation type (structural + content), we build both cost matrices in a single traversal over all child pairs, computing structural and content costs simultaneously. This halves the tree traversal cost compared to separate passes.
+
+\textbf{3. Lazy Hash Computation.} Node hashes for cache keys are computed lazily and cached by Python object ID, avoiding redundant hash computations during recursive traversal.
+
+\textbf{4. Embedding Precomputation.} The dominant cost is embedding computation (85\% of runtime on cache miss). We precompute embeddings for:
+\begin{itemize}
+\item Raw field names and values from all samples
+\item Preprocessed variants (e.g., \texttt{``userName''} $\rightarrow$ \texttt{``user name''})
+\end{itemize}
+This reduces embedding cache misses from 40\% to $<$1\%.
+
+\textbf{5. Optional: Greedy Matching.} For very large arrays ($B>100$), Hungarian's $O(B^3)$ becomes a bottleneck. An optional greedy approximation achieves $O(B^2)$ by iteratively matching each child to its best unmatched partner. Trade-off: 30$\times$ speedup but correlation drops from 0.96 to 0.70.
+
+\subsection{Benchmark Results}
+
+\begin{table}[h]
+\centering
+\caption{STED Performance Benchmarks (50 Toucan sample pairs)}
+\label{tab:optimization-benchmarks}
+\scriptsize
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Configuration} & \textbf{Time (s)} & \textbf{Speedup} & \textbf{Correlation} \\
+\midrule
+Naive (no cache) & 1.035 & 1.0$\times$ & 1.000 \\
+Optimized (cold cache) & 0.148 & 7.0$\times$ & 0.979 \\
+Optimized (warm cache) & 0.046 & 22.5$\times$ & 0.979 \\
+Greedy mode & 0.015 & 69$\times$ & 0.704 \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.3em}
+\raggedright\small Benchmarks on typical JSON structures (depth 4--7, 20--100 fields). Cold cache: first run; warm cache: repeated comparisons with precomputed embeddings.
+\end{table}
+
+\textbf{Accuracy Analysis.} The optimized algorithm maintains high fidelity:
+\begin{itemize}
+\item Mean Absolute Error vs naive: 0.027
+\item Max Absolute Error: 0.284 (rare edge cases)
+\item Pearson correlation: 0.979
+\end{itemize}
+
+The small accuracy difference stems from hash collisions in the memoization cache (different subtrees with identical hashes). \textbf{Important: All benchmark results reported in this paper use the exact (naive) implementation without caching optimizations}, ensuring collision-free computation. The optimizations are provided for production deployment where the speed-accuracy tradeoff is acceptable. For evaluation/benchmarking applications requiring exact reproducibility, we recommend disabling the subtree cache (\texttt{subtree\_cache\_size=0}).
+
+\subsection{Configuration Options}
+
+Key parameters: \texttt{subtree\_cache\_size} (default 10K, bounds LRU cache), \texttt{use\_greedy\_matching} (enables $O(B^2)$ approximation), \texttt{use\_fp16\_embeddings} (50\% memory reduction), \texttt{early\_pruning\_threshold} (skip threshold, default 0.8).
+
+\textbf{Recommendations:} (1) \textit{Production}: default settings; (2) \textit{Large datasets}: cache 50K, fp16 enabled; (3) \textit{Speed-critical}: greedy matching (30\% accuracy loss); (4) \textit{Memory-constrained}: cache 5K, fp16 enabled.
+
+\section{Stability Score Analysis}
+\label{sec:stability-analysis}
+
+We analyze how the stability score $S_{\alpha}$ varies across models and temperatures. The $\alpha$ ablation study is presented in Section~\ref{sec:ablation-steepness} of the main paper.
+
+\subsection{Steepness Parameter ($\alpha$) Analysis}
+
+Figure~\ref{fig:steepness-analysis} visualizes the effect of the steepness parameter $\alpha$ on stability score discrimination. The left panel shows how $S_\alpha$ varies with normalized standard deviation $\hat{\sigma}$ for different $\alpha$ values. Higher $\alpha$ produces steeper curves, amplifying differences between consistent (low $\hat{\sigma}$) and inconsistent (high $\hat{\sigma}$) outputs. The right panel shows discrimination (gap between $S_\alpha$ at $\hat{\sigma}=0.01$ and $\hat{\sigma}=0.10$) peaks at $\alpha \approx 15$, with $\alpha=20$ retaining 95\% of peak discrimination while providing better score range coverage.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\columnwidth]{figures/consistency_steepness_analysis.png}
+\caption{Effect of steepness parameter $\alpha$ on stability score. Left: $S_\alpha$ as a function of normalized variance $\hat{\sigma}$ for different $\alpha$ values. Right: Discrimination between consistent and inconsistent outputs peaks at $\alpha \approx 15$; we select $\alpha=20$ for balanced discrimination and score range.}
+\label{fig:steepness-analysis}
+\end{figure}
+
+\subsection{Stability Distribution Across Models}
+
+Figure~\ref{fig:appendix-stability} provides a comprehensive view of stability behavior across 18 LLMs on ShareGPT structured output tasks.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/appendix_stability_distribution.png}
+\caption{Stability score analysis across LLMs on ShareGPT structured output tasks. (a) Box plots showing the distribution of $S_{\alpha}$ for all 18 evaluated models, ordered by median stability. The gradient coloring (red to green) reflects ranking. (b) Temperature degradation curves for five representative models: Claude-Opus-4.5 (most capable proprietary), Qwen3-235B-A22B (most capable open-source), GPT-4.1-Mini (cost-effective), Grok-4.1-Fast (fast inference), and Nova-2-Lite (AWS). Higher temperature generally reduces stability, though degradation patterns vary by model architecture.}
+\label{fig:appendix-stability}
+\end{figure*}
+
+Key observations from Figure~\ref{fig:appendix-stability}:
+
+\begin{itemize}
+\item \textbf{Claude models dominate stability rankings}: Claude-Opus-4.5 achieves the highest median stability, followed by other Claude variants (3.5-Sonnet, Haiku-4.5, 3.5-Haiku).
+\item \textbf{Temperature sensitivity varies by model}: Claude-Opus-4.5 shows gradual degradation from $S_{\alpha} \approx 0.77$ (T=0.0) to $\approx 0.50$ (T=1.0), while Nova-2-Lite remains relatively flat across temperatures.
+\item \textbf{Open-source models show moderate stability}: Qwen3-235B-A22B and GPT-4.1-Mini achieve competitive stability scores, demonstrating that open-source models can match proprietary ones on this metric.
+\end{itemize}
+
+\subsection{Pareto Frontier Analysis}
+\label{sec:pareto-analysis}
+
+Figure~\ref{fig:pareto-frontier} visualizes the trade-off between adjusted consistency ($C_{adj} = r_v \times C_{mean}$) and stability ($S_\alpha$) for both tasks. Models in the upper-right region achieve the optimal balance of high consistency and high stability.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.48\textwidth]{figures/pareto_frontier_sharegpt.png}
+\hfill
+\includegraphics[width=0.48\textwidth]{figures/pareto_frontier_toucan.png}
+\caption{Pareto frontier analysis for ShareGPT (left) and Toucan (right). The x-axis shows adjusted consistency ($C_{adj} = r_v \times C_{mean}$), combining validity and mean similarity. The y-axis shows stability score ($S_\alpha$). Models on the Pareto frontier (green dashed line) represent optimal trade-offs. \textbf{Key insight}: Claude-Opus-4.5 and Claude-Opus-4 dominate both frontiers, while task-specific gaps are evident---Llama-3.3-70B achieves moderate consistency on ShareGPT but falls to the lower-left on Toucan due to low validity (33\%).}
+\label{fig:pareto-frontier}
+\end{figure*}
+
+\textbf{Task-Specific Patterns.} On ShareGPT, models cluster more tightly with Claude-Opus-4.5 achieving the best balance. On Toucan, the Claude family clearly dominates the Pareto frontier, with Nova-2-Lite as a strong mid-tier option. The dramatic position shift of Llama-3.3-70B between tasks (moderate on ShareGPT, bottom-left on Toucan) underscores the importance of task-specific evaluation.
+
+\subsection{Understanding $C_{\text{mean}}$, $S_\alpha$, and $R$: Illustrative Examples}
+\label{sec:metric-examples}
+
+To clarify the distinctions between our three aggregation metrics, we present concrete examples showing how different output distributions yield different metric values.
+
+\textbf{Setup.} Consider 5 LLM outputs for the same prompt, yielding 10 pairwise STED similarities $\{s_{ij}\}$.
+
+\begin{table}[h]
+\centering
+\caption{Illustrative Examples: How Output Distributions Affect Metrics}
+\label{tab:metric-examples}
+\scriptsize
+\begin{tabular}{@{}p{2.8cm}cccl@{}}
+\toprule
+\textbf{Scenario} & $C_{\text{mean}}$ & $S_\alpha$ & $R^*$ & \textbf{Interpretation} \\
+\midrule
+\textbf{A: Ideal} & & & & \\
+$s_{ij} \in [0.94, 0.96]$ & 0.95 & 0.99 & 0.94 & Consistently similar \\
+$\sigma = 0.007$ & & & & outputs every run \\
+\midrule
+\textbf{B: High mean,} & & & & \\
+\textbf{unstable} & 0.75 & 0.02 & 0.02 & Sometimes identical, \\
+$s_{ij} \in \{0.5, 1.0\}$ & & & & sometimes different--- \\
+$\sigma = 0.26$ & & & & \textit{unpredictable} \\
+\midrule
+\textbf{C: Low mean,} & & & & \\
+\textbf{stable} & 0.60 & 0.99 & 0.59 & Always moderately \\
+$s_{ij} \in [0.59, 0.61]$ & & & & different---\textit{predictable} \\
+$\sigma = 0.007$ & & & & \\
+\midrule
+\textbf{D: Low validity} & & & & \\
+$r_v = 0.70$ & 0.90 & 0.95 & 0.60 & Good when valid, but \\
+(30\% parse failures) & & & & 30\% failures penalized \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.3em}
+\raggedright\scriptsize $^*R = r_v \times C_{\text{mean}} \times S_\alpha$ (assuming $r_v = 1.0$ for scenarios A--C).
+\end{table}
+
+\textbf{Key Insights from Examples:}
+
+\begin{itemize}[leftmargin=*, nosep]
+\item \textbf{Scenario A} (Ideal): High similarity ($C_{\text{mean}}=0.95$) with low variance ($\sigma=0.007$) yields high stability ($S_\alpha=0.99$). This is the target for production deployment.
+
+\item \textbf{Scenario B} (Dangerous): Despite reasonable average similarity ($C_{\text{mean}}=0.75$), the high variance ($\sigma=0.26$) indicates the model is \textit{unpredictable}---sometimes outputs are identical, sometimes very different. The low $S_\alpha=0.02$ correctly flags this unreliability. \textit{This scenario is why $C_{\text{mean}}$ alone is insufficient.}
+
+\item \textbf{Scenario C} (Predictably inconsistent): Low average similarity ($C_{\text{mean}}=0.60$) but very stable variance means the model \textit{consistently} produces different outputs. While not ideal, this predictability may be acceptable for some applications.
+
+\item \textbf{Scenario D} (Validity matters): Even with excellent consistency among valid outputs ($C_{\text{mean}}=0.90$, $S_\alpha=0.95$), the 30\% parse failure rate reduces $R$ to 0.60, correctly penalizing unreliable generation.
+\end{itemize}
+
+\textbf{Real Model Examples (ShareGPT):}
+
+\begin{table}[h]
+\centering
+\caption{Real Model Comparison: Metric Decomposition at Different Temperatures}
+\label{tab:real-metric-examples}
+\scriptsize
+\begin{tabular}{@{}llcccc@{}}
+\toprule
+\textbf{Model} & \textbf{Temp} & $r_v$ & $C_{\text{mean}}$ & $S_\alpha$ & $R$ \\
+\midrule
+\multicolumn{6}{l}{\textit{Temperature effect on same model:}} \\
+Claude-3.5-Haiku & T=0.0 & 1.00 & 0.82 & 0.98 & \textbf{0.80} \\
+Claude-3.5-Haiku & T=0.5 & 0.99 & 0.82 & 0.42 & 0.34 \\
+Claude-3.5-Haiku & T=1.0 & 0.99 & 0.75 & 0.30 & 0.24 \\
+\midrule
+\multicolumn{6}{l}{\textit{Validity impact:}} \\
+Claude-Opus-4.5 & T=0.0 & 0.96 & 0.78 & 0.80 & 0.63 \\
+Claude-Sonnet-4 & T=0.0 & 0.73 & 0.77 & 0.67 & 0.40 \\
+\midrule
+\multicolumn{6}{l}{\textit{Temperature-robust model:}} \\
+Grok-4.1-Fast & T=0.0 & 0.98 & 0.78 & 0.37 & 0.28 \\
+Grok-4.1-Fast & T=1.0 & 0.94 & 0.78 & 0.33 & 0.24 \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.3em}
+\raggedright\scriptsize Key insight: $C_{\text{mean}}$ barely changes with temperature (0.82→0.75 for Claude-3.5-Haiku), but $S_\alpha$ drops dramatically (0.98→0.30). Grok-4.1-Fast shows temperature robustness but lower baseline stability.
+\end{table}
+
+\textbf{Practical Guidance:}
+\begin{itemize}[leftmargin=*, nosep]
+\item Use $R$ for \textbf{model selection}---it captures all reliability dimensions
+\item Monitor $C_{\text{mean}}$ for \textbf{drift detection}---baseline and alert on deviation
+\item Check $S_\alpha$ to identify \textbf{unpredictable models}---low $S_\alpha$ with moderate $C_{\text{mean}}$ is a red flag
+\item Track $r_v$ separately for \textbf{format compliance}---some applications require 100\% validity
+\end{itemize}
+
+\end{document}

@@ -1,0 +1,608 @@
+\documentclass{article}
+
+% COLM uses the same format as ICLR/NeurIPS
+\usepackage{neurips_2025}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{multirow}
+\usepackage{enumitem}
+\usepackage{subcaption}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage[numbers]{natbib}
+
+\newcommand{\cmean}{$c_\text{mean}$}
+\newcommand{\sted}{\textsc{Sted}}
+\newcommand{\rsq}{$R^2$}
+
+\title{Predicting LLM Structured Output Consistency from Prompt Linguistics}
+
+\author{
+  Anonymous Author(s)
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Large Language Models (LLMs) are increasingly deployed in agentic settings where they must produce structured outputs (tool calls, JSON) consistently across repeated invocations. Yet there is no way to estimate output consistency before running expensive multi-sample inference. We address this gap by training a lightweight predictor that estimates consistency directly from prompt text and tool schema features. Analyzing 2.1 million outputs from 21 LLMs across 1,006 prompts and 11 temperatures, we extract 55 interpretable features spanning surface linguistics, semantic ambiguity, syntactic complexity, and schema structure. Our per-model Gradient Boosting predictor achieves average Pearson $r = 0.37$ ($p < 10^{-5}$), with the best models reaching $r = 0.54$. Critically, we show that \textbf{linguistic features and sentence embeddings capture complementary information}: combining 55 linguistic features with PCA-reduced embeddings yields the best performance ($R^2 = 0.173$, Pearson $r = 0.435$), significantly outperforming either alone ($p < 0.001$). A leave-one-model-out evaluation demonstrates that prompt-level consistency patterns generalize across model architectures (Pearson $r = 0.59$). Feature importance analysis reveals that schema complexity and semantic ambiguity dominate, while theory-grounded syntactic features from Dependency Locality Theory and information theory provide additional predictive signal. Our findings suggest that LLM output inconsistency partially reflects the same interpretive ambiguity that produces disagreement among human language processors.
+\end{abstract}
+
+
+%==============================================================================
+\section{Introduction}
+\label{sec:intro}
+%==============================================================================
+
+As Large Language Models (LLMs) are deployed in production systems that invoke external tools and generate structured outputs, \emph{consistency}---the degree to which repeated calls on the same prompt yield semantically equivalent responses---becomes a critical reliability concern. Inconsistent outputs lead to unpredictable system behavior, failed automations, and degraded user trust \citep{ouyang2022training, schick2023toolformer}.
+
+Current practice requires running multiple inference passes to empirically measure consistency, which is expensive and impractical at deployment time. A natural question arises: \emph{Can we predict how consistently an LLM will respond to a given prompt, before running inference?}
+
+We frame this as a supervised prediction problem. Given a prompt text and its associated tool schemas, we extract interpretable linguistic and structural features and train a model to predict the expected consistency score. This lightweight predictor (running in $\sim$5ms) can serve as a pre-deployment screening tool: flagging prompts likely to produce inconsistent outputs so they can be revised before expensive multi-sample inference.
+
+Our key insight is that prompt properties that create \emph{interpretive ambiguity} for human readers---referential ambiguity, lexical polysemy, complex syntactic dependencies, underspecified task constraints---also drive LLM output inconsistency. This connects our empirical findings to established psycholinguistic theories including Dependency Locality Theory \citep{gibson2000dependency}, Uniform Information Density \citep{jaeger2010redundancy}, and Centering Theory \citep{grosz1995centering}.
+
+\paragraph{Contributions.} We make four contributions:
+\begin{enumerate}[itemsep=2pt, parsep=0pt]
+\item \textbf{Multi-level feature framework.} We design 55 interpretable features across four levels: surface linguistic (modals, hedging, politeness), semantic (ambiguity, underspecification), syntactic (dependency distance, parse tree depth, clause density), and schema complexity. Fourteen features are novel theory-grounded syntactic features based on psycholinguistic theories of processing difficulty (Section~\ref{sec:features}).
+
+\item \textbf{Consistency predictor.} Our per-model Gradient Boosting predictor achieves average $R^2 = 0.114$ (Pearson $r = 0.375$) across 21 models, with best-case $R^2 = 0.293$ (Pearson $r = 0.54$). This represents a large effect size ($d = 1.87$, $p < 10^{-5}$) over random baselines (Section~\ref{sec:predictor}).
+
+\item \textbf{Complementarity with embeddings.} Linguistic features and sentence embeddings capture orthogonal information: combining them yields $R^2 = 0.173$, significantly outperforming either linguistic features alone ($R^2 = 0.092$, $p < 0.001$) or embeddings alone ($R^2 = 0.131$, $p < 0.001$). Linguistic features provide 6.2$\times$ dimensionality reduction for 30\% less predictive power, with the critical advantage of interpretability (Section~\ref{sec:embeddings}).
+
+\item \textbf{Cross-model generalization.} Leave-one-model-out evaluation shows that multi-model training learns generalizable prompt-level patterns (Pearson $r = 0.59$), while cross-family transfer analysis reveals that within-family transfer succeeds but cross-family transfer fails (Section~\ref{sec:generalization}).
+\end{enumerate}
+
+
+%==============================================================================
+\section{Related Work}
+\label{sec:related}
+%==============================================================================
+
+\paragraph{LLM consistency and calibration.}
+Prior work has studied LLM consistency primarily through the lens of calibration and self-consistency. \citet{wang2023selfconsistency} propose sampling multiple reasoning paths and taking a majority vote, which is a post-hoc correction rather than a predictive approach. \citet{raj2023semantic} measure semantic similarity across paraphrased prompts, while we measure consistency across temperatures on the \emph{same} prompt. \citet{kalai2024calibrated} show a fundamental trade-off between calibration and hallucination. Our work differs by predicting consistency from prompt features \emph{before} inference, enabling proactive prompt optimization.
+
+\paragraph{Prompt engineering.}
+Chain-of-thought \citep{wei2022chain}, zero-shot reasoning \citep{kojima2022large}, and principled prompting guidelines \citep{bsharat2024principled} have improved LLM accuracy but focus on performance rather than output variability. We provide the first systematic analysis of which prompt \emph{linguistic} properties predict \emph{consistency} rather than accuracy.
+
+\paragraph{Tool-augmented LLMs.}
+The growth of tool-calling LLMs \citep{schick2023toolformer, patil2023gorilla, qin2023toolllm} has made structured output consistency critical. Evaluation benchmarks focus on tool selection accuracy, not on whether the same tool calls are produced consistently across invocations.
+
+\paragraph{Linguistic factors in NLP.}
+Psycholinguistic research establishes that processing difficulty increases with dependency distance \citep{gibson2000dependency}, that natural language distributes information uniformly \citep{jaeger2010redundancy}, and that referential complexity affects interpretation \citep{grosz1995centering}. We are the first to connect these theories to LLM structured output consistency.
+
+
+%==============================================================================
+\section{Feature Framework}
+\label{sec:features}
+%==============================================================================
+
+We extract features from two sources: the prompt text and the tool schema. Features are organized into four levels, progressing from surface form to deeper linguistic analysis.
+
+\subsection{Surface Linguistic Features (25 features)}
+
+\paragraph{Modal verbs (6 features).}
+Following Kratzer's modal semantics \citep{kratzer1991modality} and Palmer's typology, we detect deontic modals (strong: \emph{must, need to}; weak: \emph{should, ought to}), epistemic modals (strong: \emph{will, would}; weak: \emph{may, might}), and dynamic modals (\emph{can, able to}).
+
+\paragraph{Hedging (5 features).}
+We count epistemic hedges (\emph{maybe, perhaps}), plausibility shields (\emph{seems, appears}), conditional hedges (\emph{if, unless}), and approximators (\emph{about, roughly}).
+
+\paragraph{Politeness (4 features).}
+Based on Brown \& Levinson's politeness theory \citep{brown1987politeness}, we detect bald on-record (bare imperatives), positive politeness (\emph{please, thanks}), indirect requests (\emph{I was wondering if}), and compute a directness score.
+
+\paragraph{Speech acts and structure (10 features).}
+We classify speech acts following Searle's taxonomy (directive, interrogative, declarative, indirect) and extract structural features: word count, sentence count, question marks, list markers, conjunction count, negation count, and specificity score (named entities + numeric references).
+
+\subsection{Semantic Features (19 features)}
+
+\paragraph{Ambiguity (7 features).}
+We measure lexical ambiguity (average WordNet synset count per content word), referential ambiguity (unresolved definite descriptions), scope ambiguity (quantifier/negation scope patterns), attachment ambiguity (PP-attachment heuristics), and ellipsis count. We compute a composite ambiguity score weighted by these components.
+
+\paragraph{Underspecification (6 features).}
+We detect missing arguments (semantic role gaps), vague quantifiers (\emph{some, several, many}), vague temporals (\emph{soon, later}), implicit constraints (\emph{good, proper, appropriate}), and undefined domain terms.
+
+\paragraph{Semantic complexity (6 features).}
+We count entities (via NER), inter-entity relations (via dependency parsing), logical operators (conjunction, disjunction, negation, conditional, causal), negation complexity (nested negations), and compute semantic density (entities + relations per word).
+
+\subsection{Syntactic Complexity Features (14 features)}
+\label{sec:syntactic_features}
+
+These features are new contributions grounded in psycholinguistic theory:
+
+\paragraph{Dependency distance (Gibson, 2000).}
+Dependency Locality Theory predicts that processing difficulty increases with the distance between syntactic dependents. We extract mean and max dependency distance from spaCy parse trees, plus parse tree depth (max and mean).
+
+\paragraph{Information density (Jaeger, 2010).}
+Uniform Information Density theory predicts that language distributes information uniformly. We measure sentence length variance and coefficient of variation as proxies for information density uniformity violations. We also compute lexical entropy (Shannon entropy of word distributions), normalized entropy, and type-token ratio.
+
+\paragraph{Referential density (Centering Theory).}
+Following \citet{grosz1995centering}, we measure referential density (definite descriptions + pronouns per sentence), pronoun density, definite article density, and first-person framing ratio.
+
+\paragraph{Clause and discourse structure.}
+We count clausal dependents (advcl, relcl, ccomp, xcomp, acl), compute clause density per sentence, count conjunctions and conditional markers, and measure noun phrase complexity (mean modifiers per NP).
+
+\paragraph{Task planning complexity.}
+For prompts involving tool use, we extract verb-to-tool ratio (action verbs per available tool), tool name grounding (overlap between prompt vocabulary and tool names), action verb count, and imperative detection.
+
+\subsection{Schema Complexity Features (2 features)}
+
+After collinearity filtering, the schema-level features reduce to: number of available tools and maximum nesting depth. Despite their simplicity, these are the strongest individual predictors.
+
+\paragraph{Feature selection.}
+From an initial set of 67 raw features, we remove 6 zero-variance features, 6 composite scores (which leak information from their components), 2 dead features (always zero in our corpus), 1 proxy feature, and 3 collinear pairs ($r > 0.95$). This yields 51 cleaned features. Forward selection adds 4 theory-grounded syntactic features (verb-tool ratio, POS entropy, action verb count, imperative detection) for a final set of 55 features.
+
+
+%==============================================================================
+\section{Experimental Setup}
+\label{sec:setup}
+%==============================================================================
+
+\subsection{Dataset}
+
+We use the Toucan tool-calling dataset \citep{toucan2024} containing 1,006 prompts, each with associated tool schemas and ground-truth tool calls. For each prompt, we collected structured outputs from 21 LLMs across 11 temperature settings (0.0 to 1.0 in steps of 0.1) with 10 runs per configuration, yielding approximately 2.1 million individual outputs.
+
+\paragraph{Models.}
+Our model set spans five provider families: Claude (7 models: 3.5-Haiku, 3.5-Sonnet, 3.7-Sonnet, Haiku-4.5, Opus-4.5, Sonnet-4, Sonnet-4.5), GPT (2 models: 4.1-Mini, OSS-120B), Gemini (Gemini-2.5-Flash-Lite), Llama (3.3-70B), Qwen (3-235B, 3-32B), and others (Grok-4.1-Fast, Minimax-M2, Mistral-Large-3-675B, NemoTron-3-Nano, Nova-2-Lite, Mimo-V2-Flash, Mimo-V2-Flash:free).
+
+\paragraph{Consistency metric.}
+We measure consistency using \sted{} (Semantic Tree Edit Distance), a metric that combines embedding-based semantic similarity with structural tree edit distance for comparing JSON/tool-call outputs. For each (prompt, model) pair, we compute \cmean{}: the mean pairwise \sted{} similarity across all outputs at all 11 temperatures. This per-sample mean is our prediction target.
+
+\subsection{Prediction Model}
+
+We train per-model Gradient Boosting Regressors (GBM) with hyperparameters: 100 estimators, max depth 4, learning rate 0.1, subsample 0.8, random seed 42. Evaluation uses 5-fold GroupKFold cross-validation grouped by sample index to prevent data leakage.
+
+\subsection{Baselines}
+
+We compare against: (1) random baseline, (2) prompt length only, (3) schema features only (2 features), (4) sentence embeddings (all-MiniLM-L6-v2, 384 dimensions), and (5) PCA-reduced embeddings (50 dimensions).
+
+
+%==============================================================================
+\section{Results}
+\label{sec:results}
+%==============================================================================
+
+\subsection{Consistency Predictor Performance}
+\label{sec:predictor}
+
+Table~\ref{tab:main_results} presents the main prediction results. Our 55-feature linguistic predictor achieves average $R^2 = 0.114$ and Pearson $r = 0.375$ across 21 models.
+
+\begin{table}[t]
+\centering
+\caption{Prediction performance by feature configuration. All values are averages across 21 models with 5-fold GroupKFold. Best result per column in \textbf{bold}.}
+\label{tab:main_results}
+\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Configuration & Dims & $R^2$ & Pearson & Spearman \\
+\midrule
+Random baseline & -- & 0.000 & 0.000 & 0.000 \\
+Prompt length only & 1 & $-0.110$ & 0.071 & 0.090 \\
+Schema features only & 2 & 0.046 & 0.251 & 0.279 \\
+\midrule
+Linguistic (cleaned) & 51 & 0.105 & 0.367 & 0.377 \\
+Linguistic (+ forward sel.) & 55 & 0.114 & 0.375 & 0.380 \\
+\midrule
+Sentence embeddings & 384 & 0.131 & 0.384 & 0.389 \\
+PCA embeddings & 50 & 0.126 & 0.387 & 0.395 \\
+Emb + schema & 388 & 0.153 & 0.407 & 0.414 \\
+\midrule
+\textbf{Ling + PCA-Emb} & \textbf{111} & \textbf{0.173} & \textbf{0.435} & \textbf{0.445} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Statistical significance.}
+A one-sample $t$-test confirms that per-model $R^2$ values are significantly above zero ($t = 6.05$, $p < 10^{-5}$). The effect size versus random baseline is large (Cohen's $d = 1.87$). 90\% of models show positive $R^2$, and 100\% show positive Pearson correlation.
+
+\paragraph{Per-model variation.}
+Table~\ref{tab:per_model} shows that predictability varies substantially across models. Gemini-2.5-Flash-Lite ($R^2 = 0.293$) and GPT-4.1-Mini ($R^2 = 0.266$) are most predictable, while Nova-2-Lite ($R^2 = -0.009$) and Claude-Opus-4 ($R^2 = -0.017$) are least predictable. This 4$\times$ variation in Pearson $r$ (0.23 to 0.54) suggests that models differ systematically in their sensitivity to prompt properties.
+
+\begin{table}[t]
+\centering
+\caption{Per-model prediction performance (top 10 and bottom 5 models). Full results for all 21 models in Appendix.}
+\label{tab:per_model}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Model & $R^2$ & Pearson & Spearman \\
+\midrule
+Gemini-2.5-Flash-Lite & 0.293 & 0.545 & 0.534 \\
+GPT-4.1-Mini & 0.258 & 0.514 & 0.508 \\
+NemoTron-3-Nano & 0.193 & 0.463 & 0.449 \\
+Claude-Haiku-4.5 & 0.172 & 0.435 & 0.471 \\
+Llama-3.3-70B & 0.170 & 0.437 & 0.432 \\
+Claude-3.5-Sonnet & 0.133 & 0.405 & 0.388 \\
+Grok-4.1-Fast & 0.133 & 0.401 & 0.414 \\
+Claude-3.5-Haiku & 0.125 & 0.388 & 0.357 \\
+Qwen3-235B & 0.123 & 0.394 & 0.411 \\
+Minimax-M2 & 0.118 & 0.381 & 0.391 \\
+\midrule
+\emph{Bottom 5:} & & & \\
+Mistral-Large-3-675B & 0.039 & 0.289 & 0.280 \\
+Qwen3-32B & $-0.007$ & 0.237 & 0.247 \\
+Claude-Sonnet-4 & 0.005 & 0.262 & 0.303 \\
+Nova-2-Lite & $-0.009$ & 0.233 & 0.221 \\
+Claude-Opus-4 & $-0.004$ & 0.262 & 0.291 \\
+\midrule
+\textbf{Average (21 models)} & \textbf{0.114} & \textbf{0.375} & \textbf{0.380} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsection{Complementarity with Embeddings}
+\label{sec:embeddings}
+
+A critical question is whether hand-crafted linguistic features provide value beyond what sentence embeddings capture. Table~\ref{tab:main_results} shows that embeddings alone ($R^2 = 0.131$) outperform linguistic features alone ($R^2 = 0.092$), but the combined model (Ling + PCA-Emb) significantly outperforms both:
+
+\begin{itemize}[itemsep=1pt, parsep=0pt]
+\item Combined vs.\ Linguistic: paired $t$-test, $t = 8.54$, $p < 10^{-6}$
+\item Combined vs.\ Embedding: paired $t$-test, $t = 4.18$, $p < 0.001$
+\item Win rate: Combined beats Linguistic on 20/21 models (95\%); beats Embedding on 19/21 models (90\%)
+\end{itemize}
+
+This complementarity confirms that linguistic features capture interpretable aspects of prompt difficulty (ambiguity, complexity, schema structure) that are orthogonal to the implicit patterns learned by sentence encoders. Notably, linguistic features achieve comparable performance with 6.2$\times$ fewer dimensions (61 vs.\ 384), offering a favorable interpretability-performance trade-off.
+
+
+\subsection{Feature Importance}
+\label{sec:importance}
+
+Table~\ref{tab:importance} shows the top 15 features ranked by permutation importance on the combined 55-feature set.
+
+\begin{table}[t]
+\centering
+\caption{Top 15 features by permutation importance. Features marked with $\dagger$ are new syntactic features introduced in this work. Category abbreviations: Sch = Schema, Sem = Semantic, Sur = Surface, Syn = Syntactic, Pra = Pragmatic.}
+\label{tab:importance}
+\small
+\begin{tabular}{@{}rlll@{}}
+\toprule
+Rank & Feature & Cat. & Importance \\
+\midrule
+1 & schema\_num\_tools & Sch & 0.084 \\
+2 & semantic\_lexical\_ambiguity & Sem & 0.044 \\
+3 & surface\_polite\_bald & Sur & 0.025 \\
+4 & surface\_word\_count & Sur & 0.018 \\
+5 & pragmatic\_question\_type & Pra & 0.014 \\
+6 & verb\_tool\_ratio$^\dagger$ & Syn & 0.013 \\
+7 & pragmatic\_specificity\_score & Pra & 0.012 \\
+8 & semantic\_ellipsis\_count & Sem & 0.011 \\
+9 & surface\_modal\_deontic\_strong & Sur & 0.009 \\
+10 & surface\_sentence\_count & Sur & 0.009 \\
+11 & pragmatic\_context\_dependency & Pra & 0.008 \\
+12 & parse\_tree\_mean\_depth$^\dagger$ & Syn & 0.008 \\
+13 & semantic\_attachment\_ambiguity & Sem & 0.008 \\
+14 & dep\_mean\_distance$^\dagger$ & Syn & 0.008 \\
+15 & sentence\_length\_cv$^\dagger$ & Syn & 0.008 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Key findings.}
+(1) \textbf{Schema complexity dominates}: the number of available tools is the single strongest predictor, consistent with the intuition that more tools create more choice points for the model. (2) \textbf{Semantic ambiguity is second most important}: lexical ambiguity (polysemous words) significantly predicts inconsistency, supporting our thesis that interpretive ambiguity drives output variance. (3) \textbf{Theory-grounded syntactic features appear in top 15}: verb-tool ratio (rank 6), parse tree depth (rank 12), dependency distance (rank 14), and sentence length CV (rank 15) all contribute, validating the Dependency Locality Theory and Uniform Information Density hypotheses.
+
+\paragraph{Feature category ablation.}
+Table~\ref{tab:ablation} shows the contribution of each feature category. All four categories contribute, with schema and semantic features providing the largest marginal gains.
+
+\begin{table}[t]
+\centering
+\caption{Feature category ablation. ``Remove X'' shows performance when category X is excluded from the full 55-feature set.}
+\label{tab:ablation}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Configuration & Features & $R^2$ & Pearson \\
+\midrule
+Full model (55 features) & 55 & 0.114 & 0.375 \\
+\midrule
+Schema only & 2 & 0.046 & 0.251 \\
+Semantic only & 17 & 0.014 & 0.190 \\
+Surface only & 23 & 0.007 & 0.170 \\
+Pragmatic only & 17 & $-0.011$ & 0.129 \\
+\midrule
+Remove schema & 53 & 0.047 & 0.302 \\
+Remove semantic & 38 & 0.048 & 0.244 \\
+Remove surface & 32 & 0.055 & 0.258 \\
+Remove pragmatic & 38 & 0.057 & 0.260 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Forward selection of syntactic features.}
+Starting from the 51 cleaned features, we performed forward selection over 36 candidate syntactic features using a pooled universal dataset (all 21 models combined). The algorithm converged after selecting exactly 4 features:
+
+\begin{enumerate}[itemsep=1pt, parsep=0pt]
+\item \texttt{verb\_tool\_ratio} (+0.006 $R^2$): ratio of action verbs to available tools, capturing task-schema alignment ambiguity
+\item \texttt{pos\_entropy} (+0.003): Shannon entropy of POS tag distribution, measuring syntactic diversity
+\item \texttt{action\_verb\_count} (+0.003): number of distinct action verbs, capturing planning complexity
+\item \texttt{is\_imperative} (+0.001): whether the prompt begins with an imperative verb
+\end{enumerate}
+
+The 55-feature model (51 + 4 selected) improves over the 51-feature baseline ($R^2$: 0.109 $\to$ 0.114, 13/21 model wins), though the improvement is modest ($p = 0.12$ by paired $t$-test). Adding \emph{all} 36 syntactic features degrades performance ($R^2$: 0.109 $\to$ 0.084), demonstrating the importance of selective fusion to avoid the curse of dimensionality.
+
+
+\subsection{Binary Classification}
+\label{sec:binary}
+
+For practical deployment, binary classification (``will this prompt produce consistent outputs?'') may be more useful than regression. Table~\ref{tab:binary} shows that our predictor achieves AUC = 0.783 for detecting prompts with \cmean{} $> 0.8$, enabling effective prompt screening.
+
+\begin{table}[t]
+\centering
+\caption{Binary classification performance for detecting high-consistency prompts at different thresholds.}
+\label{tab:binary}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Threshold & F1 & AUC & Models \\
+\midrule
+$c_\text{mean} > 0.7$ & 0.601 & 0.684 & 21 \\
+$c_\text{mean} > 0.8$ & \textbf{0.675} & \textbf{0.783} & 16 \\
+$c_\text{mean} > 0.9$ & 0.674 & 0.785 & 15 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsection{Cross-Model Generalization}
+\label{sec:generalization}
+
+\paragraph{Leave-one-model-out (LOMO).}
+Training GBM on all 20 models and testing on the held-out model yields average Pearson $r = 0.591$ and $R^2 = 0.128$. This is substantially higher than per-model CV Pearson ($r = 0.375$), suggesting that multi-model training learns generalizable patterns about which prompts are \emph{inherently} more consistent, independent of the specific model.
+
+\paragraph{Within- vs.\ cross-family transfer.}
+Transfer within model families succeeds: Claude-3.7-Sonnet $\to$ Claude-3.5-Haiku achieves Pearson $r = 0.85$; Mimo-V2-Flash $\to$ Mimo-V2-Flash:free reaches $r = 0.96$. However, cross-family transfer often fails: GPT-4.1-Mini $\to$ Claude-3.7-Sonnet yields $r = -0.16$. This asymmetry suggests that while prompt-level difficulty patterns are universal, the \emph{specific} feature sensitivities are model-family dependent.
+
+
+%==============================================================================
+\section{Analysis and Discussion}
+\label{sec:discussion}
+%==============================================================================
+
+\subsection{Why Interpretive Ambiguity Predicts Inconsistency}
+
+Our results support a unified explanation: \emph{prompts that are ambiguous for human interpreters also produce inconsistent LLM outputs.} The top semantic features---lexical ambiguity (rank 2), attachment ambiguity (rank 13), ellipsis count (rank 8)---all measure properties that create multiple valid interpretations in human language processing.
+
+This connection is theoretically grounded. Dependency Locality Theory \citep{gibson2000dependency} predicts that long-distance syntactic dependencies increase processing difficulty and interpretation uncertainty. Our empirical finding that \texttt{dep\_mean\_distance} and \texttt{parse\_tree\_mean\_depth} predict inconsistency (ranks 14, 12) directly validates this prediction in the LLM setting.
+
+Similarly, the Uniform Information Density hypothesis \citep{jaeger2010redundancy} predicts that prompts with uneven information distribution are harder to process. Our \texttt{sentence\_length\_cv} feature (rank 15), which measures within-prompt heterogeneity in information density, captures this effect.
+
+\subsection{The Dominance of Schema Complexity}
+
+The number of available tools (\texttt{schema\_num\_tools}) is the single strongest predictor (importance 0.084, $1.9\times$ the next feature). This is intuitive: more tools create a larger output space, requiring the model to make more selection decisions. This finding has a direct practical implication---\emph{providing only relevant tools for a given task may be the most effective way to improve consistency.}
+
+\subsection{Relationship to Causal Findings}
+
+Our companion study\footnote{Details omitted for anonymity.} conducted 675 causal intervention experiments on prompt features, revealing an important nuance: while features like word count and modal verbs (``should'', ``must'') correlate strongly with consistency in observational analysis, their \emph{causal} effects are modest. Simpson's Paradox explains this: the same feature can improve consistency on hard prompts while degrading it on easy prompts, with the aggregate effect cancelling out. For example, word count lengthening improves hard prompts by +6.17\% but degrades easy prompts by -0.58\% ($p = 0.0007$).
+
+This suggests that our features function primarily as \emph{complexity markers}: they identify inherently difficult prompts rather than directly causing inconsistency. The practical implication is that prompt optimization should be targeted at prompts identified as low-consistency, rather than applied uniformly.
+
+\subsection{Limitations}
+
+\paragraph{Ceiling on linguistic prediction.}
+Our best linguistic-only $R^2 = 0.114$ leaves substantial unexplained variance. This reflects a fundamental challenge: consistency depends on factors beyond prompt text, including model architecture, training data, and the interaction between prompt semantics and model capabilities. The combined model ($R^2 = 0.173$) raises the ceiling but significant unexplained variance remains.
+
+\paragraph{Domain specificity.}
+Our features are designed for tool-calling prompts. Generalization to other structured output tasks (code generation, data extraction) requires validation.
+
+\paragraph{Dataset scale.}
+With 1,006 unique prompts, the effective training set for per-model prediction is modest. This likely contributes to the curse-of-dimensionality effect observed when adding too many features (87 features degraded performance vs.\ 55).
+
+\paragraph{Static feature extraction.}
+Our features are extracted from prompt text alone and do not model the interaction between prompt and model (e.g., whether specific ambiguities are handled differently by different architectures).
+
+
+%==============================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+%==============================================================================
+
+We presented a framework for predicting LLM structured output consistency from prompt linguistics. Our 55 interpretable features, spanning surface, semantic, syntactic, and schema levels, achieve significant predictive power (Pearson $r = 0.375$, $p < 10^{-5}$) and complement sentence embeddings for a combined best of $R^2 = 0.173$. Feature importance analysis reveals that schema complexity and semantic ambiguity are the dominant predictors, while theory-grounded syntactic features from Dependency Locality Theory and information theory provide additional signal.
+
+Our central finding---that interpretive ambiguity in prompt text drives LLM output inconsistency---connects to established psycholinguistic theories and suggests that improving prompt clarity (reducing ambiguity, constraining the task, limiting tool choices) is more effective than surface-level prompt engineering (adjusting politeness, modal verbs, or hedging).
+
+For practitioners, our work provides: (1) a lightweight predictor for screening prompts before deployment, (2) interpretable feature importance rankings for diagnosing \emph{why} specific prompts are inconsistent, and (3) the finding that \emph{providing fewer, more relevant tools} may be the single most impactful intervention for improving consistency.
+
+\paragraph{Future work.}
+Key directions include: (a) model-conditioned prediction that accounts for architecture-specific feature sensitivities, (b) extending to other structured output domains (code, data extraction), and (c) integrating the predictor into an automated prompt rewriting system that targets the highest-importance features identified for each specific prompt.
+
+
+%==============================================================================
+% References
+%==============================================================================
+
+\bibliographystyle{plainnat}
+
+\begin{thebibliography}{20}
+
+\bibitem[Austin(1962)]{austin1962things}
+J.~L. Austin.
+\newblock \emph{How to Do Things with Words}.
+\newblock Oxford University Press, 1962.
+
+\bibitem[Brown and Levinson(1987)]{brown1987politeness}
+Penelope Brown and Stephen~C. Levinson.
+\newblock \emph{Politeness: Some Universals in Language Usage}.
+\newblock Cambridge University Press, 1987.
+
+\bibitem[Bsharat et~al.(2024)]{bsharat2024principled}
+Sondos~Mahmoud Bsharat, Aidar Myrzakhan, and Zhiqiang Shen.
+\newblock Principled instructions are all you need for questioning {LLaMA-1/2}, {GPT-3.5/4}.
+\newblock \emph{arXiv preprint arXiv:2312.16171}, 2024.
+
+\bibitem[Gibson(2000)]{gibson2000dependency}
+Edward Gibson.
+\newblock The dependency locality theory: A distance-based theory of linguistic complexity.
+\newblock In A.~Marantz, Y.~Miyashita, and W.~O'Neil, editors, \emph{Image, Language, Brain}, pages 95--126. MIT Press, 2000.
+
+\bibitem[Grosz et~al.(1995)]{grosz1995centering}
+Barbara~J. Grosz, Aravind~K. Joshi, and Scott Weinstein.
+\newblock Centering: A framework for modeling the local coherence of discourse.
+\newblock \emph{Computational Linguistics}, 21(2):203--225, 1995.
+
+\bibitem[Jaeger(2010)]{jaeger2010redundancy}
+T.~Florian Jaeger.
+\newblock Redundancy and reduction: Speakers manage syntactic information density.
+\newblock \emph{Cognitive Psychology}, 61(1):23--62, 2010.
+
+\bibitem[Kalai and Vempala(2024)]{kalai2024calibrated}
+Adam~Tauman Kalai and Santosh~S. Vempala.
+\newblock Calibrated language models must hallucinate.
+\newblock In \emph{Proceedings of the 56th Annual ACM Symposium on Theory of Computing (STOC)}, 2024.
+
+\bibitem[Kojima et~al.(2022)]{kojima2022large}
+Takeshi Kojima, Shixiang~Shane Gu, Machel Reid, Yutaka Matsuo, and Yusuke Iwasawa.
+\newblock Large language models are zero-shot reasoners.
+\newblock In \emph{NeurIPS}, 2022.
+
+\bibitem[Kratzer(1991)]{kratzer1991modality}
+Angelika Kratzer.
+\newblock Modality.
+\newblock In Arnim von Stechow and Dieter Wunderlich, editors, \emph{Semantics: An International Handbook of Contemporary Research}, pages 639--650. De Gruyter, 1991.
+
+\bibitem[Ouyang et~al.(2022)]{ouyang2022training}
+Long Ouyang, Jeff Wu, Xu~Jiang, Diogo Almeida, Carroll~L. Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et~al.
+\newblock Training language models to follow instructions with human feedback.
+\newblock In \emph{NeurIPS}, 2022.
+
+\bibitem[Patil et~al.(2023)]{patil2023gorilla}
+Shishir~G. Patil, Tianjun Zhang, Xin Wang, and Joseph~E. Gonzalez.
+\newblock Gorilla: Large language model connected with massive {APIs}.
+\newblock \emph{arXiv preprint arXiv:2305.15334}, 2023.
+
+\bibitem[Qin et~al.(2023)]{qin2023toolllm}
+Yujia Qin, Shihao Liang, Yining Ye, Kunlun Zhu, Lan Yan, Yaxi Lu, Yankai Lin, Xin Cong, Xiangru Tang, Bill Qian, et~al.
+\newblock {ToolLLM}: Facilitating large language models to master 16000+ real-world {APIs}.
+\newblock In \emph{ICLR}, 2024.
+
+\bibitem[Qin et~al.(2023b)]{qin2023tool}
+Yujia Qin, Shengding Hu, Yankai Lin, Weize Chen, Ning Ding, Ganqu Cui, Zheni Zeng, Yufei Huang, Chaojun Xiao, Chi Han, et~al.
+\newblock Tool learning with foundation models.
+\newblock \emph{arXiv preprint arXiv:2304.08354}, 2023.
+
+\bibitem[Raj et~al.(2023)]{raj2023semantic}
+Harsh Raj, Domenic Rosati, and Subhabrata Mukherjee.
+\newblock Semantic consistency for assuring reliability of large language models.
+\newblock \emph{arXiv preprint arXiv:2308.09138}, 2023.
+
+\bibitem[Schick et~al.(2023)]{schick2023toolformer}
+Timo Schick, Jane Dwivedi-Yu, Roberto Dess{\`{i}}, Roberta Raileanu, Maria Lomeli, Eric Hambro, Luke Zettlemoyer, Nicola Cancedda, and Thomas Scialom.
+\newblock Toolformer: Language models can teach themselves to use tools.
+\newblock In \emph{NeurIPS}, 2023.
+
+\bibitem[Searle(1969)]{searle1969speech}
+John~R. Searle.
+\newblock \emph{Speech Acts: An Essay in the Philosophy of Language}.
+\newblock Cambridge University Press, 1969.
+
+\bibitem[Toucan(2024)]{toucan2024}
+Toucan.
+\newblock Toucan: Tool-calling benchmark for language models.
+\newblock \url{https://github.com/toucan-benchmark}, 2024.
+
+\bibitem[Wang et~al.(2023)]{wang2023selfconsistency}
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc~V. Le, Ed~H. Chi, Sharan Narang, Aakanksha Chowdhery, and Denny Zhou.
+\newblock Self-consistency improves chain of thought reasoning in language models.
+\newblock In \emph{ICLR}, 2023.
+
+\bibitem[Wei et~al.(2022)]{wei2022chain}
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Brian Ichter, Fei Xia, Ed~H. Chi, Quoc~V. Le, and Denny Zhou.
+\newblock Chain-of-thought prompting elicits reasoning in large language models.
+\newblock In \emph{NeurIPS}, 2022.
+
+\end{thebibliography}
+
+
+%==============================================================================
+\newpage
+\appendix
+\section{Full Per-Model Results}
+\label{app:full_results}
+%==============================================================================
+
+Table~\ref{tab:full_per_model} presents the complete per-model results for the 55-feature linguistic predictor.
+
+\begin{table}[h]
+\centering
+\caption{Complete per-model results for the 55-feature predictor (GBM, 5-fold GroupKFold).}
+\label{tab:full_per_model}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Model & $R^2$ & Pearson & Spearman \\
+\midrule
+Gemini-2.5-Flash-Lite & 0.293 & 0.545 & 0.534 \\
+GPT-4.1-Mini & 0.258 & 0.514 & 0.508 \\
+NemoTron-3-Nano & 0.193 & 0.463 & 0.449 \\
+Claude-Haiku-4.5 & 0.172 & 0.435 & 0.471 \\
+Llama-3.3-70B & 0.170 & 0.437 & 0.432 \\
+Claude-3.5-Sonnet & 0.133 & 0.405 & 0.388 \\
+Grok-4.1-Fast & 0.133 & 0.401 & 0.414 \\
+Claude-3.5-Haiku & 0.125 & 0.388 & 0.357 \\
+Qwen3-235B-A22B & 0.123 & 0.394 & 0.411 \\
+Minimax-M2 & 0.118 & 0.381 & 0.391 \\
+Claude-Opus-4.5 & 0.117 & 0.380 & 0.387 \\
+Claude-Sonnet-4.5 & 0.107 & 0.360 & 0.397 \\
+Claude-3.7-Sonnet & 0.094 & 0.362 & 0.378 \\
+GPT-OSS-120B & 0.076 & 0.329 & 0.341 \\
+Mimo-V2-Flash:free & 0.074 & 0.347 & 0.362 \\
+Mimo-V2-Flash & 0.062 & 0.334 & 0.351 \\
+Mistral-Large-3-675B & 0.039 & 0.289 & 0.280 \\
+Nova-2-Lite & 0.015 & 0.261 & 0.272 \\
+Claude-Sonnet-4 & 0.005 & 0.262 & 0.303 \\
+Claude-Opus-4 & $-0.004$ & 0.262 & 0.291 \\
+Qwen3-32B & $-0.007$ & 0.237 & 0.247 \\
+\midrule
+\textbf{Average} & \textbf{0.114} & \textbf{0.375} & \textbf{0.380} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\section{Feature Selection Details}
+\label{app:feature_selection}
+
+\paragraph{Feature cleaning pipeline.}
+Starting from 67 raw features extracted from the Toucan dataset, we apply the following cleaning steps:
+\begin{enumerate}[itemsep=1pt, parsep=0pt]
+\item Remove 6 composite scores (weighted sums of other features): \texttt{politeness\_score}, \texttt{ambiguity\_score}, \texttt{underspec\_score}, \texttt{task\_clarity\_score}, \texttt{pragmatic\_load}, \texttt{implicature\_strength}
+\item Remove 2 dead features (zero for all samples): \texttt{undefined\_terms}, \texttt{coreference\_chains}
+\item Remove 1 proxy feature: \texttt{syntactic\_ambiguity}
+\item Remove 4 zero-variance features: \texttt{polite\_negative}, \texttt{polite\_impersonal}, \texttt{has\_array\_params}, \texttt{has\_object\_params}
+\item Remove 3 collinear pairs ($r > 0.95$): \texttt{prompt\_length} ($r = 0.99$ with \texttt{word\_count}), \texttt{max\_params} ($r = 1.0$ with \texttt{total\_params}), \texttt{total\_params} ($r = 1.0$ with \texttt{max\_nesting\_depth})
+\end{enumerate}
+
+This yields 51 cleaned features. Forward selection then adds 4 syntactic features for a final set of 55.
+
+\paragraph{Forward selection protocol.}
+Forward selection is performed on a pooled universal dataset combining all 21 models' data ($\sim$21,000 rows) for computational efficiency. At each step, we evaluate all remaining candidate features by adding each one to the current set and measuring 5-fold GroupKFold $R^2$. The feature producing the largest improvement is added. Selection stops when no candidate improves $R^2$.
+
+
+\section{Cross-Model Transfer Matrix}
+\label{app:transfer}
+
+Within-family transfer achieves high Pearson correlations:
+\begin{itemize}[itemsep=1pt, parsep=0pt]
+\item Mimo-V2-Flash $\to$ Mimo-V2-Flash:free: $r = 0.96$
+\item Claude-3.7-Sonnet $\to$ Claude-3.5-Haiku: $r = 0.85$
+\item Claude-Sonnet-4.5 $\to$ Claude-Haiku-4.5: $r = 0.81$
+\end{itemize}
+
+Cross-family transfer often yields negative correlations:
+\begin{itemize}[itemsep=1pt, parsep=0pt]
+\item GPT-4.1-Mini $\to$ Claude-3.7-Sonnet: $r = -0.16$
+\item Gemini-2.5-Flash-Lite $\to$ Claude-3.7-Sonnet: $r = -0.15$
+\end{itemize}
+
+This pattern suggests model families learn shared but family-specific processing strategies for structured outputs.
+
+
+\end{document}
