@@ -130,7 +130,7 @@ python experiments/scripts/manage_experiment.py create \
     --name "experiment_name" \
     --description "What this experiment does" \
     --script "scripts/experiments/path/to/script.py" \
-    --data-s3 "s3://sted-experiment-data/data/toucan/" \
+    --data-s3 "s3://<your-s3-bucket>/data/toucan/" \
     --paper "COLM2026"
 ```
 
@@ -142,7 +142,7 @@ Every experiment run MUST record:
 |-------|-------------|---------|
 | `instance_id` | EC2 instance used | `i-0abc123def456` |
 | `instance_type` | EC2 instance type | `t3.xlarge` |
-| `data_source` | S3 URI of input data | `s3://sted-experiment-data/data/toucan/` |
+| `data_source` | S3 URI of input data | `s3://<your-s3-bucket>/data/toucan/` |
 | `script_path` | Script that was run | `scripts/experiments/colm_architecture/run_colm_experiments.py` |
 | `status` | running/completed/failed | `completed` |
 
@@ -151,7 +151,7 @@ python experiments/scripts/manage_experiment.py record \
     --experiment experiment_id \
     --instance-id i-0abc123def456 \
     --instance-type t3.xlarge \
-    --data-source s3://sted-experiment-data/data/toucan/ \
+    --data-source s3://<your-s3-bucket>/data/toucan/ \
     --status completed
 ```
 
@@ -172,10 +172,10 @@ python script.py "$@"
 
 ### Rule 4: All Data in S3
 
-- **Input data**: `s3://sted-experiment-data/data/{dataset}/`
-- **Code snapshots**: `s3://sted-experiment-data/code/{experiment_id}/`
-- **Results**: `s3://sted-experiment-data/experiments/{experiment_id}/results/`
-- **Requirements**: `s3://sted-experiment-data/experiments/{experiment_id}/requirements.txt`
+- **Input data**: `s3://<your-s3-bucket>/data/{dataset}/`
+- **Code snapshots**: `s3://<your-s3-bucket>/code/{experiment_id}/`
+- **Results**: `s3://<your-s3-bucket>/experiments/{experiment_id}/results/`
+- **Requirements**: `s3://<your-s3-bucket>/experiments/{experiment_id}/requirements.txt`
 
 Sync results after completion:
 ```bash

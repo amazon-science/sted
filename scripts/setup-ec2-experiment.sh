@@ -40,7 +40,7 @@ REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 # Container Configuration
 ECR_REGISTRY="${ECR_REGISTRY:-}"  # Set to your ECR registry URL if using ECR
 DOCKER_IMAGE="${DOCKER_IMAGE:-sted-experiment:latest}"
-S3_BUCKET="${S3_BUCKET:-sted-experiment-data}"
+S3_BUCKET="${S3_BUCKET:-<your-s3-bucket>}"
 
 # Experiment Configuration
 TEMPERATURES="${TEMPERATURES:-0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0}"
@@ -346,7 +346,7 @@ Options:
 Environment Variables:
     AWS_DEFAULT_REGION    AWS region (default: us-east-1)
     OPENAI_API_KEY        Required for OpenRouter models (grok, gemini, etc.)
-    S3_BUCKET             S3 bucket for data/code (default: sted-experiment-data)
+    S3_BUCKET             S3 bucket for data/code (default: <your-s3-bucket>)
 
 Examples:
     # Create new instance and run Claude Sonnet 4 experiment

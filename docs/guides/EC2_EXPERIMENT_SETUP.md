@@ -67,13 +67,13 @@ chmod 400 ~/.ssh/sted-experiment-key.pem
 ### 5. Upload Experiment Data to S3
 ```bash
 # Create S3 bucket
-aws s3 mb s3://sted-experiment-data
+aws s3 mb s3://<your-s3-bucket>
 
 # Upload ShareGPT data
-aws s3 cp sharegpt_data/ s3://sted-experiment-data/sharegpt_data/ --recursive
+aws s3 cp sharegpt_data/ s3://<your-s3-bucket>/sharegpt_data/ --recursive
 
 # Upload Toucan data (for tool-calling experiments)
-aws s3 cp toucan_data/ s3://sted-experiment-data/toucan_data/ --recursive
+aws s3 cp toucan_data/ s3://<your-s3-bucket>/toucan_data/ --recursive
 ```
 
 ---
@@ -145,8 +145,8 @@ aws ssm send-command \
     --instance-ids "$INSTANCE_ID" \
     --document-name "AWS-RunShellScript" \
     --parameters 'commands=[
-        "aws s3 cp s3://sted-experiment-data/sharegpt_data/ /home/ec2-user/sharegpt_data/ --recursive",
-        "aws s3 cp s3://sted-experiment-data/toucan_data/ /home/ec2-user/toucan_data/ --recursive"
+        "aws s3 cp s3://<your-s3-bucket>/sharegpt_data/ /home/ec2-user/sharegpt_data/ --recursive",
+        "aws s3 cp s3://<your-s3-bucket>/toucan_data/ /home/ec2-user/toucan_data/ --recursive"
     ]'
 ```
 
@@ -162,14 +162,14 @@ tar -czf /tmp/sted-code.tar.gz \
     -C /path/to/sted-internal .
 
 # Upload to S3
-aws s3 cp /tmp/sted-code.tar.gz s3://sted-experiment-data/code/sted-code.tar.gz
+aws s3 cp /tmp/sted-code.tar.gz s3://<your-s3-bucket>/code/sted-code.tar.gz
 
 # Download and extract on instance
 aws ssm send-command \
     --instance-ids "$INSTANCE_ID" \
     --document-name "AWS-RunShellScript" \
     --parameters 'commands=[
-        "aws s3 cp s3://sted-experiment-data/code/sted-code.tar.gz /home/ec2-user/",
+        "aws s3 cp s3://<your-s3-bucket>/code/sted-code.tar.gz /home/ec2-user/",
         "cd /home/ec2-user/sted && tar -xzf /home/ec2-user/sted-code.tar.gz"
     ]'
 ```
@@ -294,10 +294,10 @@ aws ssm send-command --instance-ids "$INSTANCE_ID" \
 
 # Upload to S3
 aws ssm send-command --instance-ids "$INSTANCE_ID" \
-    --parameters 'commands=["aws s3 cp /home/ec2-user/results.tar.gz s3://sted-experiment-data/results/results-$(date +%Y%m%d).tar.gz"]'
+    --parameters 'commands=["aws s3 cp /home/ec2-user/results.tar.gz s3://<your-s3-bucket>/results/results-$(date +%Y%m%d).tar.gz"]'
 
 # Download locally
-aws s3 cp s3://sted-experiment-data/results/results-YYYYMMDD.tar.gz ./
+aws s3 cp s3://<your-s3-bucket>/results/results-YYYYMMDD.tar.gz ./
 ```
 
 ---

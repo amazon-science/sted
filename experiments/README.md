@@ -37,7 +37,7 @@ python experiments/scripts/manage_experiment.py record \
     --experiment colm_architecture_analysis \
     --instance-id i-0abc123def456 \
     --instance-type t3.xlarge \
-    --data-source s3://sted-experiment-data/toucan_data/ \
+    --data-source s3://<your-s3-bucket>/toucan_data/ \
     --status completed
 ```
 
@@ -60,7 +60,7 @@ python experiments/scripts/manage_experiment.py list
 All experiment data is stored in S3:
 
 ```
-s3://sted-experiment-data/
+s3://<your-s3-bucket>/
 ├── code/                        # Code snapshots
 │   └── {experiment_id}/
 │       └── code-{timestamp}.tar.gz

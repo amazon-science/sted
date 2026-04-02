@@ -29,7 +29,7 @@ TEMPLATES_DIR = EXPERIMENTS_DIR / "templates"
 REGISTRY_FILE = EXPERIMENTS_DIR / "registry.json"
 
 # S3 Configuration
-S3_BUCKET = os.environ.get("STED_S3_BUCKET", "sted-experiment-data")
+S3_BUCKET = os.environ.get("STED_S3_BUCKET", "<your-s3-bucket>")
 
 
 def load_registry() -> dict:

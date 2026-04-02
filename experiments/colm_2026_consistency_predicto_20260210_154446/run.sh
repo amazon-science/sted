@@ -18,4 +18,4 @@ export AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
 python scripts/experiments/colm_consistency_predictor/experiments/exp3_train_predictor.py "$@"
 
 # Sync results to S3
-aws s3 sync results/ s3://sted-experiment-data/experiments/colm_2026_consistency_predicto_20260210_154446/results/
+aws s3 sync results/ s3://<your-s3-bucket>/experiments/colm_2026_consistency_predicto_20260210_154446/results/
