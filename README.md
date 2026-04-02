@@ -2,7 +2,7 @@
 
 A comprehensive framework for evaluating and improving consistency in LLM-generated structured outputs. This framework combines STED (Semantic Tree Edit Distance), a novel similarity metric that balances semantic flexibility with structural strictness, with a consistency scoring framework that aggregates multiple STED measurements to quantify output reliability.
 
-> 📄 **Paper**: [STED and Consistency Scoring: A Framework for Evaluating LLM Structured Output Reliability](docs/STED_and_Consistency_Scoring.pdf) - Accepted at NeurIPS 2025 Workshop on Structured Probabilistic Inference & Generative Modeling
+> 📄 **Paper**: Accepted at NeurIPS 2025 Workshop on Structured Probabilistic Inference & Generative Modeling
 
 ## Table of Contents
 
@@ -15,7 +15,6 @@ A comprehensive framework for evaluating and improving consistency in LLM-genera
 - [LLM Consistency Benchmarking](#llm-consistency-benchmarking)
 - [Key Components](#key-components)
 - [Results and Findings](#results-and-findings)
-- [MCP Server for Agentic Systems](#mcp-server-for-agentic-systems)
 - [Contributing](#contributing)
 - [Citation](#citation)
 
@@ -130,7 +129,7 @@ result = analyzer.evaluate_structural_consistency(
 print(f"Consistency: {result['consistency_metrics']['consistency_coefficient']:.4f}")
 ```
 
-For more examples, see `examples/basic_usage.py` and [Library Usage Guide](./LIBRARY_USAGE.md).
+For more examples, see `examples/basic_usage.py` and [Library Usage Guide](./docs/guides/LIBRARY_USAGE.md).
 
 ## Dataset
 
@@ -328,9 +327,7 @@ python scripts/eval/calculate_consistency_metrics.py
 python scripts/visualization/visualize_consistency_scores.py
 ```
 
-![LLM Consistency Scores](images/consistency_score_by_consistency_type_with_errors.png)
-
-For all scripts, see [Scripts Reference](./SCRIPTS_REFERENCE.md).
+For all scripts, see [Scripts Reference](./docs/guides/SCRIPTS_REFERENCE.md).
 
 ## Key Components
 
@@ -363,37 +360,19 @@ See [STED Complexity Analysis](./docs/api/sted_complexity_analysis.md) for detai
 
 ## Results and Findings
 
-Evaluated **10 LLMs** across multiple temperature settings:
+Evaluated **19 LLMs** across multiple temperature settings:
 
 | Provider | Models |
 |----------|--------|
-| Anthropic | Claude 3 Haiku, Claude 3.5 Haiku, Claude 3.7 Sonnet |
-| Amazon | Nova Pro v1 |
-| Meta | Llama 3.3 70B |
-| OpenAI | GPT-4.1 Mini |
-| Google | Gemini 2.5 Flash Lite |
-| DeepSeek | DeepSeek v3 |
+| Anthropic | Claude 3 Haiku, Claude 3.5 Haiku, Claude 3.5 Sonnet, Claude 3.7 Sonnet |
+| Amazon | Nova Lite, Nova Pro v1 |
+| Meta | Llama 3.1 70B, Llama 3.1 405B, Llama 3.3 70B, Llama 4 Maverick |
+| OpenAI | GPT-4o, GPT-4.1 Mini |
+| Google | Gemini 2.5 Flash, Gemini 2.5 Flash Lite, Gemini 2.5 Pro |
+| DeepSeek | DeepSeek V3, DeepSeek V3.1 |
 | Alibaba | Qwen3 32B, Qwen3 235B A22B |
 
-**Scale**: 10 models, 127 temperature settings, ~10,160 outputs, ~30,480 consistency calculations
-
-See [LLM Benchmarking Results](./docs/LLM_BENCHMARKING_RESULTS.md) for detailed findings.
-
-## MCP Server for Agentic Systems
-
-Model Context Protocol server for real-time consistency evaluation:
-
-```bash
-cd mcp_dev
-python test_client.py
-```
-
-**Tools available**:
-- `evaluate_consistency`: Compare two JSON structures
-- `evaluate_batch_consistency`: Evaluate multiple structures
-- `evaluate_tool_calls`: Evaluate agent tool call consistency
-
-See [mcp_dev/README.md](./mcp_dev/README.md) for integration details.
+**Scale**: 19 models, 11 temperature settings (0.0–1.0), ~2.1M outputs across 1,006 tool-calling samples
 
 ## Contributing
 
