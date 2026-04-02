@@ -279,6 +279,16 @@ temperature_experiment/
 # Large archives (store in S3 instead)
 *.zip
 *.tar.gz
+*.gz
+
+# PowerPoint and large document files
+*.pptx
+
+# JSONL data files
+*.jsonl
+
+# Node modules
+node_modules/
 
 # LaTeX build artifacts
 *.aux
