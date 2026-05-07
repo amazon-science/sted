@@ -523,13 +523,21 @@ class SemanticJsonTreeConsistencyEvaluator:
             self._subtree_cache.set(cache_key, cost)
             return cost
 
-        # If one is leaf and other is not
+        # If one is leaf and other is not.
+        # Normalize to [0, 1] per Eq. (3): divide total edit cost by max(|C_1|, |C_2|).
+        # Without this normalization, cost scales with the non-leaf subtree size and the
+        # outer `similarity = 1 - distance` can fall below 0 when this branch fires at
+        # the root.
         if not tree1.children and tree2.children:
-            cost = self.delete_cost(tree1) + sum(self.insert_cost(c) for c in tree2.children)
+            raw_cost = self.delete_cost(tree1) + sum(self.insert_cost(c) for c in tree2.children)
+            denom = max(1, len(tree2.children))
+            cost = min(raw_cost / denom, 1.0)
             self._subtree_cache.set(cache_key, cost)
             return cost
         if tree1.children and not tree2.children:
-            cost = sum(self.delete_cost(c) for c in tree1.children) + self.insert_cost(tree2)
+            raw_cost = sum(self.delete_cost(c) for c in tree1.children) + self.insert_cost(tree2)
+            denom = max(1, len(tree1.children))
+            cost = min(raw_cost / denom, 1.0)
             self._subtree_cache.set(cache_key, cost)
             return cost
 
@@ -2263,7 +2271,8 @@ class SemanticJsonTreeConsistencyEvaluator:
             # Use optimized matching cost calculation
             distance = self._calculate_optimal_matching_cost_fast(tree1, tree2, variation_type)
 
-            similarity = 1.0 - distance
+            # Enforce Proposition 1 boundedness: similarity in [0, 1].
+            similarity = max(0.0, min(1.0, 1.0 - distance))
             return similarity
 
         finally:
@@ -2318,8 +2327,15 @@ class SemanticJsonTreeConsistencyEvaluator:
                 )
                 """
                 distance = zss.simple_distance(tree1, tree2, get_children=lambda x: x.get_children())
-                max_node = max(tree1.count_nodes(), tree2.count_nodes())
-                return 1 - distance/max_node
+                # Correct normalization: ZSS unit-cost edit distance is bounded by |T1|+|T2|
+                # (delete all of T1, insert all of T2), so divide by the sum to guarantee
+                # similarity in [0, 1] per Proposition 1 / Eq. (3). Using max(|T1|,|T2|)
+                # could produce values outside [0, 1] because update operations are counted
+                # separately from insert/delete, allowing distance > max(|T1|,|T2|).
+                total_nodes = tree1.count_nodes() + tree2.count_nodes()
+                if total_nodes == 0:
+                    return 1.0
+                return max(0.0, 1.0 - distance / total_nodes)
 
             except TypeError as e:
                 raise TypeError(
@@ -2330,7 +2346,8 @@ class SemanticJsonTreeConsistencyEvaluator:
             # Use optimized version with all improvements
             distance = self._calculate_optimal_matching_cost_fast(tree1, tree2, variation_type)
 
-        similarity = 1.0 - distance
+        # Enforce Proposition 1 boundedness: similarity in [0, 1].
+        similarity = max(0.0, min(1.0, 1.0 - distance))
         return similarity
 
     def calculate_bertscore(self, json1: Dict[str, Any], json2: Dict[str, Any], **kwargs) -> float:

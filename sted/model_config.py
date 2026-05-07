@@ -33,6 +33,10 @@ FINAL_MODELS = [
 # Formula: max_workers ≈ RPM / 10 (assuming ~6 seconds avg per request)
 MODEL_REGISTRY = {
     # Bedrock models - Claude 4.5 series
+    # Claude Sonnet 4.6: 200 RPM -> 20 workers
+    "us.anthropic.claude-sonnet-4-6-v1": ("bedrock", "Claude-Sonnet-4.6", 20),
+    # Claude Opus 4.6: 125 RPM -> 12 workers
+    "us.anthropic.claude-opus-4-6-v1": ("bedrock", "Claude-Opus-4.6", 12),
     # Claude Opus 4.5: 125 RPM -> 12 workers
     "us.anthropic.claude-opus-4-5-20251101-v1:0": ("bedrock", "Claude-Opus-4.5", 12),
     # Claude Sonnet 4.5: 200 RPM -> 20 workers

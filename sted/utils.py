@@ -59,10 +59,10 @@ def count_json_elements(json_obj: Any) -> int:
 def parse_json_outputs(outputs: List[Union[str, Dict]]) -> List[Dict]:
     """
     Parse a list of JSON outputs that might be strings or dictionaries.
-    
+
     Args:
         outputs: List of JSON strings or dictionaries
-        
+
     Returns:
         List of parsed JSON dictionaries
     """
@@ -82,6 +82,45 @@ def parse_json_outputs(outputs: List[Union[str, Dict]]) -> List[Dict]:
                 parsed.append({"responses": output})
         elif isinstance(output, dict):
             parsed.append(output)
+        else:
+            parsed.append({"responses": output})
+
+    return parsed
+
+
+def parse_structured_outputs(
+    outputs: List[Union[str, Dict]],
+    format: str = "json"
+) -> List[Dict]:
+    """
+    Parse a list of structured outputs in any supported format (JSON, XML, YAML, HTML).
+
+    For JSON inputs, delegates to parse_json_outputs for backward compatibility.
+    For other formats, uses format_converters to parse strings into dicts.
+
+    Args:
+        outputs: List of raw strings or pre-parsed dictionaries
+        format: Output format - "json", "xml", "yaml", or "html"
+
+    Returns:
+        List of parsed dictionaries
+    """
+    if format == "json":
+        return parse_json_outputs(outputs)
+
+    from .format_converters import parse_structured_string
+
+    parsed = []
+    for i, output in enumerate(outputs):
+        if isinstance(output, dict):
+            parsed.append(output)
+        elif isinstance(output, str):
+            try:
+                parsed.append(parse_structured_string(output, format=format))
+            except (ValueError, ImportError) as e:
+                warnings.warn(f"Could not parse {format} string at index {i}: {e}")
+        elif isinstance(output, list):
+            parsed.append({"responses": output})
         else:
             parsed.append({"responses": output})
 
