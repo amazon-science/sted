@@ -2,7 +2,7 @@
 
 A comprehensive framework for evaluating and improving consistency in LLM-generated structured outputs. This framework combines STED (Semantic Tree Edit Distance), a novel similarity metric that balances semantic flexibility with structural strictness, with a consistency scoring framework that aggregates multiple STED measurements to quantify output reliability.
 
-> 📄 **Paper**: Accepted at NeurIPS 2025 Workshop on Structured Probabilistic Inference & Generative Modeling
+> 📄 **Paper**: [STED and Consistency Scoring: A Framework for Evaluating LLM Structured Output Reliability](docs/STED_and_Consistency_Scoring.pdf) - Accepted at NeurIPS 2025 Workshop on Structured Probabilistic Inference & Generative Modeling
 
 ## Table of Contents
 
@@ -326,6 +326,8 @@ python scripts/eval/calculate_consistency_metrics.py
 ```bash
 python scripts/visualization/visualize_consistency_scores.py
 ```
+
+![LLM Consistency Scores](images/consistency_score_by_consistency_type_with_errors.png)
 
 For all scripts, see [Scripts Reference](./docs/guides/SCRIPTS_REFERENCE.md).
 
