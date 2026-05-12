@@ -131,6 +131,139 @@ print(f"Consistency: {result['consistency_metrics']['consistency_coefficient']:.
 
 For more examples, see `examples/basic_usage.py` and [Library Usage Guide](./docs/guides/LIBRARY_USAGE.md).
 
+### Agent Consistency Evaluation (high-level API)
+
+`AgentConsistencyEvaluator` is a production-ready wrapper that evaluates an
+LLM agent's run-to-run consistency on a set of prompts:
+
+```python
+from sted import AgentConsistencyEvaluator
+
+# Either point at a live agent...
+evaluator = AgentConsistencyEvaluator(n_workers=4)
+
+def my_agent(prompt: str) -> dict:
+    return llm_call(prompt)  # any JSON-returning LLM call
+
+report = evaluator.evaluate(
+    agent_fn=my_agent,
+    prompts=["Get weather in Seattle", "Book a flight to NYC"],
+    n_runs=10,
+)
+
+# ...or score pre-collected production logs without re-running the agent
+report = evaluator.evaluate_outputs({
+    "weather_query": [output_run_1, output_run_2, ...],
+    "flight_query": [...],
+})
+
+print(report.summary())
+# Agent Consistency Report
+# ============================================================
+# Prompts evaluated:    2
+# Runs per prompt:      10
+#
+# Mean consistency:     0.939  (high)
+# Mean validity:        1.000
+# Mean c_adj:           0.939  (deployment-aware)
+#
+# Least consistent prompts:
+#   c_mean=0.883  r_v=1.00  | Book a flight to NYC
+#   c_mean=0.932  r_v=1.00  | Get weather in Seattle
+```
+
+The evaluator separates **validity** ($r_v$ — fraction of runs that produced
+parseable output) from **consistency** ($c_\text{mean}$ — pairwise STED on the
+parseable subset), matching the deployment-aware framing of the STED paper.
+
+### Performance
+
+**Benchmark setup**:
+- **Workload**: 200 prompts × 10 runs/prompt = **2,000 LLM outputs**, **9,000
+  pairwise STED comparisons** (`200 × C(10, 2) = 200 × 45`)
+- **Output shape**: synthetic tool-call payloads, 4–6 keys, depth 1–2,
+  ~30% per-run drift on one field
+- **Hardware**: MacBook M-series laptop (8 cores), single Python process,
+  single `SemanticJsonTreeConsistencyEvaluator` instance shared across
+  workers
+- **Embedding model**: `all-MiniLM-L6-v2` (default, CPU)
+- **Reproduce**: `python -c "from sted import AgentConsistencyEvaluator; ..."`
+  with the snippet shown above
+
+| Configuration                                       | Time (200 prompts × 10 runs = 2,000 outputs) | Speedup |
+|-----------------------------------------------------|---------------------------------------------:|--------:|
+| Baseline (sequential, no batch encoding)            |                                     **70 s** |      1× |
+| + cross-prompt batch precompute *(default in `evaluate_outputs`)* |                       **11 s** |    6.2× |
+| + 4 worker threads (`n_workers=4`)                  |                                    **4.8 s** | **15×** |
+
+**Per-prompt latency at 4 workers**: ~24 ms/prompt average (~0.5 ms per
+pairwise STED comparison) including all embedding computation.
+
+Both optimizations are on by default in `evaluate_outputs`; threading is
+opt-in via `n_workers` in the constructor and is bit-identical to the
+sequential path (regression-tested under `tests/test_agent_consistency_evaluator.py::test_n_workers_produces_same_results_as_sequential`).
+
+Linear extrapolation to larger workloads (`n_workers=4`):
+- 1,000 prompts × 10 runs ≈ **24 s**
+- 10,000 prompts × 10 runs ≈ **4 min**
+
+Further notes:
+- Embedding cache is shared across prompts, so repeated string values
+  (common in tool-call args) benefit from cross-prompt cache hits — actual
+  speedup on logs with high string overlap can exceed the table above.
+- Threads beyond ~4 saturate due to the Python GIL on cosine math; for
+  workloads larger than ~10K prompts, prefer multiple processes over more
+  threads. If you have a Bedrock embedding backend, use
+  `precompute_embeddings()` manually to push the encode batch out to
+  async API calls.
+- Per-pair STED on small-to-medium JSON (≤50 keys, depth ≤4) is
+  ~50–100 ms cold / ~10 ms warm; pathological inputs (deep recursion,
+  200+ element arrays) can take seconds because of the inherent O(n³)
+  cost of Hungarian assignment on the cost matrix.
+
+### Production caveats (alpha-quality library)
+
+`sted` is currently classified as **Development Status :: 3 - Alpha**.
+Suitable for: internal pilots, batch evaluation of production logs,
+research benchmarks. **Not yet recommended for**: latency-critical online
+inference, mission-critical agent monitoring, regulated workloads.
+
+Known limits to plan around:
+
+| Concern | Status | Mitigation |
+|---|---|---|
+| Hungarian is O(n³) on array length | known | Set `use_greedy=True` for arrays >30 |
+| No SLA / on-call story | not in scope | Use behind your own circuit breaker |
+| Thread-safety verified empirically only (no architectural locks) | known | One evaluator per process if paranoid |
+| `evaluate_outputs(timeout_seconds=...)` per-pair | available | Default disabled to preserve current semantics |
+| Streaming / large-batch via `evaluate_outputs_streaming(...)` | available | Use for >10K prompts |
+| Logging via `logging.getLogger("sted")` | available | `sted.set_log_level("DEBUG")` |
+| No dashboards / async monitoring | not in scope | See LangSmith / Braintrust for that layer |
+| Cosine similarity calibration drifts with embedder | known | Pin embedder version; validate on your domain |
+
+CLI usage (after `pip install sted`):
+
+```bash
+sted-eval --input production_logs.jsonl --workers 4 --output report.json
+sted-eval --input small.jsonl --summary-only --log-level INFO
+```
+
+Input JSONL format: one row per prompt with `{"prompt": "...", "outputs": [...]}`.
+
+Async usage:
+
+```python
+import asyncio
+from sted import AgentConsistencyEvaluator
+from sted.agent_consistency_async import evaluate_async
+
+async def my_async_agent(prompt):
+    return await my_async_llm.ainvoke(prompt)
+
+evaluator = AgentConsistencyEvaluator(n_workers=4)
+report = asyncio.run(evaluate_async(evaluator, my_async_agent, prompts, n_runs=10))
+```
+
 ## Dataset
 
 The framework supports two datasets for evaluation:

@@ -3,8 +3,10 @@ import json
 import numpy as np
 import time
 import warnings
-import boto3
-from botocore.config import Config
+
+# boto3 / botocore are optional (only needed for Bedrock helpers).
+# Imported lazily inside the functions that use them so that users without
+# the `bedrock` extra can still `import sted`.
 
 def collect_all_values(data: Union[Dict, List, Any]) -> List[Tuple[str, Any]]:
     """
@@ -214,13 +216,25 @@ def get_embeddings(text, model_id, bedrock_client, max_retries=10, initial_delay
 def create_bedrock_client(region_name="us-west-2", config=None):
     """
     Create a configured Bedrock client with optimized settings.
-    
+
     Args:
         region_name: AWS region name
-        
+
     Returns:
         Configured boto3 Bedrock client
+
+    Note:
+        Requires the optional `bedrock` extra: `pip install sted[bedrock]`.
     """
+    try:
+        import boto3
+        from botocore.config import Config
+    except ImportError as e:
+        raise ImportError(
+            "boto3 / botocore are required for Bedrock helpers. "
+            "Install with: pip install sted[bedrock]"
+        ) from e
+
     if config is None:
         config = Config(
             max_pool_connections=50,  # Increase connection pool size

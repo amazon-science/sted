@@ -8,7 +8,13 @@ separate from the core pairwise comparison logic.
 import datetime
 import numpy as np
 from typing import Dict, Any, List, Tuple, Union
-from bert_score import score as bert_score
+
+# bert_score is optional (only used when method='bertscore'). Import lazily
+# inside the function that uses it.
+try:
+    from bert_score import score as bert_score
+except ImportError:
+    bert_score = None
 
 from .utils import collect_all_values
 
@@ -69,6 +75,11 @@ class StructuralConsistencyAnalyzer:
             refs, cands = zip(*batch)
 
             if method == "bertscore":
+                if bert_score is None:
+                    raise ImportError(
+                        "bert_score is required for method='bertscore'. "
+                        "Install with: pip install sted[bertscore]"
+                    )
                 P, R, F1 = bert_score(list(cands), list(refs), lang="en", verbose=False)
                 scores = [float(f.item()) for f in F1]
             else:

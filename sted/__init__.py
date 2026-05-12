@@ -5,6 +5,9 @@ This package provides tools for evaluating structural consistency of JSON output
 using tree edit distance algorithms enhanced with semantic similarity.
 """
 
+# Logging utilities (always available)
+from ._logging import get_logger, set_log_level
+
 # Core lightweight imports (no bert_score dependency)
 from .json_tree_node import JsonNode
 from .similarity_cache import StringSimilarityCache
@@ -38,6 +41,19 @@ except ImportError:
 from .consistency_risk_assessor import ConsistencyRiskAssessor, RiskReport
 from .consistency_predictor import ConsistencyPredictor, PredictionResult
 
+# High-level agent consistency wrapper. Lazy-imports the heavier deps via
+# the structural analyzer; safe to import at module load.
+try:
+    from .agent_consistency_evaluator import (
+        AgentConsistencyEvaluator,
+        ConsistencyReport,
+        PromptResult,
+    )
+except ImportError:
+    AgentConsistencyEvaluator = None
+    ConsistencyReport = None
+    PromptResult = None
+
 __version__ = "0.1.0"
 __author__ = "AWS Generative AI Innovation Center"
 
@@ -61,4 +77,9 @@ __all__ = [
     "RiskReport",
     "ConsistencyPredictor",
     "PredictionResult",
+    "AgentConsistencyEvaluator",
+    "ConsistencyReport",
+    "PromptResult",
+    "get_logger",
+    "set_log_level",
 ]

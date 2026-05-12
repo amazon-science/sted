@@ -15,7 +15,14 @@ from functools import lru_cache
 from collections import OrderedDict
 import warnings
 import re
-from bert_score import score as bert_score
+
+# bert_score is optional (only used by the bertscore_pair / bertscore_json
+# helpers below). Lazy-imported so users without the bertscore extra can
+# still use the STED metric.
+try:
+    from bert_score import score as bert_score
+except ImportError:
+    bert_score = None
 
 from scipy.optimize import linear_sum_assignment
 import zss
@@ -30,10 +37,15 @@ from deepdiff import DeepDiff
 from .json_tree_node import JsonNode
 from .similarity_cache import StringSimilarityCache
 from .utils import get_embeddings, create_bedrock_client, count_json_elements
-from botocore.config import Config
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from tqdm.asyncio import tqdm as atqdm
+
+# botocore is optional (only needed for Bedrock embedding backends).
+try:
+    from botocore.config import Config as _BotoConfig
+except ImportError:
+    _BotoConfig = None
 
 from transformers import logging
 logging.set_verbosity_error()
@@ -50,6 +62,10 @@ class LRUCache:
 
     def get(self, key: Tuple) -> Optional[float]:
         """Get value from cache, moving to end (most recently used)."""
+        if self.maxsize == 0:
+            # Cache disabled — count as a miss but never store.
+            self.misses += 1
+            return None
         if key in self._cache:
             self._cache.move_to_end(key)
             self.hits += 1
@@ -59,6 +75,8 @@ class LRUCache:
 
     def set(self, key: Tuple, value: float) -> None:
         """Set value in cache, evicting LRU if at capacity."""
+        if self.maxsize == 0:
+            return  # disabled
         if key in self._cache:
             self._cache.move_to_end(key)
         else:
@@ -138,9 +156,10 @@ class SemanticJsonTreeConsistencyEvaluator:
                  sort_arrays: bool = True,
                  embedding_dim: int = 512,
                  # Space optimization options
-                 subtree_cache_size: int = 10000,
+                 subtree_cache_size: int = 0,
                  use_fp16_embeddings: bool = False,
-                 max_embedding_cache_size: int = 100000
+                 max_embedding_cache_size: int = 100000,
+                 min_length_for_embeddings: int = 4
         ):
         """
         Initialize the evaluator with semantic capabilities.
@@ -165,9 +184,15 @@ class SemanticJsonTreeConsistencyEvaluator:
             chunk_overlap: Overlap between chunks
             structural_weight: Structural vs content weight w (0-1), default 0.5. Paper Eq.(1): γ_upd = w·γ_struct + (1-w)·γ_content
             embedding_dim: Embedding dimension for Bedrock models (256, 384, 512, or 1024). Default: 512
-            subtree_cache_size: Max entries in subtree LRU cache (default 10000). Set to 0 for unbounded.
+            subtree_cache_size: Size of the subtree LRU cache. Default 0 (disabled).
+                The cache is only useful when you re-compare the same subtree pair
+                multiple times — most production workloads don't trigger this. Set
+                to >0 (e.g., 10000) only for benchmarks comparing many similar trees.
             use_fp16_embeddings: Store embeddings as float16 to save ~50% memory (slight precision loss)
             max_embedding_cache_size: Max embeddings to cache (default 100000). Set to 0 for unbounded.
+            min_length_for_embeddings: Strings shorter than this fall back to character-level
+                edit distance instead of embeddings (which are unreliable for very short
+                strings). Default 4.
         """
         self.path_weight_decay = path_weight_decay
         self.type_change_cost = type_change_cost or _get_default_type_change_costs()
@@ -182,13 +207,19 @@ class SemanticJsonTreeConsistencyEvaluator:
         self.model_id = model_id
         self.embedding_dim = embedding_dim
 
-        boto_config = Config(
-            retries={
-                'max_attempts': 10,
-                'mode': 'adaptive'
-            },
-            max_pool_connections=50  # Increase connection pool size
-        )
+        # boto_config is only used by Bedrock embedding paths below; build it
+        # lazily so users without the bedrock extra can still instantiate the
+        # evaluator with a non-Bedrock model (e.g. local sentence-transformers).
+        if _BotoConfig is not None:
+            boto_config = _BotoConfig(
+                retries={
+                    'max_attempts': 10,
+                    'mode': 'adaptive'
+                },
+                max_pool_connections=50  # Increase connection pool size
+            )
+        else:
+            boto_config = None
 
         if self.model_id in ["amazon.titan-embed-text-v1", "amazon.titan-embed-text-v2:0",
                              "cohere.embed-multilingual-v3", "cohere.embed-v4:0", "us.cohere.embed-v4:0"]:
@@ -232,12 +263,19 @@ class SemanticJsonTreeConsistencyEvaluator:
         self.subtree_cache_size = subtree_cache_size
 
         # Memoization cache for subtree comparisons: (tree1_hash, tree2_hash, variation_type) -> cost
-        # Use LRU cache with bounded size for space efficiency
+        # Default is disabled (size=0) since most production workloads do not
+        # benefit from this cache; set subtree_cache_size>0 (e.g. 10000) to enable.
         if subtree_cache_size > 0:
             self._subtree_cache = LRUCache(maxsize=subtree_cache_size)
+        elif subtree_cache_size == 0:
+            # Disabled: get() always returns None, set() is a no-op.
+            self._subtree_cache = LRUCache(maxsize=0)
         else:
-            # Unbounded cache (original behavior)
+            # Negative => unbounded (legacy/back-compat).
             self._subtree_cache = LRUCache(maxsize=float('inf'))
+
+        # Min string length for embedding-based similarity (else fall back to char edit distance)
+        self.min_length_for_embeddings = int(min_length_for_embeddings)
 
         # Greedy approximation flag (optional, trades accuracy for speed)
         self.use_greedy_matching = False
@@ -1486,16 +1524,17 @@ class SemanticJsonTreeConsistencyEvaluator:
         """
         Calculate semantic similarity between two texts using embeddings.
 
-        For very short strings (< 4 characters), uses character-level edit distance
-        instead of embeddings, as embeddings are unreliable for short strings.
+        For very short strings (< self.min_length_for_embeddings characters), uses
+        character-level edit distance instead of embeddings, as embeddings are
+        unreliable for short strings.
         """
         if text1 == text2:
             return 1.0
 
         # For very short strings, use character-level edit distance instead of embeddings
-        # Embeddings are unreliable for strings shorter than 4 characters
-        MIN_LENGTH_FOR_EMBEDDINGS = 4
-        if len(text1) < MIN_LENGTH_FOR_EMBEDDINGS or len(text2) < MIN_LENGTH_FOR_EMBEDDINGS:
+        # Embeddings are unreliable for very short strings.
+        if (len(text1) < self.min_length_for_embeddings
+                or len(text2) < self.min_length_for_embeddings):
             # Use normalized Levenshtein distance
             max_len = max(len(text1), len(text2))
             if max_len == 0:
@@ -2257,6 +2296,28 @@ class SemanticJsonTreeConsistencyEvaluator:
             # CRITICAL: Clear node hash cache to prevent id() reuse bugs.
             # Python may reuse memory addresses for new objects after old ones are garbage collected.
             self._node_hash_cache.clear()
+
+            # === Optimization: batch-encode all unique strings in this pair
+            # before running the recursive comparison. Without this, every
+            # leaf/key comparison triggers a separate single-string encode
+            # call (~50ms each on MiniLM), making large/deep JSON pairs O(n)
+            # encode calls. With this, encoding is O(1) batch call.
+            # Only does anything when we have a SentenceTransformer (Bedrock
+            # batch path is handled by user-driven precompute_embeddings).
+            if self.embedding_model is not None and not getattr(self, '_skip_auto_precompute', False):
+                try:
+                    pair_strings: Set[str] = set()
+                    self.collect_strings_from_json(json1, pair_strings)
+                    self.collect_strings_from_json(json2, pair_strings)
+                    new_strings = [s for s in pair_strings if s not in self._embedding_dict]
+                    # Heuristic: skip the batch path for tiny pairs (overhead
+                    # exceeds savings) — single-encode caching covers them.
+                    if len(new_strings) >= 4:
+                        self._batch_encode_sentence_transformer(
+                            new_strings, batch_size=64, show_progress=False
+                        )
+                except Exception:
+                    pass  # never block real computation on a pre-warm failure
 
             # Convert JSONs to trees
             tree1 = JsonNode.from_dict(json1, sort_arrays=self.sort_arrays, sort_keys=self.sort_keys,
