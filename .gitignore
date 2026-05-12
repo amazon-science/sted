@@ -220,10 +220,13 @@ config/secrets.yaml
 config/credentials.json
 .secrets
 
-# Large embedding files
-embeddings/
+# Large embedding files (data caches, not source code)
+/embeddings/
 *.npy
 *.npz
+# Allow the sted/embeddings/ source package
+!sted/embeddings/
+!sted/embeddings/**
 
 # Experiment tracking
 mlruns/

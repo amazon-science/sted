@@ -1,6 +1,6 @@
 [project]
 name = "sted"
-version = "0.1.0"
+version = "0.1.1"
 description = "Semantic Tree Edit Distance (STED) for evaluating consistency of LLM structured outputs"
 readme = "README.md"
 license = {text = "Apache-2.0"}
