@@ -44,6 +44,16 @@ logger = get_logger("agent_evaluator")
 JsonLike = Union[dict, list, str, int, float, bool, None]
 AgentFn = Callable[[str], JsonLike]
 
+# Defaults applied when mode="trajectory". Tool names and parameter names are
+# exact-match (no semantic similarity); step lists are positional. Embedding
+# similarity still applies to parameter values and free-text observations.
+_TRAJECTORY_EXACT_MATCH_FIELDS = frozenset({
+    "name", "tool", "tool_name", "function", "function_name",
+})
+_TRAJECTORY_ORDER_SENSITIVE_FIELDS = frozenset({
+    "trace", "steps", "tool_calls", "messages", "actions", "history",
+})
+
 # Module-level executor for STED timeout enforcement. Lazily created.
 _TIMEOUT_EXECUTOR: Optional[concurrent.futures.ThreadPoolExecutor] = None
 
@@ -185,6 +195,7 @@ class AgentConsistencyEvaluator:
         max_parallel_runs: int = 8,
         n_workers: int = 1,
         timeout_seconds: Optional[float] = None,
+        mode: str = "json",
     ):
         """
         Args:
@@ -206,14 +217,30 @@ class AgentConsistencyEvaluator:
                 exceeds this many seconds, the pair's similarity is marked None
                 and the prompt's PromptResult.error is set to
                 "timeout after Xs". None (default) disables the timeout.
+            mode: "json" (default) or "trajectory". When "trajectory", the
+                default evaluator is created with exact-match on all JSON keys
+                (parameter names) and on tool-name fields ({"name", "tool",
+                "tool_name", "function", "function_name"}), and step lists
+                ({"trace", "steps", "tool_calls", "messages", "actions",
+                "history"}) are matched positionally instead of via Hungarian.
+                Ignored if `evaluator` is provided (configure that explicitly).
         """
         from .structural_consistency_analyzer import StructuralConsistencyAnalyzer
 
+        if mode not in ("json", "trajectory"):
+            raise ValueError(
+                f"mode must be 'json' or 'trajectory', got {mode!r}"
+            )
+
         if evaluator is None:
             from .semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
-            kwargs = {"structural_weight": structural_weight}
+            kwargs: dict = {"structural_weight": structural_weight}
             if embedding_model is not None:
-                kwargs["embedding_model_name"] = embedding_model
+                kwargs["model_id"] = embedding_model
+            if mode == "trajectory":
+                kwargs["exact_match_all_keys"] = True
+                kwargs["exact_match_fields"] = set(_TRAJECTORY_EXACT_MATCH_FIELDS)
+                kwargs["order_sensitive_fields"] = set(_TRAJECTORY_ORDER_SENSITIVE_FIELDS)
             evaluator = SemanticJsonTreeConsistencyEvaluator(**kwargs)
 
         self._evaluator = evaluator
@@ -228,7 +255,35 @@ class AgentConsistencyEvaluator:
             "embedding_model": embedding_model or "all-MiniLM-L6-v2",
             "n_workers": self.n_workers,
             "timeout_seconds": self.timeout_seconds,
+            "mode": mode,
         }
+
+    @classmethod
+    def for_trajectory(
+        cls,
+        evaluator: Optional[Any] = None,
+        structural_weight: float = 0.5,
+        embedding_model: Optional[str] = None,
+        max_parallel_runs: int = 8,
+        n_workers: int = 1,
+        timeout_seconds: Optional[float] = None,
+    ) -> "AgentConsistencyEvaluator":
+        """Construct an evaluator pre-configured for agent trajectories.
+
+        Equivalent to ``AgentConsistencyEvaluator(..., mode="trajectory")``.
+        Tool names and parameter names use exact-match; step lists use
+        positional matching; parameter values and free-text fields still
+        use embedding similarity.
+        """
+        return cls(
+            evaluator=evaluator,
+            structural_weight=structural_weight,
+            embedding_model=embedding_model,
+            max_parallel_runs=max_parallel_runs,
+            n_workers=n_workers,
+            timeout_seconds=timeout_seconds,
+            mode="trajectory",
+        )
 
     # ---------- Public API ----------
 

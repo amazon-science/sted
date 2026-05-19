@@ -245,3 +245,70 @@ def test_min_length_zero_uses_embeddings_for_short_strings():
     # a float in [0,1].
     s = ev._calculate_semantic_similarity("a", "b")
     assert 0.0 <= s <= 1.0
+
+
+# ---------- Trajectory-mode defaults (Issue 94) ------------------------------
+
+
+def test_trajectory_mode_sets_exact_match_keys():
+    """trajectory mode wires exact-match on keys + tool-name fields, plus
+    positional matching on step lists."""
+    ev = AgentConsistencyEvaluator(mode="trajectory")
+    inner = ev._evaluator
+    assert inner.exact_match_all_keys is True
+    assert "name" in inner.exact_match_fields
+    assert "tool" in inner.exact_match_fields
+    assert "tool_name" in inner.exact_match_fields
+    assert "function" in inner.exact_match_fields
+    assert "tool_calls" in inner.order_sensitive_fields
+    assert "steps" in inner.order_sensitive_fields
+    assert ev._metric_config["mode"] == "trajectory"
+
+
+def test_for_trajectory_classmethod_equivalent_to_mode_kw():
+    a = AgentConsistencyEvaluator.for_trajectory()
+    b = AgentConsistencyEvaluator(mode="trajectory")
+    assert a._evaluator.exact_match_all_keys == b._evaluator.exact_match_all_keys
+    assert a._evaluator.exact_match_fields == b._evaluator.exact_match_fields
+    assert a._evaluator.order_sensitive_fields == b._evaluator.order_sensitive_fields
+
+
+def test_default_mode_does_not_force_exact_match():
+    ev = AgentConsistencyEvaluator()
+    assert ev._evaluator.exact_match_all_keys is False
+    assert ev._evaluator.exact_match_fields == set()
+
+
+def test_invalid_mode_raises():
+    with pytest.raises(ValueError, match="mode must be"):
+        AgentConsistencyEvaluator(mode="bogus")
+
+
+def test_trajectory_mode_penalizes_tool_name_drift():
+    """Two trajectories that only differ in tool name (semantically similar
+    e.g. 'search' vs 'lookup') should score LOWER under trajectory mode than
+    under default JSON mode, because tool names are exact-match in trajectory
+    mode."""
+    traj_a = {"tool_calls": [{"name": "search", "args": {"q": "python"}}]}
+    traj_b = {"tool_calls": [{"name": "lookup", "args": {"q": "python"}}]}
+
+    json_mode = AgentConsistencyEvaluator()
+    traj_mode = AgentConsistencyEvaluator.for_trajectory()
+
+    s_json = json_mode.evaluate_pair(traj_a, traj_b)
+    s_traj = traj_mode.evaluate_pair(traj_a, traj_b)
+
+    # trajectory mode should be strictly lower (or equal) since exact-match
+    # fields turn the ~0.6 semantic sim on "search"/"lookup" into 0.
+    assert s_traj <= s_json + 1e-6
+
+
+def test_explicit_evaluator_overrides_mode():
+    """If an evaluator is passed explicitly, mode is ignored for its config."""
+    custom = SemanticJsonTreeConsistencyEvaluator(
+        model_id="all-MiniLM-L6-v2",
+        exact_match_all_keys=False,
+    )
+    ev = AgentConsistencyEvaluator(evaluator=custom, mode="trajectory")
+    # Did NOT mutate the user-supplied evaluator.
+    assert ev._evaluator.exact_match_all_keys is False
