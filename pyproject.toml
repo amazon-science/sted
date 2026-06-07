@@ -48,7 +48,7 @@ dependencies = [
     "zss>=1.2.0",
     "tqdm>=4.62.0",
     "sentence-transformers>=2.2.0",
-    "langchain-text-splitters>=0.0.1",
+    "langchain-text-splitters>=0.3.11",
 ]
 
 [project.optional-dependencies]
