@@ -64,16 +64,24 @@ Validation artifacts cover human preference, generated perturbations, constructe
 
 ## Installation
 
+`sted` is not published on PyPI; `pip install sted` will not install this library.
+Install it from GitHub instead:
+
 ```bash
-# Clone the repository
+# Directly from GitHub
+pip install "git+https://github.com/amazon-science/sted.git"
+
+# With optional extras (bedrock, openai, bertscore)
+pip install "sted[bedrock] @ git+https://github.com/amazon-science/sted.git"
+```
+
+Or from a local clone:
+
+```bash
 git clone https://github.com/amazon-science/sted.git
 cd sted
-
-# Install the library
-pip install -e .
-
-# Or with uv
-uv pip install -e .
+pip install -e .          # or: uv pip install -e .
+pip install -e ".[bedrock,openai]"   # with extras
 ```
 
 For development:
@@ -282,7 +290,7 @@ Known limits to plan around:
 | No dashboards / async monitoring | not in scope | See LangSmith / Braintrust for that layer |
 | Cosine similarity calibration drifts with embedder | known | Pin embedder version; validate on your domain |
 
-CLI usage (after `pip install sted`):
+CLI usage (after installing as above):
 
 ```bash
 sted-eval --input production_logs.jsonl --workers 4 --output report.json

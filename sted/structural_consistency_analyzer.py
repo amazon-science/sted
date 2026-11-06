@@ -78,7 +78,7 @@ class StructuralConsistencyAnalyzer:
                 if bert_score is None:
                     raise ImportError(
                         "bert_score is required for method='bertscore'. "
-                        "Install with: pip install sted[bertscore]"
+                        "Install with: pip install bert-score"
                     )
                 P, R, F1 = bert_score(list(cands), list(refs), lang="en", verbose=False)
                 scores = [float(f.item()) for f in F1]
