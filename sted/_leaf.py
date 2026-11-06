@@ -244,7 +244,10 @@ def document_edit_radius(theta: float, tau: Optional[float], structural_weight: 
 # Off by default so every published number is reproduced bit for bit.
 
 _LIT_NUMBER = re.compile(r"^\s*[-+]?(\d[\d,]*)?(\.\d+)?([eE][-+]?\d+)?\s*$")
-_LIT_NUMLIST = re.compile(r"^\s*[-+]?\d+(\.\d+)?(\s*[,;/ ]\s*[-+]?\d+(\.\d+)?)+\s*$")
+# Separator: one of , ; / with optional whitespace, or a whitespace run holding at
+# least one space. Written so each separator has exactly one parse; the earlier
+# `\s*[,;/ ]\s*` let a run of spaces split many ways and backtracked exponentially.
+_LIT_NUMLIST = re.compile(r"^\s*[-+]?\d+(?:\.\d+)?(?:(?:\s*[,;/]\s*|[^\S ]* \s*)[-+]?\d+(?:\.\d+)?)+\s*$")
 _LIT_DATE = re.compile(r"^\s*(\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[-+]\d{2}:?\d{2})?)?"
                        r"|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}:\d{2}(:\d{2})?)\s*$")
 _LIT_AMOUNT = re.compile(r"^\s*[$€£¥]?\s*[-+]?\d[\d,]*(\.\d+)?\s*(%|[A-Za-z]{1,3})?\s*$")
