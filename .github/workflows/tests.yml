@@ -22,8 +22,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python: ["3.10", "3.11", "3.12", "3.13"]
         include:
+          # ubuntu-latest (26.04) no longer ships 3.9, which requires-python still allows
+          - os: ubuntu-22.04
+            python: "3.9"
           - os: macos-latest
             python: "3.12"
           - os: windows-latest
