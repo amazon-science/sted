@@ -93,8 +93,13 @@ dev = [
 ]
 
 # Convenience: install everything optional.
+# MCP server (`sted-mcp`). The mcp SDK needs Python >= 3.10.
+mcp = [
+    "mcp>=1.2.0; python_version >= '3.10'",
+]
+
 all = [
-    "sted[bedrock,openai,bertscore,yaml,viz,async]",
+    "sted[bedrock,openai,bertscore,yaml,viz,async,mcp]",
 ]
 
 [project.urls]
@@ -104,6 +109,7 @@ Issues = "https://github.com/amazon-science/sted/issues"
 
 [project.scripts]
 sted-eval = "sted.cli:main"
+sted-mcp = "sted.mcp_server:main"
 
 [build-system]
 requires = ["hatchling"]

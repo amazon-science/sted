@@ -17,6 +17,8 @@ A framework for measuring consistency in LLM-generated structured outputs. It co
   value (`3` equals `"3"`), free text by embedding similarity.
 - **20-model results** on Toucan tool calling across 11 temperatures, see
   [Results and Findings](#results-and-findings).
+- **MCP server** `sted-mcp` with `compare_outputs` and `evaluate_consistency` tools,
+  see [MCP Server](#mcp-server).
 - Fixed a regular expression that could backtrack exponentially on long runs of spaces.
 
 **May 2026**
@@ -58,7 +60,7 @@ Validation artifacts cover human preference, generated perturbations, constructe
 - **Semantic Tree Edit Distance (STED)**: Advanced similarity calculation combining structural and semantic analysis
 - **Multiple Variation Types**: Support for schema, expression, and semantic variations
 - **LLM Benchmarking**: Comprehensive evaluation of different LLMs across temperature settings
-- **MCP Server Support**: Model Context Protocol server for real-time consistency evaluation in agentic systems
+- **MCP Server**: `sted-mcp` exposes STED to MCP clients (Claude Code, Claude Desktop, other agents) as two tools, see [MCP Server](#mcp-server)
 - **Synthetic Dataset Generation**: Automated generation of variation datasets for evaluation
 - **Visualization Tools**: Rich plotting and analysis capabilities for results interpretation
 
@@ -223,6 +225,44 @@ print(report.summary())
 The evaluator separates **validity** ($r_v$ — fraction of runs that produced
 parseable output) from **consistency** ($c_\text{mean}$ — pairwise STED on the
 parseable subset), matching the deployment-aware framing of the STED paper.
+
+### MCP Server
+
+`sted-mcp` serves STED over the [Model Context Protocol](https://modelcontextprotocol.io)
+(stdio), so an agent can check its own outputs or compare runs. Requires Python ≥ 3.10.
+
+```bash
+pip install "sted[mcp] @ git+https://github.com/amazon-science/sted.git"
+
+# Claude Code
+claude mcp add sted -- sted-mcp
+```
+
+Claude Desktop (`claude_desktop_config.json`; Desktop does not read your shell `PATH`,
+so give the absolute path printed by `which sted-mcp`):
+
+```json
+{ "mcpServers": { "sted": { "command": "/absolute/path/to/sted-mcp" } } }
+```
+
+| Tool | Input | Returns |
+|---|---|---|
+| `compare_outputs` | `output_a`, `output_b`, `threshold` (0.95) | `min_readout`, `mean_readout`, `same` (= min readout ≥ threshold) |
+| `evaluate_consistency` | `outputs` (2–50 generations of one prompt), `threshold` (0.95) | `validity`, `agreement_min`, `agreement_mean`, `share_same`, `least_agreeing_pair` |
+
+Outputs can be JSON values or JSON text; text that does not parse counts as invalid.
+Free-text fields are embedded locally with `all-MiniLM-L6-v2` (override with
+`STED_EMBEDDING_MODEL`), so no cloud credentials are needed. For example, four runs of a
+search tool call, one of which is a refusal:
+
+```json
+{"n_outputs": 4, "n_valid": 3, "validity": 0.75,
+ "agreement_min": 0.333, "agreement_mean": 0.833, "share_same": 0.333,
+ "least_agreeing_pair": {"i": 0, "j": 2, "min_readout": 0.0}}
+```
+
+The two runs that differ only in key order count as the same; `limit: 5` vs `limit: 10`
+is the least-agreeing pair.
 
 ### Performance
 
