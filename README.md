@@ -6,7 +6,7 @@ A framework for measuring consistency in LLM-generated structured outputs. It co
 
 ## What's New
 
-**November 2026**
+**November 2026 — v0.2.0**
 - **Breaking: new default scoring.** `SemanticJsonTreeConsistencyEvaluator()` now uses
   `profile="typed"` (the *min readout*): a score of θ means every matched field scores at
   least θ, so a changed argument is no longer averaged away. Scores will differ from

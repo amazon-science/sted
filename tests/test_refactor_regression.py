@@ -8,7 +8,7 @@ behavioral change.
 
 These values were captured with v0.1.1 of the library.
 
-Re-captured for v0.2.1, where ``_calculate_semantic_similarity`` stopped affinely rescaling the
+Re-captured for v0.2.0, where ``_calculate_semantic_similarity`` stopped affinely rescaling the
 embedding cosine as ``(cos + 1) / 2`` and now truncates it at zero. That rescaling gave long-string
 leaves a similarity floor near 0.47 while the short-string branch, numbers, booleans and
 ``exact_match_fields`` all used the full 0/1 scale, so identical amounts of disagreement were priced
@@ -16,7 +16,7 @@ leaves a similarity floor near 0.47 while the short-string branch, numbers, bool
 reach the embedding path moved, and the distances (1 - score) for the two pure-value cases moved by
 exactly 2x, which is the rescaling factor:
 
-| case | v0.1.1 | v0.2.1 |
+| case | v0.1.1 | v0.2.0 |
 |---|---|---|
 | ``tool_call_arg_drift`` ("python" vs "java") | 0.931212 | 0.862424 |
 | ``single_string_change`` ("John Smith" vs "Jane Smith") | 0.917750 | 0.835501 |
