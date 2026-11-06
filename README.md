@@ -4,8 +4,32 @@ A framework for measuring consistency in LLM-generated structured outputs. It co
 
 > 📄 **Paper**: [STED and Consistency Scoring: A Framework for Evaluating LLM Structured Output Reliability](docs/STED_and_Consistency_Scoring.pdf) - Accepted at NeurIPS 2025 Workshop on Structured Probabilistic Inference & Generative Modeling
 
+## What's New
+
+**November 2026**
+- **Breaking: new default scoring.** `SemanticJsonTreeConsistencyEvaluator()` now uses
+  `profile="typed"` (the *min readout*): a score of θ means every matched field scores at
+  least θ, so a changed argument is no longer averaged away. Scores will differ from
+  earlier releases; pass `profile="legacy"` to reproduce them exactly.
+- **Two readouts.** `profile="typed"` decides whether two outputs are the same;
+  `profile="typed_mean"` grades how far they drift. See the [profile table](#basic-similarity-calculation).
+- **Type-aware leaves.** Literals (identifiers, dates, codes) compare exactly, numbers by
+  value (`3` equals `"3"`), free text by embedding similarity.
+- **20-model results** on Toucan tool calling across 11 temperatures, see
+  [Results and Findings](#results-and-findings).
+- Fixed a regular expression that could backtrack exponentially on long runs of spaces.
+
+**May 2026**
+- `AgentConsistencyEvaluator` with trajectory mode, an OpenTelemetry adapter and the
+  `sted-eval` CLI.
+
+**2025**
+- STED and Consistency Scoring accepted at the NeurIPS 2025 Workshop on Structured
+  Probabilistic Inference & Generative Modeling.
+
 ## Table of Contents
 
+- [What's New](#whats-new)
 - [Overview](#overview)
 - [Key Features](#key-features)
 - [Installation](#installation)
