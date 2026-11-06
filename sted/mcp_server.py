@@ -96,8 +96,10 @@ def compare_outputs(output_a: Any, output_b: Any, threshold: float = 0.95) -> Di
     for name, raw, val in (("output_a", output_a, a), ("output_b", output_b, b)):
         if val is None:
             raise ValueError(f"{name} is not valid JSON: {str(raw)[:80]!r}")
-    lo = _agent_evaluator("typed").evaluate_pair(a, b)
-    mean = _agent_evaluator("typed_mean").evaluate_pair(a, b)
+    # STED directly: AgentConsistencyEvaluator.evaluate_pair scores an empty object
+    # as invalid (0.0), but an explicit pair of {} and {} is identical.
+    lo = _agent_evaluator("typed")._evaluator.calculate_tree_edit_distance_fast(a, b)
+    mean = _agent_evaluator("typed_mean")._evaluator.calculate_tree_edit_distance_fast(a, b)
     return {
         "min_readout": round(float(lo), 6),
         "mean_readout": round(float(mean), 6),

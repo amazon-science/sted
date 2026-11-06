@@ -29,6 +29,15 @@ def test_compare_changed_argument_min_rejects_mean_dips():
     assert r["same"] is False
 
 
+def test_compare_non_object_values():
+    assert ms.compare_outputs({}, {})["same"] is True          # identical empties
+    assert ms.compare_outputs([], [])["same"] is True
+    assert ms.compare_outputs({}, {"a": 1})["min_readout"] == 0.0
+    assert ms.compare_outputs([1, 2, 3], [1, 2, 3])["same"] is True
+    assert ms.compare_outputs([1, 2, 3], [3, 2, 1])["same"] is False   # arrays are positional
+    assert ms.compare_outputs(42, 42)["same"] is True
+
+
 def test_compare_accepts_json_text():
     assert ms.compare_outputs(json.dumps(REF), json.dumps(REORDERED))["same"] is True
 
