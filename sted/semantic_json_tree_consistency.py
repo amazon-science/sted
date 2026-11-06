@@ -226,6 +226,20 @@ def _levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 
+def format_json_path(path) -> str:
+    """Typed path -> readable JSONPath-like string: ``arguments.days``, ``[0].name``,
+    ``["a.b"]`` for keys that are not plain identifiers, ``$`` for the root."""
+    parts = []
+    for kind, step in path:
+        if kind == "index":
+            parts.append(f"[{step}]")
+        elif isinstance(step, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", step):
+            parts.append(("." if parts else "") + step)
+        else:
+            parts.append(f"[{json.dumps(step)}]")
+    return "".join(parts) or "$"
+
+
 class SemanticJsonTreeConsistencyEvaluator:
     """Evaluator for JSON structural consistency using Tree Edit Distance with semantic similarity."""
 
@@ -2309,6 +2323,62 @@ class SemanticJsonTreeConsistencyEvaluator:
     def _leaf_paths_skipping_holes(self, obj: Any) -> Dict[JsonPath, Any]:
         """_leaf_paths, but an unmatched hole contributes no leaves."""
         return terminal_paths(obj, skip=self._UNMATCHED, skip_enabled=True)
+
+    def calculate_field_differences(self, json1: Any, json2: Any) -> List[Dict[str, Any]]:
+        """Per-field scores behind the tree score, for the fields that differ.
+
+        Fields are terminal paths (primitives and empty containers, typed key/index
+        steps). A field present on one side only is ``missing`` (in json2) or
+        ``extra`` (in json2) and scores 0. For a field present on both sides with
+        different values, the score is the tree score of ``json1`` against a copy of
+        ``json1`` with only that field replaced by json2's value: siblings, path and
+        callee identity stay in context, so the field is scored exactly as it is
+        inside the full comparison. Under a bottleneck profile with positional
+        arrays and exact keys (``typed``), the tree score equals the minimum over
+        these scores (1.0 when the list is empty).
+
+        Returns dicts ``{"path", "status", "a", "b", "score"}`` sorted by score.
+        """
+        from ._paths import EmptyContainer, terminal_paths
+
+        pa, pb = terminal_paths(json1), terminal_paths(json2)
+
+        def show(v):
+            if isinstance(v, EmptyContainer):
+                return {} if v is EmptyContainer.OBJECT else []
+            return v
+
+        def replaced(doc, path, value):
+            doc = json.loads(json.dumps(doc))
+            if not path:
+                return value
+            node = doc
+            for _, step in path[:-1]:
+                node = node[step]
+            node[path[-1][1]] = value
+            return doc
+
+        out: List[Dict[str, Any]] = []
+        for p in sorted(set(pa) | set(pb), key=repr):
+            if p not in pb:
+                out.append({"path": format_json_path(p), "status": "missing", "a": show(pa[p]), "b": None, "score": 0.0})
+            elif p not in pa:
+                out.append({"path": format_json_path(p), "status": "extra", "a": None, "b": show(pb[p]), "score": 0.0})
+            else:
+                x, y = pa[p], pb[p]
+                if isinstance(x, EmptyContainer) or isinstance(y, EmptyContainer):
+                    if x is y:
+                        continue
+                    score = 0.0
+                elif type(x) is type(y) and x == y:
+                    continue
+                else:
+                    score = float(self.calculate_tree_edit_distance_fast(json1, replaced(json1, p, y)))
+                    if score >= 1.0:
+                        continue   # e.g. 3 vs "3": not a difference under this profile
+                out.append({"path": format_json_path(p), "status": "changed", "a": show(x), "b": show(y), "score": score})
+        out.sort(key=lambda d: d["score"])
+        return out
 
     def calculate_readouts(self, json1: Any, json2: Any) -> Dict[str, float]:
         """One leaf table, two readouts.

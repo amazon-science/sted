@@ -35,6 +35,9 @@ import threading
 from typing import Any, Dict, List, Optional
 
 MAX_OUTPUTS = 50                 # 1,225 pairs; keeps one tool call bounded
+MAX_DIFFS = 20                   # differing fields listed per pair
+MAX_DIFF_PAIRS = 300             # pairs searched for unstable fields (evenly sampled beyond)
+MAX_VALUE_CHARS = 200            # long string values are truncated in the response
 PAIR_TIMEOUT_SECONDS = 30.0
 DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
@@ -78,6 +81,19 @@ def _parse(output: Any) -> Any:
     return output
 
 
+def _short(v: Any) -> Any:
+    if isinstance(v, str) and len(v) > MAX_VALUE_CHARS:
+        return v[:MAX_VALUE_CHARS] + "..."
+    return v
+
+
+def _differences(a: Any, b: Any, limit: int = MAX_DIFFS) -> List[Dict[str, Any]]:
+    """Fields that differ under the min readout, lowest score first."""
+    diffs = _agent_evaluator("typed")._evaluator.calculate_field_differences(a, b)
+    return [{**d, "a": _short(d["a"]), "b": _short(d["b"]), "score": round(d["score"], 6)}
+            for d in diffs[:limit]]
+
+
 def _check_threshold(threshold: float) -> None:
     if not 0.0 <= threshold <= 1.0:
         raise ValueError(f"threshold must be in [0, 1], got {threshold}")
@@ -89,7 +105,10 @@ def compare_outputs(output_a: Any, output_b: Any, threshold: float = 0.95) -> Di
 
     Returns min_readout (lowest matched-field score; use it to decide whether the
     outputs are the same), mean_readout (average field score; use it to grade how far
-    apart they are), and same = min_readout >= threshold.
+    apart they are), same = min_readout >= threshold, and differences: the fields that
+    differ, lowest score first, each with path, status (changed / missing from b /
+    extra in b), the two values and the field score. min_readout equals the lowest
+    field score.
     """
     _check_threshold(threshold)
     a, b = _parse(output_a), _parse(output_b)
@@ -105,6 +124,7 @@ def compare_outputs(output_a: Any, output_b: Any, threshold: float = 0.95) -> Di
         "mean_readout": round(float(mean), 6),
         "same": bool(lo >= threshold),
         "threshold": threshold,
+        "differences": _differences(a, b),
     }
 
 
@@ -118,8 +138,10 @@ def evaluate_consistency(outputs: List[Any], threshold: float = 0.95) -> Dict[st
 
     outputs: 2 to 50 generations (JSON values or JSON text). Returns validity (share
     that parse), agreement_min / agreement_mean (mean pairwise STED over valid outputs
-    under each readout), share_same (pairs with min readout >= threshold), and the
-    least-agreeing pair by index into `outputs`.
+    under each readout), share_same (pairs with min readout >= threshold),
+    unstable_fields (fields scoring below threshold in some pair: the share of pairs
+    in which each disagrees, and the values seen across outputs), and the least-agreeing pair by index into
+    `outputs` with its differing fields.
     """
     _check_threshold(threshold)
     if not isinstance(outputs, list) or len(outputs) < 2:
@@ -152,14 +174,54 @@ def evaluate_consistency(outputs: List[Any], threshold: float = 0.95) -> Dict[st
     worst_s, (wi, wj) = min(scored, key=lambda t: t[0])
     finite_mean = [s for s in mean.pairwise_similarities if s is not None]
 
+    from ._paths import EmptyContainer, terminal_paths
+    from .semantic_json_tree_consistency import format_json_path
+
+    # A pair at or above threshold has every field at or above it, so only pairs
+    # below threshold can hold an unstable field.
+    below = [(s, p) for s, p in scored if s < threshold]
+    n_below = len(below)
+    if len(below) > MAX_DIFF_PAIRS:
+        step = len(below) / MAX_DIFF_PAIRS
+        below = [below[int(k * step)] for k in range(MAX_DIFF_PAIRS)]
+    sted = _agent_evaluator("typed")._evaluator
+    counts: Dict[str, int] = {}
+    for _, (i, j) in below:
+        for d in sted.calculate_field_differences(parsed[valid_idx[i]], parsed[valid_idx[j]]):
+            if d["score"] < threshold:
+                counts[d["path"]] = counts.get(d["path"], 0) + 1
+
+    leaves = [{format_json_path(p): v for p, v in terminal_paths(parsed[k]).items()} for k in valid_idx]
+    def values_at(path):
+        seen: Dict[str, List[Any]] = {}
+        for lv in leaves:
+            v = lv.get(path, "<absent>")
+            if isinstance(v, EmptyContainer):
+                v = {} if v is EmptyContainer.OBJECT else []
+            key = json.dumps(v, sort_keys=True, default=str)
+            seen.setdefault(key, [_short(v), 0])[1] += 1
+        ranked = sorted(seen.values(), key=lambda t: -t[1])[:5]
+        return [{"value": v, "count": c} for v, c in ranked]
+
+    # Share of all valid pairs in which the field disagrees (scaled up from the
+    # sample when the disagreeing pairs were sampled).
+    scale = (n_below / len(below)) / len(scored) if below else 0.0
+    unstable = [{"path": path, "share_of_pairs": round(c * scale, 6), "values": values_at(path)}
+                for path, c in sorted(counts.items(), key=lambda t: (-t[1], t[0]))[:MAX_DIFFS]]
+
     out.update(
         agreement_min=round(statistics.mean(s for s, _ in scored), 6),
         agreement_mean=round(statistics.mean(finite_mean), 6) if finite_mean else None,
         share_same=round(sum(s >= threshold for s, _ in scored) / len(scored), 6),
         n_pairs=len(pairs),
         threshold=threshold,
-        least_agreeing_pair={"i": valid_idx[wi], "j": valid_idx[wj], "min_readout": round(worst_s, 6)},
+        unstable_fields=unstable,
+        least_agreeing_pair={"i": valid_idx[wi], "j": valid_idx[wj], "min_readout": round(worst_s, 6),
+                             "differences": _differences(parsed[valid_idx[wi]], parsed[valid_idx[wj]])},
     )
+    if n_below > MAX_DIFF_PAIRS:
+        out["unstable_fields_note"] = (f"share_of_pairs estimated from an even sample of "
+                                       f"{MAX_DIFF_PAIRS} of the {n_below} disagreeing pairs")
     errors = {r.error for r in (lo, mean) if r.error}
     if errors:
         out["note"] = "; ".join(sorted(errors))

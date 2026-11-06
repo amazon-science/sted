@@ -17,8 +17,10 @@ A framework for measuring consistency in LLM-generated structured outputs. It co
   value (`3` equals `"3"`), free text by embedding similarity.
 - **20-model results** on Toucan tool calling across 11 temperatures, see
   [Results and Findings](#results-and-findings).
-- **MCP server** `sted-mcp` with `compare_outputs` and `evaluate_consistency` tools,
-  see [MCP Server](#mcp-server).
+- **MCP server** `sted-mcp` with `compare_outputs` and `evaluate_consistency` tools that
+  report which fields differ, see [MCP Server](#mcp-server).
+- **Field-level differences**: `calculate_field_differences(a, b)` lists each differing
+  field with its score; under `typed` the score is the lowest of them.
 - Fixed a regular expression that could backtrack exponentially on long runs of spaces.
 
 **May 2026**
@@ -248,8 +250,8 @@ so give the absolute path printed by `which sted-mcp`):
 
 | Tool | Input | Returns |
 |---|---|---|
-| `compare_outputs` | `output_a`, `output_b`, `threshold` (0.95) | `min_readout`, `mean_readout`, `same` (= min readout ≥ threshold) |
-| `evaluate_consistency` | `outputs` (2–50 generations of one prompt), `threshold` (0.95) | `validity`, `agreement_min`, `agreement_mean`, `share_same`, `least_agreeing_pair` |
+| `compare_outputs` | `output_a`, `output_b`, `threshold` (0.95) | `min_readout`, `mean_readout`, `same` (= min readout ≥ threshold), `differences` (each differing field: path, changed / missing / extra, both values, field score) |
+| `evaluate_consistency` | `outputs` (2–50 generations of one prompt), `threshold` (0.95) | `validity`, `agreement_min`, `agreement_mean`, `share_same`, `unstable_fields` (which fields disagree, in what share of pairs, with the values seen), `least_agreeing_pair` with its `differences` |
 
 Outputs can be JSON values or JSON text; text that does not parse counts as invalid.
 Free-text fields are embedded locally with `all-MiniLM-L6-v2` (override with
@@ -259,11 +261,17 @@ search tool call, one of which is a refusal:
 ```json
 {"n_outputs": 4, "n_valid": 3, "validity": 0.75,
  "agreement_min": 0.333, "agreement_mean": 0.833, "share_same": 0.333,
- "least_agreeing_pair": {"i": 0, "j": 2, "min_readout": 0.0}}
+ "unstable_fields": [{"path": "arguments.limit", "share_of_pairs": 0.667,
+                      "values": [{"value": 5, "count": 2}, {"value": 10, "count": 1}]}],
+ "least_agreeing_pair": {"i": 0, "j": 2, "min_readout": 0.0,
+   "differences": [{"path": "arguments.limit", "status": "changed", "a": 5, "b": 10, "score": 0.0}]}}
 ```
 
-The two runs that differ only in key order count as the same; `limit: 5` vs `limit: 10`
-is the least-agreeing pair.
+The refusal is invalid, the two runs that differ only in key order count as the same, and
+`unstable_fields` names the one field that varies: `limit`. The minimum readout always
+equals the lowest field score, so the listed differences fully explain it. The same
+breakdown is available in Python as
+`SemanticJsonTreeConsistencyEvaluator(profile="typed").calculate_field_differences(a, b)`.
 
 ### Performance
 

@@ -97,3 +97,38 @@ def test_stdio_server_end_to_end():
                 assert json.loads(res.content[0].text)["validity"] == 1.0
 
     asyncio.run(asyncio.wait_for(run(), timeout=240))
+
+
+def test_compare_lists_field_differences():
+    r = ms.compare_outputs(REF, {"name": "get_weather", "arguments": {"city": "Seattle, WA", "days": "5"}})
+    by_path = {d["path"]: d for d in r["differences"]}
+    assert by_path["arguments.days"] == {"path": "arguments.days", "status": "changed", "a": 3, "b": "5", "score": 0.0}
+    assert by_path["arguments.units"]["status"] == "missing"
+    assert 0.5 < by_path["arguments.city"]["score"] < 1.0
+    assert r["min_readout"] == min(d["score"] for d in r["differences"])
+    assert ms.compare_outputs(REF, REORDERED)["differences"] == []   # 3 vs "3" is not a difference
+
+
+def test_compare_flags_changed_callee_name():
+    r = ms.compare_outputs(REF, {**REF, "name": "get_weathers"})
+    assert r["differences"][0]["path"] == "name" and r["differences"][0]["score"] == 0.0
+
+
+def test_evaluate_consistency_unstable_fields():
+    a = {"name": "search", "arguments": {"q": "hotels in Paris", "limit": 5}}
+    b = {"name": "search", "arguments": {"q": "hotels in Paris", "limit": 10}}
+    c = {"name": "search", "arguments": {"q": "hotels in Paris", "limit": 5, "sort": "price"}}
+    r = ms.evaluate_consistency([a] * 6 + [b] * 3 + [c])          # 10 valid -> 45 pairs
+    fields = {u["path"]: u for u in r["unstable_fields"]}
+    assert fields["arguments.limit"]["share_of_pairs"] == pytest.approx(21 / 45, abs=1e-6)   # 7 x 3
+    assert fields["arguments.sort"]["share_of_pairs"] == pytest.approx(9 / 45, abs=1e-6)     # 9 x 1
+    assert {"value": 5, "count": 7} in fields["arguments.limit"]["values"]
+    assert {"value": "<absent>", "count": 9} in fields["arguments.sort"]["values"]
+    assert r["least_agreeing_pair"]["differences"]
+
+
+def test_evaluate_consistency_unstable_fields_sampled_share_is_scaled():
+    outs = [{"name": "search", "arguments": {"q": "hotels", "limit": 5 + i % 2}} for i in range(50)]
+    r = ms.evaluate_consistency(outs)                              # 625 of 1,225 pairs disagree
+    assert r["unstable_fields"][0]["share_of_pairs"] == pytest.approx(625 / 1225, abs=1e-6)
+    assert "estimated" in r["unstable_fields_note"]
