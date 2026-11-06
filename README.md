@@ -514,19 +514,36 @@ See [STED Complexity Analysis](./docs/api/sted_complexity_analysis.md) for detai
 
 ## Results and Findings
 
-Evaluated **19 LLMs** across multiple temperature settings:
+![Tool-call consistency of 20 LLMs](images/socb_toucan_consistency.png)
+
+**20 LLMs** on Toucan tool calling: 1,006 prompts, 10 generations per prompt at each of
+11 temperatures (0.0–1.0), scored with STED's min readout (`profile="typed"`).
+Agreement $c_{mean}$ is the mean pairwise STED among a prompt's *valid* outputs; validity
+$r_v$ is the share of outputs that parse. They are reported separately.
+
+- **No model is fully consistent at T = 0.** Agreement ranges from 0.26 (Mistral-Large-3)
+  to 0.98 (Claude-3.5-Haiku).
+- **Temperature effects are model-specific.** Claude-Haiku-4.5 drops from 0.94 to 0.71
+  between T = 0 and T = 1; GPT-4.1-Mini is unchanged (0.60); Llama-3.3-70B rises slightly.
+- **Validity and agreement are different axes.** Llama-3.3-70B parses only 33% of the
+  time; Grok-4.1-Fast parses 95% but agrees at 0.68.
 
 | Provider | Models |
 |----------|--------|
-| Anthropic | Claude 3 Haiku, Claude 3.5 Haiku, Claude 3.5 Sonnet, Claude 3.7 Sonnet |
-| Amazon | Nova Lite, Nova Pro v1 |
-| Meta | Llama 3.1 70B, Llama 3.1 405B, Llama 3.3 70B, Llama 4 Maverick |
-| OpenAI | GPT-4o, GPT-4.1 Mini |
-| Google | Gemini 2.5 Flash, Gemini 2.5 Flash Lite, Gemini 2.5 Pro |
-| DeepSeek | DeepSeek V3, DeepSeek V3.1 |
+| Anthropic | Claude 3.5 Haiku, Claude 3.5 Sonnet, Claude 3.7 Sonnet, Claude Sonnet 4, Claude Opus 4, Claude Haiku 4.5, Claude Sonnet 4.5, Claude Opus 4.5 |
+| Amazon | Nova 2 Lite |
+| OpenAI | GPT-4.1 Mini, GPT-OSS-120B |
+| Google | Gemini 2.5 Flash Lite |
+| Meta | Llama 3.3 70B |
 | Alibaba | Qwen3 32B, Qwen3 235B A22B |
+| Mistral | Mistral Large 3 (675B) |
+| NVIDIA | Nemotron 3 Nano 30B A3B |
+| xAI | Grok 4.1 Fast |
+| MiniMax | MiniMax M2 |
+| Xiaomi | MiMo V2 Flash |
 
-**Scale**: 19 models, 11 temperature settings (0.0–1.0), ~2.1M outputs across 1,006 tool-calling samples
+The NeurIPS 2025 workshop paper evaluated an earlier set of 19 models (Claude 3/3.5/3.7,
+Nova, Llama 3.1/3.3/4, GPT-4o, Gemini 2.5, DeepSeek V3, Qwen3) with the `legacy` profile.
 
 ## Contributing
 
