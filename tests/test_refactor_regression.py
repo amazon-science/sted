@@ -7,6 +7,23 @@ these inputs. If any of these tests fail, the refactor introduced a
 behavioral change.
 
 These values were captured with v0.1.1 of the library.
+
+Re-captured for v0.2.1, where ``_calculate_semantic_similarity`` stopped affinely rescaling the
+embedding cosine as ``(cos + 1) / 2`` and now truncates it at zero. That rescaling gave long-string
+leaves a similarity floor near 0.47 while the short-string branch, numbers, booleans and
+``exact_match_fields`` all used the full 0/1 scale, so identical amounts of disagreement were priced
+2.1x lower for a long string than for a number. Only the three cases whose leaves are long enough to
+reach the embedding path moved, and the distances (1 - score) for the two pure-value cases moved by
+exactly 2x, which is the rescaling factor:
+
+| case | v0.1.1 | v0.2.1 |
+|---|---|---|
+| ``tool_call_arg_drift`` ("python" vs "java") | 0.931212 | 0.862424 |
+| ``single_string_change`` ("John Smith" vs "Jane Smith") | 0.917750 | 0.835501 |
+| ``semantic_key_rename`` ("email" vs "email_address") | 0.732952 | 0.715905 |
+
+The eight remaining cases are unchanged, as are all of them under the D1/D2/D3a/D3b/D5 fixes that
+preceded this one. See ``docs/design/sted_computation_defects.md``.
 """
 from __future__ import annotations
 
@@ -21,18 +38,20 @@ GOLDEN = {
     "tool_call_match": 1.000000,
     "array_reorder": 1.000000,
     "type_coercion_bool_str": 0.950000,
-    "tool_call_arg_drift": 0.931212,
-    "single_string_change": 0.917750,
+    "tool_call_arg_drift": 0.862424,
+    "single_string_change": 0.835501,
     "nested_dict": 0.750000,
-    "semantic_key_rename": 0.732952,
+    "semantic_key_rename": 0.715905,
     "w0_content_only": 0.000000,
     "w1_struct_only": 0.000000,
 }
 
 
+# Pinned values are the published (legacy) configuration; the default profile is now
+# "typed", so the profile is named explicitly.
 @pytest.fixture(scope="module")
 def evaluator():
-    return STED()
+    return STED(profile="legacy")
 
 
 def _check(actual: float, expected: float, name: str) -> None:

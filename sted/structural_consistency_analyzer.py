@@ -168,10 +168,12 @@ class StructuralConsistencyAnalyzer:
 
         # Prepare similarity computation by collecting all string pairs
         if gt:
-
-            if isinstance(gt, list) and len(gt) == 1:
-                gt = gt[0]
-
+            # A single-element ground-truth list used to be unwrapped here (gt = gt[0])
+            # while the outputs stayed lists, so every sample whose reference is one
+            # call compared a dict against a list. The legacy tree score gave an
+            # *identical* output 0.75 instead of 1.0 and the path-F1 score 0. Toucan
+            # references are lists of calls, so this touched a large share of benchmark
+            # cells. Both sides now keep the shape they arrived in.
             all_pairs = self.collect_all_string_pairs(json_outputs, gt)
             self.batch_compute_similarities(all_pairs)
 

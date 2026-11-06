@@ -1,6 +1,6 @@
 # STED and Consistency Scoring: A Framework for Evaluating LLM Structured Output Reliability
 
-A comprehensive framework for evaluating and improving consistency in LLM-generated structured outputs. This framework combines STED (Semantic Tree Edit Distance), a novel similarity metric that balances semantic flexibility with structural strictness, with a consistency scoring framework that aggregates multiple STED measurements to quantify output reliability.
+A framework for measuring consistency in LLM-generated structured outputs. It combines the configurable STED JSON-similarity family with repeated-run aggregation and explicitly separates validity from consistency.
 
 > 📄 **Paper**: [STED and Consistency Scoring: A Framework for Evaluating LLM Structured Output Reliability](docs/STED_and_Consistency_Scoring.pdf) - Accepted at NeurIPS 2025 Workshop on Structured Probabilistic Inference & Generative Modeling
 
@@ -22,10 +22,12 @@ A comprehensive framework for evaluating and improving consistency in LLM-genera
 
 Large Language Models (LLMs) are increasingly deployed for structured data generation tasks, yet their output consistency remains a critical challenge for production applications. This framework addresses this challenge through two key contributions:
 
-1. **STED (Semantic Tree Edit Distance)**: A novel similarity metric that balances semantic flexibility with structural strictness when comparing JSON outputs
-2. **Consistency Scoring Framework**: Aggregates multiple STED measurements across repeated generations to quantify output reliability
+1. **STED (Semantic Tree Edit Distance)**: a JSON tree similarity that aligns two outputs field by field and scores each field by its type (literals exactly, numbers by value, text by embedding similarity). It has two readouts over the same field scores:
+   - **min readout** (`profile="typed"`, the default): the lowest field score. A pair scoring 0.95 has *every* matched field at or above 0.95, so a threshold on it decides whether two outputs are the same.
+   - **mean readout** (`profile="typed_mean"`): the average field score. It grades how far outputs drift and is suited to monitoring and ranking, but must not be thresholded: one changed field is diluted by the unchanged ones.
+2. **Consistency Scoring Framework**: samples each prompt repeatedly and reports **validity** (share of outputs that parse) separately from **agreement** (mean pairwise STED over the valid outputs).
 
-Through systematic experiments on synthetic datasets with controlled schema, expression, and semantic variations, STED achieves superior performance (0.86–0.90 similarity for semantic equivalents, 0.0 for structural breaks) compared to existing metrics including TED, BERTScore, and DeepDiff.
+Validation artifacts cover human preference, generated perturbations, constructed triples, and deterministic sandbox outcomes. These instruments disagree in informative ways; no universal semantic-equivalence ranking is claimed.
 
 ## Key Features
 
@@ -90,21 +92,35 @@ pip install --upgrade "torch>=2.4"
 ```python
 from sted.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
 
-# Initialize evaluator
-evaluator = SemanticJsonTreeConsistencyEvaluator(
-    model_id='amazon.titan-embed-text-v2:0'
-)
+# Default profile "typed" = min readout (decides "the same")
+same = SemanticJsonTreeConsistencyEvaluator()
+# "typed_mean" = mean readout (grades drift)
+drift = SemanticJsonTreeConsistencyEvaluator(profile="typed_mean")
 
-# Compare JSON structures
-json1 = {'name': 'John', 'age': 30, 'city': 'New York'}
-json2 = {'name': 'John', 'age': 30, 'location': 'NYC'}
+ref       = {"name": "get_weather", "arguments": {"city": "Seattle", "days": 3, "units": "metric"}}
+reordered = {"arguments": {"units": "metric", "days": "3", "city": "Seattle"}, "name": "get_weather"}
+changed   = {"name": "get_weather", "arguments": {"city": "Seattle", "days": 5, "units": "metric"}}
 
-# Calculate similarity
-similarity = evaluator.calculate_tree_edit_distance_opt(
-    json1, json2, 
-    variation_type="combined"
-)
-print(f"Similarity: {similarity:.4f}")  # Output: 0.8650
+for other in (reordered, changed):
+    print(same.calculate_tree_edit_distance_opt(ref, other, variation_type="combined"),
+          drift.calculate_tree_edit_distance_opt(ref, other, variation_type="combined"))
+# 1.0   1.0     key order and "3" vs 3 are harmless
+# 0.0   0.833   a changed argument: min rejects, mean only dips
+```
+
+Other profiles are kept as ablations and for reproducing earlier results:
+
+| Profile | What it is |
+|---|---|
+| `typed` (default) | Min readout: positional arrays, exact keys, typed leaves, bottleneck aggregation |
+| `typed_mean` | Mean readout: same as `typed` with arithmetic-mean aggregation |
+| `path_f1` (alias `ranking`) | Harmonic mean of path-anchored soft precision/recall; a ranker, not a threshold |
+| `certificate` | Bottleneck with literal character leaves (earlier threshold profile) |
+| `rank` | Order-adaptive arrays, bottleneck, legacy leaf kernel |
+| `legacy` | Original embedding/additive/mean scoring from the NeurIPS 2025 workshop paper |
+
+```python
+legacy = SemanticJsonTreeConsistencyEvaluator(profile="legacy", model_id="all-MiniLM-L6-v2")
 ```
 
 ### Batch Consistency Evaluation
@@ -113,7 +129,7 @@ print(f"Similarity: {similarity:.4f}")  # Output: 0.8650
 from sted.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
 from sted.structural_consistency_analyzer import StructuralConsistencyAnalyzer
 
-evaluator = SemanticJsonTreeConsistencyEvaluator(model_id='amazon.titan-embed-text-v2:0')
+evaluator = SemanticJsonTreeConsistencyEvaluator()
 analyzer = StructuralConsistencyAnalyzer(evaluator)
 
 # Multiple LLM outputs for the same prompt
@@ -186,7 +202,8 @@ parseable subset), matching the deployment-aware framing of the STED paper.
 - **Hardware**: MacBook M-series laptop (8 cores), single Python process,
   single `SemanticJsonTreeConsistencyEvaluator` instance shared across
   workers
-- **Embedding model**: `all-MiniLM-L6-v2` (default, CPU)
+- **Profile used by this historical throughput benchmark**: `legacy`
+- **Embedding model for that profile**: `all-MiniLM-L6-v2` (CPU)
 - **Reproduce**: `python -c "from sted import AgentConsistencyEvaluator; ..."`
   with the snippet shown above
 
@@ -468,10 +485,12 @@ For all scripts, see [Scripts Reference](./docs/guides/SCRIPTS_REFERENCE.md).
 
 ### STED Algorithm
 
-STED extends classical tree edit distance with semantic awareness:
+STED aligns two JSON trees and scores matched leaves with a type-aware kernel:
 
-- **Semantic-Enhanced Tree Edit Distance**: Recognizes equivalent keys and values while preserving structural constraints
-- **Order-Invariant Matching**: Uses Hungarian algorithm for optimal element pairing in O(n³) time
+- **Typed leaves**: booleans/null and literals (identifiers, dates, codes, numbers) compare exactly; a JSON number equals a numeric string of the same value; free text compares by embedding similarity
+- **Readouts**: the min readout (`typed`, default) takes the worst matched field, so a threshold certifies every field; the mean readout (`typed_mean`) averages them to grade drift
+- **Legacy profile**: embedding-aware labels/values, bag-style array matching, additive channels, and arithmetic-mean aggregation; retained for historical reproducibility
+- **Hungarian matching**: computes the configured local assignment in O(n³) time
 - **Multi-Level Similarity**: Integrates structural, key, value, and type similarities with configurable weights
 
 The semantic update cost: `γ_upd(v1, v2) = w_s · γ_struct(v1, v2) + w_c · γ_content(v1, v2)`

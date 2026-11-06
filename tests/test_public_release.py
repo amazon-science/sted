@@ -100,7 +100,7 @@ def test_sted_calculation():
     print("Testing STED calculation...")
     from sted import SemanticJsonTreeConsistencyEvaluator
     
-    evaluator = SemanticJsonTreeConsistencyEvaluator(model_id='all-MiniLM-L6-v2')
+    evaluator = SemanticJsonTreeConsistencyEvaluator(model_id='all-MiniLM-L6-v2', profile='legacy')  # graded smoke test of the published configuration; typed is a threshold instrument and ranking scores disjoint paths 0
     
     json1 = {'name': 'John', 'age': 30}
     json2 = {'name': 'John', 'age': 30}

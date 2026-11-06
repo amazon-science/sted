@@ -17,7 +17,7 @@ class TestOrderSensitiveFieldDetection:
     def test_no_order_sensitive_fields(self):
         """When order_sensitive_fields is empty, no field should match."""
         evaluator = SemanticJsonTreeConsistencyEvaluator(
-            model_id='all-MiniLM-L6-v2',
+            model_id='all-MiniLM-L6-v2', profile='legacy',   # bag arrays unless the field is named order-sensitive
             order_sensitive_fields=set()
         )
         assert evaluator._is_order_sensitive_field("trace") is False
@@ -27,7 +27,7 @@ class TestOrderSensitiveFieldDetection:
     def test_direct_field_name_match(self):
         """Direct field names should be detected."""
         evaluator = SemanticJsonTreeConsistencyEvaluator(
-            model_id='all-MiniLM-L6-v2',
+            model_id='all-MiniLM-L6-v2', profile='legacy',   # bag arrays unless the field is named order-sensitive
             order_sensitive_fields={"trace", "steps"}
         )
         assert evaluator._is_order_sensitive_field("trace") is True
@@ -37,7 +37,7 @@ class TestOrderSensitiveFieldDetection:
     def test_nested_path_match(self):
         """Nested paths containing order-sensitive field should match."""
         evaluator = SemanticJsonTreeConsistencyEvaluator(
-            model_id='all-MiniLM-L6-v2',
+            model_id='all-MiniLM-L6-v2', profile='legacy',   # bag arrays unless the field is named order-sensitive
             order_sensitive_fields={"trace", "calls"}
         )
         assert evaluator._is_order_sensitive_field("root.trace") is True
@@ -48,7 +48,7 @@ class TestOrderSensitiveFieldDetection:
     def test_array_index_in_path(self):
         """Paths with array indices should correctly identify fields."""
         evaluator = SemanticJsonTreeConsistencyEvaluator(
-            model_id='all-MiniLM-L6-v2',
+            model_id='all-MiniLM-L6-v2', profile='legacy',   # bag arrays unless the field is named order-sensitive
             order_sensitive_fields={"steps"}
         )
         assert evaluator._is_order_sensitive_field("steps[0]") is True
@@ -63,7 +63,7 @@ class TestOrderSensitiveArrayComparison:
     def order_sensitive_evaluator(self):
         """Evaluator with order-sensitive fields configured."""
         return SemanticJsonTreeConsistencyEvaluator(
-            model_id='all-MiniLM-L6-v2',
+            model_id='all-MiniLM-L6-v2', profile='legacy',   # bag arrays unless the field is named order-sensitive
             order_sensitive_fields={"steps", "trace", "sequence"}
         )
 
@@ -71,7 +71,7 @@ class TestOrderSensitiveArrayComparison:
     def order_insensitive_evaluator(self):
         """Evaluator with no order-sensitive fields."""
         return SemanticJsonTreeConsistencyEvaluator(
-            model_id='all-MiniLM-L6-v2',
+            model_id='all-MiniLM-L6-v2', profile='legacy',   # bag arrays unless the field is named order-sensitive
             order_sensitive_fields=set()
         )
 
@@ -146,7 +146,7 @@ class TestOrderSensitiveWithNestedObjects:
     @pytest.fixture
     def evaluator(self):
         return SemanticJsonTreeConsistencyEvaluator(
-            model_id='all-MiniLM-L6-v2',
+            model_id='all-MiniLM-L6-v2', profile='legacy',   # bag arrays unless the field is named order-sensitive
             order_sensitive_fields={"calls", "trace"}
         )
 
@@ -226,13 +226,13 @@ class TestOrderSensitiveVsInsensitiveComparison:
 
         # Order-sensitive evaluator
         sensitive_eval = SemanticJsonTreeConsistencyEvaluator(
-            model_id='all-MiniLM-L6-v2',
+            model_id='all-MiniLM-L6-v2', profile='legacy',   # bag arrays unless the field is named order-sensitive
             order_sensitive_fields={"items"}
         )
 
         # Order-insensitive evaluator
         insensitive_eval = SemanticJsonTreeConsistencyEvaluator(
-            model_id='all-MiniLM-L6-v2',
+            model_id='all-MiniLM-L6-v2', profile='legacy',   # bag arrays unless the field is named order-sensitive
             order_sensitive_fields=set()
         )
 
@@ -250,12 +250,12 @@ class TestOrderSensitiveVsInsensitiveComparison:
         arr2 = ["A", "C", "B", "D"]  # Middle two swapped
 
         sensitive_eval = SemanticJsonTreeConsistencyEvaluator(
-            model_id='all-MiniLM-L6-v2',
+            model_id='all-MiniLM-L6-v2', profile='legacy',   # bag arrays unless the field is named order-sensitive
             order_sensitive_fields={"data"}
         )
 
         insensitive_eval = SemanticJsonTreeConsistencyEvaluator(
-            model_id='all-MiniLM-L6-v2',
+            model_id='all-MiniLM-L6-v2', profile='legacy',   # bag arrays unless the field is named order-sensitive
             order_sensitive_fields=set()
         )
 
@@ -275,7 +275,7 @@ class TestEdgeCases:
     @pytest.fixture
     def evaluator(self):
         return SemanticJsonTreeConsistencyEvaluator(
-            model_id='all-MiniLM-L6-v2',
+            model_id='all-MiniLM-L6-v2', profile='legacy',   # bag arrays unless the field is named order-sensitive
             order_sensitive_fields={"steps"}
         )
 
