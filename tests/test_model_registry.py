@@ -31,7 +31,11 @@ import os
 import json
 import pytest
 from typing import Dict, Any, Optional, Tuple
-from dotenv import dotenv_values
+try:  # python-dotenv is optional; only the live tests read keys from .env
+    from dotenv import dotenv_values
+except ImportError:  # pragma: no cover
+    def dotenv_values(_path):
+        return {}
 
 # Load only non-AWS environment variables from .env file
 # AWS credentials should come from ~/.aws/credentials or shell environment
