@@ -229,7 +229,8 @@ parseable subset), matching the deployment-aware framing of the STED paper.
 ### MCP Server
 
 `sted-mcp` serves STED over the [Model Context Protocol](https://modelcontextprotocol.io)
-(stdio), so an agent can check its own outputs or compare runs. Requires Python ≥ 3.10.
+(stdio), so an agent can check its own outputs or compare runs. Requires Python ≥ 3.10
+and `mcp` 1.x (`sted[mcp]` pins `mcp>=1.2,<2`; mcp 2.x is not supported yet).
 
 ```bash
 pip install "sted[mcp] @ git+https://github.com/amazon-science/sted.git"

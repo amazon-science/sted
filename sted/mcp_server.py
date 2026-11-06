@@ -172,7 +172,8 @@ def build_server(name: str = "sted"):
         from mcp.server.fastmcp import FastMCP
     except ImportError as e:  # pragma: no cover - exercised only without the extra
         raise ImportError(
-            "The MCP server needs the `mcp` package. Install with: pip install mcp"
+            "The STED MCP server needs mcp>=1.2,<2 (mcp 2.x renamed FastMCP). "
+            'Install with: pip install "mcp>=1.2,<2"'
         ) from e
     server = FastMCP(name)
     server.tool()(compare_outputs)
