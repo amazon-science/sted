@@ -54,7 +54,7 @@ except ImportError:
     ConsistencyReport = None
     PromptResult = None
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 __author__ = "AWS Generative AI Innovation Center"
 
 __all__ = [

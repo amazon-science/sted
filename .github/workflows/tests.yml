@@ -1,0 +1,97 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: py${{ matrix.python }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          # ubuntu-latest (26.04) no longer ships 3.9, which requires-python still allows
+          - os: ubuntu-22.04
+            python: "3.9"
+          - os: macos-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # CPU-only torch on Linux keeps the install to a few hundred MB.
+      - name: Install CPU torch (Linux)
+        if: runner.os == 'Linux'
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      # `mcp` is skipped by its marker on 3.9; tests/test_mcp_server.py then skips itself.
+      - name: Install package
+        run: pip install -e ".[dev,mcp]"
+
+      - name: Cache embedding model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-all-MiniLM-L6-v2-${{ runner.os }}
+
+      # Live-API tests skip unless STED_LIVE_TESTS=1; these three files are scripts
+      # that call live APIs at import time, so they are not collected at all.
+      - name: Run tests
+        run: >
+          python -m pytest tests -q -p no:cacheprovider
+          --ignore=tests/integration
+          --ignore=tests/test_bedrock_openai.py
+          --ignore=tests/test_oss_gpt.py
+          --ignore=tests/langchang_test.py
+
+      - name: sted-mcp starts and lists its tools
+        if: matrix.python != '3.9'
+        shell: python
+        run: |
+          import asyncio, shutil
+          from mcp import ClientSession, StdioServerParameters
+          from mcp.client.stdio import stdio_client
+
+          async def main():
+              params = StdioServerParameters(command=shutil.which("sted-mcp"), args=[])
+              async with stdio_client(params) as (r, w):
+                  async with ClientSession(r, w) as s:
+                      await s.initialize()
+                      names = sorted(t.name for t in (await s.list_tools()).tools)
+                      assert names == ["compare_outputs", "evaluate_consistency"], names
+                      print("sted-mcp tools:", names)
+
+          asyncio.run(main())
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*

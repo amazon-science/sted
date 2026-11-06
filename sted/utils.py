@@ -224,7 +224,7 @@ def create_bedrock_client(region_name="us-west-2", config=None):
         Configured boto3 Bedrock client
 
     Note:
-        Requires the optional `bedrock` extra: `pip install sted[bedrock]`.
+        Requires the optional `bedrock` extra: `pip install boto3`.
     """
     try:
         import boto3
@@ -232,7 +232,7 @@ def create_bedrock_client(region_name="us-west-2", config=None):
     except ImportError as e:
         raise ImportError(
             "boto3 / botocore are required for Bedrock helpers. "
-            "Install with: pip install sted[bedrock]"
+            "Install with: pip install boto3"
         ) from e
 
     if config is None:

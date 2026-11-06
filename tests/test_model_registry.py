@@ -18,15 +18,24 @@ Usage:
     # Run a quick smoke test (first model of each provider)
     pytest tests/test_model_registry.py -v -k "smoke"
 
-Note: These tests require valid AWS credentials for Bedrock models
-and OPENAI_API_KEY for OpenAI-compatible models.
+The registry-structure tests run offline. The invocation and smoke tests call
+live, billed model APIs, so they only run when STED_LIVE_TESTS=1:
+
+    STED_LIVE_TESTS=1 pytest tests/test_model_registry.py -v
+
+They also need valid AWS credentials for Bedrock models and OPENAI_API_KEY for
+OpenAI-compatible models.
 """
 
 import os
 import json
 import pytest
 from typing import Dict, Any, Optional, Tuple
-from dotenv import dotenv_values
+try:  # python-dotenv is optional; only the live tests read keys from .env
+    from dotenv import dotenv_values
+except ImportError:  # pragma: no cover
+    def dotenv_values(_path):
+        return {}
 
 # Load only non-AWS environment variables from .env file
 # AWS credentials should come from ~/.aws/credentials or shell environment
@@ -38,7 +47,7 @@ for key, value in env_values.items():
     if not key.startswith('AWS_') and key not in os.environ:
         os.environ[key] = value
 
-from sted.model_config import MODEL_REGISTRY, get_provider, get_display_name
+from sted.model_config import MODEL_REGISTRY, get_provider, get_display_name, get_max_workers
 
 
 # Test configuration
@@ -46,6 +55,11 @@ SIMPLE_PROMPT = "What is 2 + 2? Answer with just the number."
 EXPECTED_RESPONSE_CONTAINS = "4"
 MAX_TOKENS = 500  # Increased to accommodate models with internal reasoning tokens
 TEMPERATURE = 0.0  # Deterministic for testing
+
+live = pytest.mark.skipif(
+    os.getenv("STED_LIVE_TESTS") != "1",
+    reason="calls live, billed model APIs; set STED_LIVE_TESTS=1 to run",
+)
 
 
 def get_bedrock_client():
@@ -157,31 +171,39 @@ class TestModelRegistryStructure:
         """MODEL_REGISTRY should have models."""
         assert len(MODEL_REGISTRY) > 0
 
-    def test_all_models_have_provider_and_name(self):
-        """Each model should have (provider, display_name) tuple."""
+    def test_all_models_have_provider_name_and_workers(self):
+        """Each model should have a (provider, display_name, max_workers) tuple."""
         for model_id, value in MODEL_REGISTRY.items():
             assert isinstance(value, tuple), f"{model_id} value is not a tuple"
-            assert len(value) == 2, f"{model_id} tuple length is not 2"
-            provider, display_name = value
+            assert len(value) == 3, f"{model_id} tuple length is not 3"
+            provider, display_name, max_workers = value
             assert provider in ("bedrock", "openai"), f"{model_id} has invalid provider: {provider}"
             assert isinstance(display_name, str), f"{model_id} display_name is not a string"
             assert len(display_name) > 0, f"{model_id} display_name is empty"
+            assert isinstance(max_workers, int) and max_workers > 0, f"{model_id} max_workers is not a positive int"
 
     def test_get_provider(self):
         """get_provider should return correct provider."""
-        for model_id, (expected_provider, _) in MODEL_REGISTRY.items():
+        for model_id, (expected_provider, _, _) in MODEL_REGISTRY.items():
             assert get_provider(model_id) == expected_provider
 
     def test_get_display_name(self):
         """get_display_name should return correct name."""
-        for model_id, (_, expected_name) in MODEL_REGISTRY.items():
+        for model_id, (_, expected_name, _) in MODEL_REGISTRY.items():
             assert get_display_name(model_id) == expected_name
+
+    def test_get_max_workers(self):
+        """get_max_workers should return the registry value, 20 for unknown models."""
+        for model_id, (_, _, expected_workers) in MODEL_REGISTRY.items():
+            assert get_max_workers(model_id) == expected_workers
+        assert get_max_workers("unknown-model-xyz") == 20
 
     def test_get_provider_unknown_model(self):
         """get_provider should return 'bedrock' for unknown models."""
         assert get_provider("unknown-model-xyz") == "bedrock"
 
 
+@live
 class TestBedrockModels:
     """Test Bedrock models from MODEL_REGISTRY."""
 
@@ -196,7 +218,7 @@ class TestBedrockModels:
     @pytest.mark.parametrize("model_id,model_info", list(BEDROCK_MODELS.items()))
     def test_bedrock_model_invocation(self, bedrock_client, model_id: str, model_info: tuple):
         """Test that a Bedrock model can be invoked successfully."""
-        provider, display_name = model_info
+        provider, display_name, _ = model_info
 
         success, response = invoke_bedrock_model(bedrock_client, model_id, SIMPLE_PROMPT)
 
@@ -223,6 +245,7 @@ class TestBedrockModels:
         print(f"\n  {display_name}: '{response.strip()[:50]}...'")
 
 
+@live
 class TestOpenAIModels:
     """Test OpenAI-compatible models from MODEL_REGISTRY."""
 
@@ -241,7 +264,7 @@ class TestOpenAIModels:
     @pytest.mark.parametrize("model_id,model_info", list(OPENAI_MODELS.items()))
     def test_openai_model_invocation(self, openai_client, model_id: str, model_info: tuple):
         """Test that an OpenAI-compatible model can be invoked successfully."""
-        provider, display_name = model_info
+        provider, display_name, _ = model_info
 
         success, response = invoke_openai_model(openai_client, model_id, SIMPLE_PROMPT)
 
@@ -262,6 +285,7 @@ class TestOpenAIModels:
         print(f"\n  {display_name}: '{response.strip()[:50]}...'")
 
 
+@live
 class TestSmokeTest:
     """Quick smoke tests for one model from each provider."""
 
