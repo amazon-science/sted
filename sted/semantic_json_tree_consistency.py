@@ -24,6 +24,7 @@ import numpy as np
 from typing import Dict, Any, List, Tuple, Optional, Set
 from functools import lru_cache
 from collections import OrderedDict
+import threading
 import warnings
 import re
 
@@ -85,6 +86,21 @@ logging.set_verbosity_error()
 
 
 _PROFILE_UNSET = object()
+
+_ST_MODELS: Dict[str, Any] = {}
+_ST_LOCK = threading.Lock()
+
+
+def _load_sentence_transformer(model_id: str):
+    """One SentenceTransformer per model id per process, warmed up once. Evaluators that
+    differ only in profile or field rules share it instead of each loading the weights."""
+    with _ST_LOCK:
+        model = _ST_MODELS.get(model_id)
+        if model is None:
+            model = SentenceTransformer(model_id)
+            model.encode(["test"], show_progress_bar=False)
+            _ST_MODELS[model_id] = model
+        return model
 
 STED_PROFILES = {
     # The certificate structure with a *typed* leaf: prose is read as a form
@@ -492,9 +508,7 @@ class SemanticJsonTreeConsistencyEvaluator:
                              "cohere.embed-multilingual-v3", "cohere.embed-v4:0", "us.cohere.embed-v4:0"]:
             self.bedrock_client = create_bedrock_client(region_name=region_name, config=boto_config)
         else:
-            self.embedding_model = SentenceTransformer(self.model_id)
-            # Warm up the model
-            self.embedding_model.encode(["test"], show_progress_bar=False)
+            self.embedding_model = _load_sentence_transformer(self.model_id)
 
         # Cache for embeddings
         self._cache = StringSimilarityCache()
