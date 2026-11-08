@@ -95,6 +95,11 @@ def test_stdio_server_end_to_end():
                 res = await session.call_tool("evaluate_consistency", {"outputs": [REF, REORDERED, CHANGED]})
                 assert not res.isError
                 assert json.loads(res.content[0].text)["validity"] == 1.0
+                res = await session.call_tool("compare_outputs", {
+                    "output_a": {**REF, "request_id": "a", "tags": [1, 2]},
+                    "output_b": {**REORDERED, "request_id": "b", "tags": [2, 1]},
+                    "ignore": ["request_id"], "unordered": ["tags"]})
+                assert not res.isError and json.loads(res.content[0].text)["same"] is True
 
     asyncio.run(asyncio.wait_for(run(), timeout=240))
 
@@ -131,4 +136,4 @@ def test_evaluate_consistency_unstable_fields_sampled_share_is_scaled():
     outs = [{"name": "search", "arguments": {"q": "hotels", "limit": 5 + i % 2}} for i in range(50)]
     r = ms.evaluate_consistency(outs)                              # 625 of 1,225 pairs disagree
     assert r["unstable_fields"][0]["share_of_pairs"] == pytest.approx(625 / 1225, abs=1e-6)
-    assert "estimated" in r["unstable_fields_note"]
+    assert "estimated" in r["note"]

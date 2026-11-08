@@ -46,6 +46,7 @@ from deepdiff import DeepDiff
 
 
 from .json_tree_node import JsonNode
+from .rules import numbers_within
 from ._paths import EmptyContainer, Path as JsonPath, terminal_paths
 from .similarity_cache import StringSimilarityCache
 from .utils import get_embeddings, create_bedrock_client, count_json_elements
@@ -76,6 +77,7 @@ from ._costs import _get_default_type_change_costs  # noqa: E402, F401
 from . import _aggregation  # noqa: E402
 from . import _key_identity  # noqa: E402
 from . import _leaf  # noqa: E402
+from . import _order  # noqa: E402
 
 
 from transformers import logging
@@ -226,6 +228,18 @@ def _levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 
+class _Whole:
+    """An unordered array reported as one field in calculate_field_differences."""
+    __slots__ = ("value",)
+
+    def __init__(self, value):
+        self.value = value
+
+    def __eq__(self, other):
+        return isinstance(other, _Whole) and json.dumps(self.value, sort_keys=True, default=str) == \
+            json.dumps(other.value, sort_keys=True, default=str)
+
+
 def format_json_path(path) -> str:
     """Typed path -> readable JSONPath-like string: ``arguments.days``, ``[0].name``,
     ``["a.b"]`` for keys that are not plain identifiers, ``$`` for the root."""
@@ -270,6 +284,7 @@ class SemanticJsonTreeConsistencyEvaluator:
                  aggregation_mode=_PROFILE_UNSET,
                  exact_name_fields=_PROFILE_UNSET,
                  align_calls_by_name=_PROFILE_UNSET,
+                 field_rules=None,
                  embedding_dim: int = 512,
                  # Space optimization options
                  subtree_cache_size: int = 0,
@@ -380,6 +395,11 @@ class SemanticJsonTreeConsistencyEvaluator:
                 and 20 against -- the annotator reads the order of calls as part of the
                 meaning (a candidate in the reference's order with one wrong value beat a
                 perfect reordering). Kept as an option so that result is reproducible.
+            field_rules: Optional ``sted.rules.FieldRules`` (ignore / unordered / tolerance
+                by path pattern). Ignored fields are removed from both documents before any
+                comparison; arrays matching an ``unordered`` pattern are compared as
+                multisets (lambda = 0) while the others keep the profile's lambda; numbers
+                matching a ``tolerance`` pattern are equal within that tolerance.
             literal_near_miss: When True (ranking profile), two unequal literal strings are
                 scored by a graded near-miss kernel -- 0.95 for a case-only difference,
                 otherwise 0.9 x (1 - edit distance / length) -- instead of 0. A ranker needs
@@ -503,6 +523,16 @@ class SemanticJsonTreeConsistencyEvaluator:
 
         self.sort_keys = sort_keys
         # Assign array_order_lambda BEFORE sort_arrays: the sort_arrays property below reads it.
+        from .rules import FieldRules
+        self.field_rules = field_rules if field_rules is not None else FieldRules()
+        if self.field_rules.unordered and array_order_lambda is not None:
+            base_lambda, rules_ = array_order_lambda, self.field_rules
+
+            def _lambda_with_rules(node1, node2, _base=base_lambda, _rules=rules_):
+                if _rules.is_unordered(node1.path) or _rules.is_unordered(node2.path):
+                    return 0.0
+                return _order.resolve_lambda(_base, node1, node2, self.array_order_lambda_default)
+            array_order_lambda = _lambda_with_rules
         self.array_order_lambda = array_order_lambda
         self.array_order_lambda_default = float(array_order_lambda_default)
         self.sort_arrays = sort_arrays
@@ -1607,6 +1637,12 @@ class SemanticJsonTreeConsistencyEvaluator:
             return 1.0
         return _leaf.numeric_near_miss([x], [y]) if self.literal_near_miss else 0.0
 
+    def _numeric_tolerance(self, node1: JsonNode, node2: JsonNode):
+        """The field rule's (abs, rel) tolerance for this pair of number nodes, or None."""
+        if not self.field_rules.tolerance:
+            return None
+        return self.field_rules.tolerance_for(node1.path) or self.field_rules.tolerance_for(node2.path)
+
     def _compare_numbers(self, num1: float, num2: float) -> float:
         """Exact numeric kernel, up to float noise.
 
@@ -1732,6 +1768,9 @@ class SemanticJsonTreeConsistencyEvaluator:
                 if node1.node_type == "string":
                     return self._compare_strings(str(node1.value), str(node2.value))
                 elif node1.node_type == "number":
+                    tol = self._numeric_tolerance(node1, node2)
+                    if tol is not None:
+                        return 1.0 if numbers_within(float(node1.value), float(node2.value), tol) else 0.0
                     return self._compare_numbers(float(node1.value), float(node2.value))
                 elif node1.node_type == "array":
                     return 1 - self._compare_arrays_unordered(list(node1.value), list(node2.value), node1.label, node2.label, variation_type="content")
@@ -1747,6 +1786,9 @@ class SemanticJsonTreeConsistencyEvaluator:
                 if self.numeric_string_equality and {node1.node_type, node2.node_type} == {"number", "string"}:
                     a, b = _leaf.numeric_value(node1.value), _leaf.numeric_value(node2.value)
                     if a is not None and b is not None:
+                        tol = self._numeric_tolerance(node1, node2)
+                        if tol is not None:
+                            return 1.0 if numbers_within(a, b, tol) else 0.0
                         return 1.0 if _leaf.numbers_close(a, b) else 0.0
                 # Cross-type comparison: use semantic similarity with type penalty
                 val1_str = str(node1.value)
@@ -2337,16 +2379,26 @@ class SemanticJsonTreeConsistencyEvaluator:
         arrays and exact keys (``typed``), the tree score equals the minimum over
         these scores (1.0 when the list is empty).
 
+        Arrays matched by an ``unordered`` field rule are reported as one field (the
+        whole array), since element positions do not correspond. Ignored fields never
+        appear.
+
         Returns dicts ``{"path", "status", "a", "b", "score"}`` sorted by score.
         """
         from ._paths import EmptyContainer, terminal_paths
 
+        json1, json2 = self.field_rules.strip(json1), self.field_rules.strip(json2)
         pa, pb = terminal_paths(json1), terminal_paths(json2)
+        if self.field_rules.unordered:
+            pa, pb = self._collapse_unordered(json1, pa), self._collapse_unordered(json2, pb)
 
         def show(v):
             if isinstance(v, EmptyContainer):
                 return {} if v is EmptyContainer.OBJECT else []
             return v
+
+        def show(v, _show=show):
+            return v.value if isinstance(v, _Whole) else _show(v)
 
         def replaced(doc, path, value):
             doc = json.loads(json.dumps(doc))
@@ -2366,6 +2418,14 @@ class SemanticJsonTreeConsistencyEvaluator:
                 out.append({"path": format_json_path(p), "status": "extra", "a": None, "b": show(pb[p]), "score": 0.0})
             else:
                 x, y = pa[p], pb[p]
+                if isinstance(x, _Whole) or isinstance(y, _Whole):
+                    xv = x.value if isinstance(x, _Whole) else show(x)
+                    yv = y.value if isinstance(y, _Whole) else show(y)
+                    score = float(self.calculate_tree_edit_distance_fast(json1, replaced(json1, p, yv)))
+                    if score >= 1.0:
+                        continue
+                    out.append({"path": format_json_path(p), "status": "changed", "a": xv, "b": yv, "score": score})
+                    continue
                 if isinstance(x, EmptyContainer) or isinstance(y, EmptyContainer):
                     if x is y:
                         continue
@@ -2379,6 +2439,32 @@ class SemanticJsonTreeConsistencyEvaluator:
                 out.append({"path": format_json_path(p), "status": "changed", "a": show(x), "b": show(y), "score": score})
         out.sort(key=lambda d: d["score"])
         return out
+
+    def _collapse_unordered(self, doc: Any, leaves: Dict[JsonPath, Any]) -> Dict[JsonPath, Any]:
+        """Replace the leaves under each outermost unordered array by one _Whole entry."""
+        out: Dict[JsonPath, Any] = {}
+        for p, v in leaves.items():
+            cut = next((i for i in range(len(p) + 1)
+                        if self._is_unordered_array(doc, p[:i])), None)
+            if cut is None:
+                out[p] = v
+            else:
+                q = p[:cut]
+                if q not in out:
+                    node = doc
+                    for _, step in q:
+                        node = node[step]
+                    out[q] = _Whole(node)
+        return out
+
+    def _is_unordered_array(self, doc: Any, path: JsonPath) -> bool:
+        node = doc
+        try:
+            for _, step in path:
+                node = node[step]
+        except (KeyError, IndexError, TypeError):
+            return False
+        return isinstance(node, list) and self.field_rules.is_unordered(path)
 
     def calculate_readouts(self, json1: Any, json2: Any) -> Dict[str, float]:
         """One leaf table, two readouts.
@@ -2443,6 +2529,7 @@ class SemanticJsonTreeConsistencyEvaluator:
         return 2.0 * precision * recall / (precision + recall)
 
     def calculate_tree_edit_distance_opt(self, json1: Dict[str, Any], json2: Dict[str, Any], variation_type: str = "combined") -> float:
+        json1, json2 = self.field_rules.strip(json1), self.field_rules.strip(json2)
         if self.aggregation_mode == "path_f1":
             return self.calculate_path_f1_similarity(json1, json2)
         import warnings
@@ -2457,6 +2544,7 @@ class SemanticJsonTreeConsistencyEvaluator:
     def calculate_tree_edit_distance_fast(self, json1: Dict[str, Any], json2: Dict[str, Any],
                                           variation_type: str = "combined",
                                           use_greedy: bool = None) -> float:
+        json1, json2 = self.field_rules.strip(json1), self.field_rules.strip(json2)
         if self.aggregation_mode == "path_f1":
             return self.calculate_path_f1_similarity(json1, json2)
         """

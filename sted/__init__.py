@@ -8,6 +8,11 @@ using tree edit distance algorithms enhanced with semantic similarity.
 # Logging utilities (always available)
 from ._logging import get_logger, set_log_level
 
+# The main entry points: sted.compare(a, b) and sted.consistency(outputs).
+# Heavy dependencies load on first call, not at import.
+from .rules import FieldRules
+from .api import compare, consistency, Comparison, Consistency, FieldDifference, UnstableField
+
 # Core lightweight imports (no bert_score dependency)
 from .json_tree_node import JsonNode
 from .similarity_cache import StringSimilarityCache
@@ -58,6 +63,13 @@ __version__ = "0.2.0"
 __author__ = "AWS Generative AI Innovation Center"
 
 __all__ = [
+    "compare",
+    "consistency",
+    "FieldRules",
+    "Comparison",
+    "Consistency",
+    "FieldDifference",
+    "UnstableField",
     "STED",
     "SemanticJsonTreeConsistencyEvaluator",
     "StructuralConsistencyAnalyzer",

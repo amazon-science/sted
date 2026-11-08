@@ -19,6 +19,10 @@ A framework for measuring consistency in LLM-generated structured outputs. It co
   [Results and Findings](#results-and-findings).
 - **MCP server** `sted-mcp` with `compare_outputs` and `evaluate_consistency` tools that
   report which fields differ, see [MCP Server](#mcp-server).
+- **`sted.compare(a, b)` and `sted.consistency(outputs)`**: one call each, readable
+  output, every differing or unstable field listed, see [Quick Start](#quick-start).
+- **Field rules**: `ignore`, `unordered` (arrays as sets) and numeric `tolerance` by path
+  pattern, in the library and the MCP tools.
 - **Field-level differences**: `calculate_field_differences(a, b)` lists each differing
   field with its score; under `typed` the score is the lowest of them.
 - Fixed a regular expression that could backtrack exponentially on long runs of spaces.
@@ -123,7 +127,86 @@ pip install --upgrade "torch>=2.4"
 
 ## Quick Start
 
-### Basic Similarity Calculation
+### Compare two outputs
+
+```python
+import sted
+
+a = {"name": "book_flight", "arguments": {"from": "SEA", "to": "JFK", "passengers": 2,
+                                          "request_id": "r-1", "seats": ["12A", "12B"], "price": 410.00}}
+b = {"name": "book_flight", "arguments": {"to": "JFK", "from": "SEA", "passengers": "2",
+                                          "request_id": "r-9", "seats": ["12B", "12A"], "price": 410.004}}
+
+print(sted.compare(a, b))
+```
+
+```
+DIFFERENT  min 0.000  mean 0.750  (threshold 0.95)
+  arguments.price                410.0 -> 410.004   [changed, 0.000]
+  arguments.request_id           "r-1" -> "r-9"   [changed, 0.000]
+  arguments.seats[0]             "12A" -> "12B"   [changed, 0.000]
+  arguments.seats[1]             "12B" -> "12A"   [changed, 0.000]
+```
+
+Key order and `2` vs `"2"` are not differences. The rest are, until you say otherwise:
+
+```python
+r = sted.compare(a, b,
+                 ignore=["request_id"],          # drop this field (any depth)
+                 unordered=["seats"],            # compare this array as a set
+                 tolerance={"price": 0.01})      # numbers equal within 0.01
+r.same            # True
+r.differences     # []
+```
+
+`r.same` is `min_readout >= threshold` (default 0.95): the *lowest* field score, so one
+wrong field is enough to make two outputs different. `r.mean_readout` averages the fields
+instead, which grades drift but cannot decide sameness. `r.differences` lists every field
+that differs with its score, and its lowest score is exactly `r.min_readout`.
+
+### Rate the consistency of repeated runs
+
+Ten runs of the same prompt, e.g. collected from your agent or from logs: six book Dec 1,
+three book Dec 2, one refuses.
+
+```python
+def call(date, rid):
+    return {"name": "book_flight", "arguments": {"from": "SEA", "to": "JFK", "date": date,
+                                                 "passengers": 2, "request_id": rid}}
+
+runs = ([call("2026-12-01", f"r-{i}") for i in range(6)]
+        + [call("2026-12-02", f"r-{i}") for i in range(6, 9)]
+        + ["Sorry, I can't book flights."])
+print(sted.consistency(runs, ignore=["request_id"]))
+```
+
+```
+validity 0.90 (9/10)   agreement min 0.500 / mean 0.938   same pairs 50% of 36
+unstable fields:
+  arguments.date                 differs in 50% of pairs   "2026-12-01" x6, "2026-12-02" x3
+```
+
+Outputs may be JSON values or JSON text; text that does not parse counts as invalid.
+`.to_dict()` on either result gives plain JSON for logging or CI.
+
+### Field rules
+
+Patterns are matched against paths as STED prints them (`arguments.items[0].id`):
+
+| Pattern | Matches |
+|---|---|
+| `request_id` | that key at any depth (a bare name is shorthand for `**.request_id`) |
+| `arguments.request_id` | exactly that path |
+| `items[*].id` | `id` in every element of `items` |
+| `*.id` / `**.id` | `id` one level down / at any depth |
+
+`ignore` drops matching fields from both outputs; `unordered` compares matching arrays as
+multisets (other arrays stay positional, since the order of a list argument usually changes
+the call); `tolerance` maps a pattern to an absolute tolerance, or to
+`{"abs": a, "rel": r}`. The same rules are accepted by the MCP tools. For reuse, build them
+once: `rules = sted.FieldRules(ignore=[...])`, then `sted.compare(a, b, rules=rules)`.
+
+### Lower-level evaluator and profiles
 
 ```python
 from sted.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
@@ -250,8 +333,8 @@ so give the absolute path printed by `which sted-mcp`):
 
 | Tool | Input | Returns |
 |---|---|---|
-| `compare_outputs` | `output_a`, `output_b`, `threshold` (0.95) | `min_readout`, `mean_readout`, `same` (= min readout ≥ threshold), `differences` (each differing field: path, changed / missing / extra, both values, field score) |
-| `evaluate_consistency` | `outputs` (2–50 generations of one prompt), `threshold` (0.95) | `validity`, `agreement_min`, `agreement_mean`, `share_same`, `unstable_fields` (which fields disagree, in what share of pairs, with the values seen), `least_agreeing_pair` with its `differences` |
+| `compare_outputs` | `output_a`, `output_b`, `threshold` (0.95), optional `ignore` / `unordered` / `tolerance` | `min_readout`, `mean_readout`, `same` (= min readout ≥ threshold), `differences` (each differing field: path, changed / missing / extra, both values, field score) |
+| `evaluate_consistency` | `outputs` (2–50 generations of one prompt), `threshold` (0.95), optional `ignore` / `unordered` / `tolerance` | `validity`, `agreement_min`, `agreement_mean`, `share_same`, `unstable_fields` (which fields disagree, in what share of pairs, with the values seen), `least_agreeing_pair` with its `differences` |
 
 Outputs can be JSON values or JSON text; text that does not parse counts as invalid.
 Free-text fields are embedded locally with `all-MiniLM-L6-v2` (override with
