@@ -48,7 +48,7 @@ jobs:
 
       # `mcp` is skipped by its marker on 3.9; tests/test_mcp_server.py then skips itself.
       - name: Install package
-        run: pip install -e ".[dev,mcp]"
+        run: pip install -e ".[dev,mcp,embeddings]"
 
       - name: Cache embedding model
         uses: actions/cache@v4
@@ -84,6 +84,28 @@ jobs:
                       print("sted-mcp tools:", names)
 
           asyncio.run(main())
+
+  # `pip install sted` without extras: no torch, text fields by character similarity.
+  lite:
+    name: lite (no torch) / py3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package without extras
+        run: pip install -e . pytest "mcp>=1.2,<2"
+      - name: torch and sentence-transformers are absent
+        shell: python
+        run: |
+          import importlib.util
+          for m in ("torch", "sentence_transformers", "transformers"):
+              assert importlib.util.find_spec(m) is None, f"{m} should not be installed"
+          print("no torch, no sentence-transformers")
+      - name: Run character-mode tests
+        run: python -m pytest -q -p no:cacheprovider tests/test_lite.py tests/test_rules.py tests/test_command.py tests/test_mcp_server.py
 
   build:
     runs-on: ubuntu-latest

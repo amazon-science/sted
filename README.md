@@ -22,7 +22,13 @@ A framework for measuring consistency in LLM-generated structured outputs. It co
 - **`sted.compare(a, b)` and `sted.consistency(outputs)`**: one call each, readable
   output, every differing or unstable field listed, see [Quick Start](#quick-start).
 - **Field rules**: `ignore`, `unordered` (arrays as sets) and numeric `tolerance` by path
-  pattern, in the library and the MCP tools.
+  pattern, in the library, the CLI and the MCP tools.
+- **`sted` command**: `compare`, `consistency` and `diff` subcommands with CI exit codes,
+  see [Command line](#command-line).
+- **Breaking: no torch by default.** The core install no longer pulls in
+  sentence-transformers/torch and compares free-text fields by character similarity
+  (with a one-time warning). To keep embedding-based scores, install
+  `"sted[embeddings]"`; results report the mode in `text_similarity`.
 - **Field-level differences**: `calculate_field_differences(a, b)` lists each differing
   field with its score; under `typed` the score is the lowest of them.
 - Fixed a regular expression that could backtrack exponentially on long runs of spaces.
@@ -76,12 +82,23 @@ Validation artifacts cover human preference, generated perturbations, constructe
 Install it from GitHub instead:
 
 ```bash
-# Directly from GitHub
+# Core: no torch (~170 MB environment); text fields compared by character similarity
 pip install "git+https://github.com/amazon-science/sted.git"
 
-# With optional extras (bedrock, openai, bertscore)
-pip install "sted[bedrock] @ git+https://github.com/amazon-science/sted.git"
+# + semantic comparison of free-text fields with a local embedding model (pulls in torch)
+pip install "sted[embeddings] @ git+https://github.com/amazon-science/sted.git"
+
+# + MCP server
+pip install "sted[embeddings,mcp] @ git+https://github.com/amazon-science/sted.git"
 ```
+
+Which you need depends on your outputs. Tool calls, IDs, numbers, dates and enums are
+compared exactly either way, so the core install is enough for most tool-calling checks.
+Install `embeddings` when outputs carry free text (descriptions, queries, summaries) whose
+wording may vary: `"hotels near the Louvre"` vs `"hotels close to the Louvre"` scores 0.98
+with embeddings and 0.85 by characters. Every result reports which was used
+(`text_similarity`); force one with `embedding_model="none"` or a model name, or set
+`STED_EMBEDDING_MODEL`.
 
 Or from a local clone:
 
@@ -89,7 +106,7 @@ Or from a local clone:
 git clone https://github.com/amazon-science/sted.git
 cd sted
 pip install -e .          # or: uv pip install -e .
-pip install -e ".[bedrock,openai]"   # with extras
+pip install -e ".[embeddings,mcp]"   # with extras
 ```
 
 For development:
@@ -311,6 +328,30 @@ The evaluator separates **validity** ($r_v$ — fraction of runs that produced
 parseable output) from **consistency** ($c_\text{mean}$ — pairwise STED on the
 parseable subset), matching the deployment-aware framing of the STED paper.
 
+### Command line
+
+```bash
+sted compare a.json b.json --ignore request_id      # which fields differ; exit 1 if different
+sted consistency runs.jsonl --min-same 0.9          # which fields are unstable; exit 1 below 90% same pairs
+sted diff before/ after/ --rules rules.json         # regression check by file; exit 1 if any differ
+```
+
+```
+$ sted diff before after --rules rules.json
+DIFFERENT  q2.json   min 0.000
+  arguments.date                 "2026-12-01" -> "2026-12-02"   [changed, 0.000]
+MISSING_AFTER q3.json
+
+3 files: 1 different, 1 missing after, 1 same
+```
+
+`consistency` reads a JSON array or JSONL of outputs (a line that is not JSON counts as an
+invalid output), or rows of `{"prompt": ..., "outputs": [...]}` and rates each prompt.
+`diff` pairs files by relative path (`--glob`, default `*.json`). Rules come from
+`--ignore` / `--unordered` / `--tolerance PATTERN=VALUE` or a JSON/YAML file with the
+same three keys. `--json` prints machine-readable results. Exit codes: 0 same, 1 different,
+2 usage or input error, so each command can gate a CI step.
+
 ### MCP Server
 
 `sted-mcp` serves STED over the [Model Context Protocol](https://modelcontextprotocol.io)
@@ -422,7 +463,7 @@ Known limits to plan around:
 | No dashboards / async monitoring | not in scope | See LangSmith / Braintrust for that layer |
 | Cosine similarity calibration drifts with embedder | known | Pin embedder version; validate on your domain |
 
-CLI usage (after installing as above):
+Batch CLI for production logs (one JSON row per prompt with `outputs`):
 
 ```bash
 sted-eval --input production_logs.jsonl --workers 4 --output report.json

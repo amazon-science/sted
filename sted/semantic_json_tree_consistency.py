@@ -39,10 +39,9 @@ except ImportError:
 from scipy.optimize import linear_sum_assignment
 import zss
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-from sentence_transformers import SentenceTransformer
-
+# sentence-transformers (and torch) and langchain-text-splitters are the `embeddings`
+# extra. Without them the evaluator still runs with model_id=None: text leaves are
+# compared by character similarity instead of embeddings.
 from deepdiff import DeepDiff
 
 
@@ -61,8 +60,11 @@ try:
 except ImportError:
     _BotoConfig = None
 
-from transformers import logging
-logging.set_verbosity_error()
+try:
+    from transformers import logging as _hf_logging
+    _hf_logging.set_verbosity_error()
+except ImportError:
+    pass
 
 
 # LRUCache definition moved to ./_lru_cache.py during the v0.2.0 refactor.
@@ -81,11 +83,18 @@ from . import _leaf  # noqa: E402
 from . import _order  # noqa: E402
 
 
-from transformers import logging
-logging.set_verbosity_error()
+try:
+    from transformers import logging as _hf_logging
+    _hf_logging.set_verbosity_error()
+except ImportError:
+    pass
 
 
 _PROFILE_UNSET = object()
+
+# Imported lazily by _load_sentence_transformer. Kept as a module attribute so callers
+# (and tests) can substitute a class without importing torch.
+SentenceTransformer = None
 
 _ST_MODELS: Dict[str, Any] = {}
 _ST_LOCK = threading.Lock()
@@ -97,7 +106,17 @@ def _load_sentence_transformer(model_id: str):
     with _ST_LOCK:
         model = _ST_MODELS.get(model_id)
         if model is None:
-            model = SentenceTransformer(model_id)
+            cls = SentenceTransformer
+            if cls is None:
+                try:
+                    from sentence_transformers import SentenceTransformer as cls
+                except ImportError as e:
+                    raise ImportError(
+                        f"model_id={model_id!r} needs sentence-transformers, which is not installed. "
+                        'Install it with: pip install "sted[embeddings]", or pass model_id=None to '
+                        "compare text fields by character similarity instead."
+                    ) from e
+            model = cls(model_id)
             model.encode(["test"], show_progress_bar=False)
             _ST_MODELS[model_id] = model
         return model
@@ -280,7 +299,7 @@ class SemanticJsonTreeConsistencyEvaluator:
                  order_sensitive_fields: Set[str] = None,
                  exact_match_fields: Set[str] = None,
                  exact_match_all_keys: bool = False,
-                 model_id: str = 'all-MiniLM-L6-v2',
+                 model_id: Optional[str] = 'all-MiniLM-L6-v2',
                  chunk_size: int = 300,
                  chunk_overlap: int = 50,
                  region_name: str = "us-west-2",
@@ -504,7 +523,13 @@ class SemanticJsonTreeConsistencyEvaluator:
         else:
             boto_config = None
 
-        if self.model_id in ["amazon.titan-embed-text-v1", "amazon.titan-embed-text-v2:0",
+        if self.model_id is None or str(self.model_id).lower() in ("none", "char", "character"):
+            # No embedding model: text leaves fall back to the character kernel (tau = 1)
+            # unless the caller chose a tau explicitly.
+            self.model_id = None
+            if self.leaf_literalism_tau is None:
+                self.leaf_literalism_tau = 1.0
+        elif self.model_id in ["amazon.titan-embed-text-v1", "amazon.titan-embed-text-v2:0",
                              "cohere.embed-multilingual-v3", "cohere.embed-v4:0", "us.cohere.embed-v4:0"]:
             self.bedrock_client = create_bedrock_client(region_name=region_name, config=boto_config)
         else:
@@ -1407,7 +1432,11 @@ class SemanticJsonTreeConsistencyEvaluator:
         Extracted so ``sted._leaf``'s τ axis can ask for the *form* reading of a leaf value
         without the length switch deciding for it. Callers must handle ``text1 == text2``
         themselves; this function does not shortcut it.
+
+        Without an embedding backend (``model_id=None``) the character kernel stands in.
         """
+        if self.embedding_model is None and self.bedrock_client is None:
+            return _leaf.char_kernel(text1, text2)
         emb1 = self._get_embedding(text1)
         emb2 = self._get_embedding(text2)
 
@@ -1621,6 +1650,10 @@ class SemanticJsonTreeConsistencyEvaluator:
             return [text]
 
         # Create a text splitter that tries to create semantically meaningful chunks
+        try:
+            from langchain_text_splitters import RecursiveCharacterTextSplitter
+        except ImportError:
+            return [text]
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size - self.chunk_overlap,
             chunk_overlap=self.chunk_overlap,
@@ -1739,6 +1772,10 @@ class SemanticJsonTreeConsistencyEvaluator:
         # Use exact match for field names if enabled (e.g., for tool calling)
         if self.exact_match_all_keys:
             # Exact string match for field names
+            field_similarity = 1.0 if key1 == key2 else 0.0
+        elif _key_identity.resolve_mu(self.key_identity_mu) >= 1.0:
+            # μ = 1 is the identifier reading alone (field_similarity returns exact_sim), so
+            # the label embedding would be computed and then discarded.
             field_similarity = 1.0 if key1 == key2 else 0.0
         else:
             # Semantic similarity for field names (default behavior)

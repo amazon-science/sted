@@ -11,6 +11,12 @@ Both use STED's ``typed`` profile. ``min_readout`` is the lowest field score, so
 ``differences`` list explains it exactly: its lowest score *is* the min readout.
 ``mean_readout`` averages the field scores and grades how far apart two outputs are.
 
+Text fields are compared by a local Sentence-Transformers model when the ``embeddings``
+extra is installed (``pip install "sted[embeddings]"``), otherwise by character
+similarity; ``text_similarity`` in every result says which. Force either with
+``embedding_model="all-MiniLM-L6-v2"`` or ``embedding_model="none"``, or set
+``STED_EMBEDDING_MODEL``.
+
 Field rules (path patterns, see ``sted.rules``)::
 
     sted.compare(a, b,
@@ -21,8 +27,10 @@ Field rules (path patterns, see ``sted.rules``)::
 import dataclasses
 import json
 import os
+import importlib.util
 import statistics
 import threading
+import warnings
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .rules import FieldRules
@@ -55,6 +63,7 @@ class Comparison:
     mean_readout: float
     threshold: float
     differences: List[FieldDifference]
+    text_similarity: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return dataclasses.asdict(self)
@@ -86,6 +95,7 @@ class Consistency:
     unstable_fields: List[UnstableField]
     least_agreeing_pair: Optional[Dict[str, Any]]    # {"i", "j", "min_readout", "differences"}
     note: Optional[str] = None
+    text_similarity: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         d = dataclasses.asdict(self)
@@ -118,11 +128,33 @@ def _format_diff(d: FieldDifference) -> str:
 
 # ---------------------------------------------------------------- evaluators
 
-def _embedding_model(explicit: Optional[str]) -> str:
-    return explicit or os.environ.get("STED_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)
+_warned_no_embeddings = False
 
 
-def _evaluators(rules: FieldRules, model: str):
+def _embedding_model(explicit: Optional[str]) -> Optional[str]:
+    """Model id to use, or None for character similarity on text fields.
+
+    Explicit argument, then STED_EMBEDDING_MODEL, then the default model if
+    sentence-transformers is installed, else None (with a one-time warning)."""
+    global _warned_no_embeddings
+    choice = explicit or os.environ.get("STED_EMBEDDING_MODEL")
+    if choice:
+        return None if choice.lower() in ("none", "char", "character") else choice
+    if importlib.util.find_spec("sentence_transformers") is not None:
+        return DEFAULT_EMBEDDING_MODEL
+    if not _warned_no_embeddings:
+        warnings.warn('sentence-transformers is not installed: text fields are compared by '
+                      'character similarity. For semantic comparison: pip install "sted[embeddings]"',
+                      stacklevel=3)
+        _warned_no_embeddings = True
+    return None
+
+
+def _text_similarity_label(model: Optional[str]) -> str:
+    return f"embedding:{model}" if model else "character"
+
+
+def _evaluators(rules: FieldRules, model: Optional[str]):
     """(min-readout evaluator, mean-readout evaluator), each wrapped for consistency runs."""
     key = (rules.key(), model)
     with _lock:
@@ -184,14 +216,16 @@ def compare(a: Any, b: Any, *, threshold: float = DEFAULT_THRESHOLD,
     for name, raw, val in (("a", a, pa), ("b", b, pb)):
         if val is None:
             raise ValueError(f"{name} is not valid JSON: {str(raw)[:80]!r}")
-    lo_eval, mean_eval = _evaluators(rules, _embedding_model(embedding_model))
+    model = _embedding_model(embedding_model)
+    lo_eval, mean_eval = _evaluators(rules, model)
     # STED directly: AgentConsistencyEvaluator.evaluate_pair scores an empty object as
     # invalid (0.0), but an explicit pair of {} and {} is identical.
     lo = float(lo_eval._evaluator.calculate_tree_edit_distance_fast(pa, pb))
     mean = float(mean_eval._evaluator.calculate_tree_edit_distance_fast(pa, pb))
     return Comparison(same=lo >= threshold, min_readout=round(lo, 6), mean_readout=round(mean, 6),
                       threshold=threshold,
-                      differences=_differences(lo_eval._evaluator, pa, pb, max_differences))
+                      differences=_differences(lo_eval._evaluator, pa, pb, max_differences),
+                      text_similarity=_text_similarity_label(model))
 
 
 def consistency(outputs: Sequence[Any], *, threshold: float = DEFAULT_THRESHOLD,
@@ -211,14 +245,16 @@ def consistency(outputs: Sequence[Any], *, threshold: float = DEFAULT_THRESHOLD,
     if isinstance(outputs, (str, bytes)) or not isinstance(outputs, Sequence) or len(outputs) < 2:
         raise ValueError("outputs must be a list of at least 2 generations")
     rules = FieldRules.coerce(rules, ignore=ignore, unordered=unordered, tolerance=tolerance)
-    lo_eval, mean_eval = _evaluators(rules, _embedding_model(embedding_model))
+    model = _embedding_model(embedding_model)
+    lo_eval, mean_eval = _evaluators(rules, model)
     parsed = [_parse(o) for o in outputs]
     lo = lo_eval.evaluate_outputs({"prompt": parsed}).per_prompt[0]
     mean = mean_eval.evaluate_outputs({"prompt": parsed}).per_prompt[0]
 
     from .agent_consistency_evaluator import _is_valid
     valid_idx = [i for i, o in enumerate(parsed) if _is_valid(o)]
-    base = dict(n_outputs=len(outputs), n_valid=lo.n_valid, validity=round(lo.r_v, 6), threshold=threshold)
+    base = dict(n_outputs=len(outputs), n_valid=lo.n_valid, validity=round(lo.r_v, 6), threshold=threshold,
+                text_similarity=_text_similarity_label(model))
     if lo.n_valid < 2:
         return Consistency(**base, agreement_min=None, agreement_mean=None, share_same=None, n_pairs=0,
                            unstable_fields=[], least_agreeing_pair=None, note="fewer than 2 valid outputs")
