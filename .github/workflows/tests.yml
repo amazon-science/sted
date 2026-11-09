@@ -144,7 +144,7 @@ jobs:
           - group: braintrust, weave
             packages: braintrust weave
           - group: deepeval, ragas, mlflow, promptfoo
-            packages: deepeval ragas mlflow "langchain-community<0.4"
+            packages: deepeval ragas mlflow langchain-community<0.4
             promptfoo: "1"
     steps:
       - uses: actions/checkout@v4
