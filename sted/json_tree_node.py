@@ -22,6 +22,11 @@ class JsonNode:
         self.children = []
         self.node_type = node_type or self._determine_type(value)
         self.path = label  # Full path to this node
+        # Set by add_child. Read only by the order-sensitivity estimator in ``_order.py``,
+        # which needs to see a node's siblings; nothing in the cost functions or the tree
+        # hash traverses it, so it cannot affect any score. It does create reference
+        # cycles, which Python's cycle collector handles.
+        self.parent = None
 
     def _determine_type(self, value: Any) -> str:
         """Determine the type of a node based on its value."""
@@ -42,6 +47,7 @@ class JsonNode:
 
     def add_child(self, child: 'JsonNode'):
         """Add a child node."""
+        child.parent = self
         self.children.append(child)
 
     def get_children(self):

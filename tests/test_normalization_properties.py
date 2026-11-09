@@ -16,8 +16,10 @@ from sted.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvalu
 
 @pytest.fixture(scope="module")
 def evaluator():
+    # These properties (synonym keys score high, partial overlap is graded) are the
+    # published legacy semantics; the typed default reads keys as identifiers.
     return SemanticJsonTreeConsistencyEvaluator(
-        model_id="all-MiniLM-L6-v2", embedding_dim=512
+        model_id="all-MiniLM-L6-v2", embedding_dim=512, profile="legacy"
     )
 
 

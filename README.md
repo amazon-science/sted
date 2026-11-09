@@ -1,11 +1,39 @@
 # STED and Consistency Scoring: A Framework for Evaluating LLM Structured Output Reliability
 
-A comprehensive framework for evaluating and improving consistency in LLM-generated structured outputs. This framework combines STED (Semantic Tree Edit Distance), a novel similarity metric that balances semantic flexibility with structural strictness, with a consistency scoring framework that aggregates multiple STED measurements to quantify output reliability.
+A framework for measuring consistency in LLM-generated structured outputs. It combines the configurable STED JSON-similarity family with repeated-run aggregation and explicitly separates validity from consistency.
 
 > 📄 **Paper**: [STED and Consistency Scoring: A Framework for Evaluating LLM Structured Output Reliability](docs/STED_and_Consistency_Scoring.pdf) - Accepted at NeurIPS 2025 Workshop on Structured Probabilistic Inference & Generative Modeling
 
+## What's New
+
+**November 2026 — v0.2.0**
+- **Breaking: new default scoring.** `SemanticJsonTreeConsistencyEvaluator()` now uses
+  `profile="typed"` (the *min readout*): a score of θ means every matched field scores at
+  least θ, so a changed argument is no longer averaged away. Scores will differ from
+  earlier releases; pass `profile="legacy"` to reproduce them exactly.
+- **Two readouts.** `profile="typed"` decides whether two outputs are the same;
+  `profile="typed_mean"` grades how far they drift. See the [profile table](#basic-similarity-calculation).
+- **Type-aware leaves.** Literals (identifiers, dates, codes) compare exactly, numbers by
+  value (`3` equals `"3"`), free text by embedding similarity.
+- **20-model results** on Toucan tool calling across 11 temperatures, see
+  [Results and Findings](#results-and-findings).
+- **MCP server** `sted-mcp` with `compare_outputs` and `evaluate_consistency` tools that
+  report which fields differ, see [MCP Server](#mcp-server).
+- **Field-level differences**: `calculate_field_differences(a, b)` lists each differing
+  field with its score; under `typed` the score is the lowest of them.
+- Fixed a regular expression that could backtrack exponentially on long runs of spaces.
+
+**May 2026**
+- `AgentConsistencyEvaluator` with trajectory mode, an OpenTelemetry adapter and the
+  `sted-eval` CLI.
+
+**2025**
+- STED and Consistency Scoring accepted at the NeurIPS 2025 Workshop on Structured
+  Probabilistic Inference & Generative Modeling.
+
 ## Table of Contents
 
+- [What's New](#whats-new)
 - [Overview](#overview)
 - [Key Features](#key-features)
 - [Installation](#installation)
@@ -22,32 +50,42 @@ A comprehensive framework for evaluating and improving consistency in LLM-genera
 
 Large Language Models (LLMs) are increasingly deployed for structured data generation tasks, yet their output consistency remains a critical challenge for production applications. This framework addresses this challenge through two key contributions:
 
-1. **STED (Semantic Tree Edit Distance)**: A novel similarity metric that balances semantic flexibility with structural strictness when comparing JSON outputs
-2. **Consistency Scoring Framework**: Aggregates multiple STED measurements across repeated generations to quantify output reliability
+1. **STED (Semantic Tree Edit Distance)**: a JSON tree similarity that aligns two outputs field by field and scores each field by its type (literals exactly, numbers by value, text by embedding similarity). It has two readouts over the same field scores:
+   - **min readout** (`profile="typed"`, the default): the lowest field score. A pair scoring 0.95 has *every* matched field at or above 0.95, so a threshold on it decides whether two outputs are the same.
+   - **mean readout** (`profile="typed_mean"`): the average field score. It grades how far outputs drift and is suited to monitoring and ranking, but must not be thresholded: one changed field is diluted by the unchanged ones.
+2. **Consistency Scoring Framework**: samples each prompt repeatedly and reports **validity** (share of outputs that parse) separately from **agreement** (mean pairwise STED over the valid outputs).
 
-Through systematic experiments on synthetic datasets with controlled schema, expression, and semantic variations, STED achieves superior performance (0.86–0.90 similarity for semantic equivalents, 0.0 for structural breaks) compared to existing metrics including TED, BERTScore, and DeepDiff.
+Validation artifacts cover human preference, generated perturbations, constructed triples, and deterministic sandbox outcomes. These instruments disagree in informative ways; no universal semantic-equivalence ranking is claimed.
 
 ## Key Features
 
 - **Semantic Tree Edit Distance (STED)**: Advanced similarity calculation combining structural and semantic analysis
 - **Multiple Variation Types**: Support for schema, expression, and semantic variations
 - **LLM Benchmarking**: Comprehensive evaluation of different LLMs across temperature settings
-- **MCP Server Support**: Model Context Protocol server for real-time consistency evaluation in agentic systems
+- **MCP Server**: `sted-mcp` exposes STED to MCP clients (Claude Code, Claude Desktop, other agents) as two tools, see [MCP Server](#mcp-server)
 - **Synthetic Dataset Generation**: Automated generation of variation datasets for evaluation
 - **Visualization Tools**: Rich plotting and analysis capabilities for results interpretation
 
 ## Installation
 
+`sted` is not published on PyPI; `pip install sted` will not install this library.
+Install it from GitHub instead:
+
 ```bash
-# Clone the repository
+# Directly from GitHub
+pip install "git+https://github.com/amazon-science/sted.git"
+
+# With optional extras (bedrock, openai, bertscore)
+pip install "sted[bedrock] @ git+https://github.com/amazon-science/sted.git"
+```
+
+Or from a local clone:
+
+```bash
 git clone https://github.com/amazon-science/sted.git
 cd sted
-
-# Install the library
-pip install -e .
-
-# Or with uv
-uv pip install -e .
+pip install -e .          # or: uv pip install -e .
+pip install -e ".[bedrock,openai]"   # with extras
 ```
 
 For development:
@@ -90,21 +128,35 @@ pip install --upgrade "torch>=2.4"
 ```python
 from sted.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
 
-# Initialize evaluator
-evaluator = SemanticJsonTreeConsistencyEvaluator(
-    model_id='amazon.titan-embed-text-v2:0'
-)
+# Default profile "typed" = min readout (decides "the same")
+same = SemanticJsonTreeConsistencyEvaluator()
+# "typed_mean" = mean readout (grades drift)
+drift = SemanticJsonTreeConsistencyEvaluator(profile="typed_mean")
 
-# Compare JSON structures
-json1 = {'name': 'John', 'age': 30, 'city': 'New York'}
-json2 = {'name': 'John', 'age': 30, 'location': 'NYC'}
+ref       = {"name": "get_weather", "arguments": {"city": "Seattle", "days": 3, "units": "metric"}}
+reordered = {"arguments": {"units": "metric", "days": "3", "city": "Seattle"}, "name": "get_weather"}
+changed   = {"name": "get_weather", "arguments": {"city": "Seattle", "days": 5, "units": "metric"}}
 
-# Calculate similarity
-similarity = evaluator.calculate_tree_edit_distance_opt(
-    json1, json2, 
-    variation_type="combined"
-)
-print(f"Similarity: {similarity:.4f}")  # Output: 0.8650
+for other in (reordered, changed):
+    print(same.calculate_tree_edit_distance_opt(ref, other, variation_type="combined"),
+          drift.calculate_tree_edit_distance_opt(ref, other, variation_type="combined"))
+# 1.0   1.0     key order and "3" vs 3 are harmless
+# 0.0   0.833   a changed argument: min rejects, mean only dips
+```
+
+Other profiles are kept as ablations and for reproducing earlier results:
+
+| Profile | What it is |
+|---|---|
+| `typed` (default) | Min readout: positional arrays, exact keys, typed leaves, bottleneck aggregation |
+| `typed_mean` | Mean readout: same as `typed` with arithmetic-mean aggregation |
+| `path_f1` (alias `ranking`) | Harmonic mean of path-anchored soft precision/recall; a ranker, not a threshold |
+| `certificate` | Bottleneck with literal character leaves (earlier threshold profile) |
+| `rank` | Order-adaptive arrays, bottleneck, legacy leaf kernel |
+| `legacy` | Original embedding/additive/mean scoring from the NeurIPS 2025 workshop paper |
+
+```python
+legacy = SemanticJsonTreeConsistencyEvaluator(profile="legacy", model_id="all-MiniLM-L6-v2")
 ```
 
 ### Batch Consistency Evaluation
@@ -113,7 +165,7 @@ print(f"Similarity: {similarity:.4f}")  # Output: 0.8650
 from sted.semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
 from sted.structural_consistency_analyzer import StructuralConsistencyAnalyzer
 
-evaluator = SemanticJsonTreeConsistencyEvaluator(model_id='amazon.titan-embed-text-v2:0')
+evaluator = SemanticJsonTreeConsistencyEvaluator()
 analyzer = StructuralConsistencyAnalyzer(evaluator)
 
 # Multiple LLM outputs for the same prompt
@@ -176,6 +228,51 @@ The evaluator separates **validity** ($r_v$ — fraction of runs that produced
 parseable output) from **consistency** ($c_\text{mean}$ — pairwise STED on the
 parseable subset), matching the deployment-aware framing of the STED paper.
 
+### MCP Server
+
+`sted-mcp` serves STED over the [Model Context Protocol](https://modelcontextprotocol.io)
+(stdio), so an agent can check its own outputs or compare runs. Requires Python ≥ 3.10
+and `mcp` 1.x (`sted[mcp]` pins `mcp>=1.2,<2`; mcp 2.x is not supported yet).
+
+```bash
+pip install "sted[mcp] @ git+https://github.com/amazon-science/sted.git"
+
+# Claude Code
+claude mcp add sted -- sted-mcp
+```
+
+Claude Desktop (`claude_desktop_config.json`; Desktop does not read your shell `PATH`,
+so give the absolute path printed by `which sted-mcp`):
+
+```json
+{ "mcpServers": { "sted": { "command": "/absolute/path/to/sted-mcp" } } }
+```
+
+| Tool | Input | Returns |
+|---|---|---|
+| `compare_outputs` | `output_a`, `output_b`, `threshold` (0.95) | `min_readout`, `mean_readout`, `same` (= min readout ≥ threshold), `differences` (each differing field: path, changed / missing / extra, both values, field score) |
+| `evaluate_consistency` | `outputs` (2–50 generations of one prompt), `threshold` (0.95) | `validity`, `agreement_min`, `agreement_mean`, `share_same`, `unstable_fields` (which fields disagree, in what share of pairs, with the values seen), `least_agreeing_pair` with its `differences` |
+
+Outputs can be JSON values or JSON text; text that does not parse counts as invalid.
+Free-text fields are embedded locally with `all-MiniLM-L6-v2` (override with
+`STED_EMBEDDING_MODEL`), so no cloud credentials are needed. For example, four runs of a
+search tool call, one of which is a refusal:
+
+```json
+{"n_outputs": 4, "n_valid": 3, "validity": 0.75,
+ "agreement_min": 0.333, "agreement_mean": 0.833, "share_same": 0.333,
+ "unstable_fields": [{"path": "arguments.limit", "share_of_pairs": 0.667,
+                      "values": [{"value": 5, "count": 2}, {"value": 10, "count": 1}]}],
+ "least_agreeing_pair": {"i": 0, "j": 2, "min_readout": 0.0,
+   "differences": [{"path": "arguments.limit", "status": "changed", "a": 5, "b": 10, "score": 0.0}]}}
+```
+
+The refusal is invalid, the two runs that differ only in key order count as the same, and
+`unstable_fields` names the one field that varies: `limit`. The minimum readout always
+equals the lowest field score, so the listed differences fully explain it. The same
+breakdown is available in Python as
+`SemanticJsonTreeConsistencyEvaluator(profile="typed").calculate_field_differences(a, b)`.
+
 ### Performance
 
 **Benchmark setup**:
@@ -186,7 +283,8 @@ parseable subset), matching the deployment-aware framing of the STED paper.
 - **Hardware**: MacBook M-series laptop (8 cores), single Python process,
   single `SemanticJsonTreeConsistencyEvaluator` instance shared across
   workers
-- **Embedding model**: `all-MiniLM-L6-v2` (default, CPU)
+- **Profile used by this historical throughput benchmark**: `legacy`
+- **Embedding model for that profile**: `all-MiniLM-L6-v2` (CPU)
 - **Reproduce**: `python -c "from sted import AgentConsistencyEvaluator; ..."`
   with the snippet shown above
 
@@ -241,7 +339,7 @@ Known limits to plan around:
 | No dashboards / async monitoring | not in scope | See LangSmith / Braintrust for that layer |
 | Cosine similarity calibration drifts with embedder | known | Pin embedder version; validate on your domain |
 
-CLI usage (after `pip install sted`):
+CLI usage (after installing as above):
 
 ```bash
 sted-eval --input production_logs.jsonl --workers 4 --output report.json
@@ -468,10 +566,12 @@ For all scripts, see [Scripts Reference](./docs/guides/SCRIPTS_REFERENCE.md).
 
 ### STED Algorithm
 
-STED extends classical tree edit distance with semantic awareness:
+STED aligns two JSON trees and scores matched leaves with a type-aware kernel:
 
-- **Semantic-Enhanced Tree Edit Distance**: Recognizes equivalent keys and values while preserving structural constraints
-- **Order-Invariant Matching**: Uses Hungarian algorithm for optimal element pairing in O(n³) time
+- **Typed leaves**: booleans/null and literals (identifiers, dates, codes, numbers) compare exactly; a JSON number equals a numeric string of the same value; free text compares by embedding similarity
+- **Readouts**: the min readout (`typed`, default) takes the worst matched field, so a threshold certifies every field; the mean readout (`typed_mean`) averages them to grade drift
+- **Legacy profile**: embedding-aware labels/values, bag-style array matching, additive channels, and arithmetic-mean aggregation; retained for historical reproducibility
+- **Hungarian matching**: computes the configured local assignment in O(n³) time
 - **Multi-Level Similarity**: Integrates structural, key, value, and type similarities with configurable weights
 
 The semantic update cost: `γ_upd(v1, v2) = w_s · γ_struct(v1, v2) + w_c · γ_content(v1, v2)`
@@ -495,19 +595,36 @@ See [STED Complexity Analysis](./docs/api/sted_complexity_analysis.md) for detai
 
 ## Results and Findings
 
-Evaluated **19 LLMs** across multiple temperature settings:
+![Tool-call consistency of 20 LLMs](images/socb_toucan_consistency.png)
+
+**20 LLMs** on Toucan tool calling: 1,006 prompts, 10 generations per prompt at each of
+11 temperatures (0.0–1.0), scored with STED's min readout (`profile="typed"`).
+Agreement $c_{mean}$ is the mean pairwise STED among a prompt's *valid* outputs; validity
+$r_v$ is the share of outputs that parse. They are reported separately.
+
+- **No model is fully consistent at T = 0.** Agreement ranges from 0.26 (Mistral-Large-3)
+  to 0.98 (Claude-3.5-Haiku).
+- **Temperature effects are model-specific.** Claude-Haiku-4.5 drops from 0.94 to 0.71
+  between T = 0 and T = 1; GPT-4.1-Mini is unchanged (0.60); Llama-3.3-70B rises slightly.
+- **Validity and agreement are different axes.** Llama-3.3-70B parses only 33% of the
+  time; Grok-4.1-Fast parses 95% but agrees at 0.68.
 
 | Provider | Models |
 |----------|--------|
-| Anthropic | Claude 3 Haiku, Claude 3.5 Haiku, Claude 3.5 Sonnet, Claude 3.7 Sonnet |
-| Amazon | Nova Lite, Nova Pro v1 |
-| Meta | Llama 3.1 70B, Llama 3.1 405B, Llama 3.3 70B, Llama 4 Maverick |
-| OpenAI | GPT-4o, GPT-4.1 Mini |
-| Google | Gemini 2.5 Flash, Gemini 2.5 Flash Lite, Gemini 2.5 Pro |
-| DeepSeek | DeepSeek V3, DeepSeek V3.1 |
+| Anthropic | Claude 3.5 Haiku, Claude 3.5 Sonnet, Claude 3.7 Sonnet, Claude Sonnet 4, Claude Opus 4, Claude Haiku 4.5, Claude Sonnet 4.5, Claude Opus 4.5 |
+| Amazon | Nova 2 Lite |
+| OpenAI | GPT-4.1 Mini, GPT-OSS-120B |
+| Google | Gemini 2.5 Flash Lite |
+| Meta | Llama 3.3 70B |
 | Alibaba | Qwen3 32B, Qwen3 235B A22B |
+| Mistral | Mistral Large 3 (675B) |
+| NVIDIA | Nemotron 3 Nano 30B A3B |
+| xAI | Grok 4.1 Fast |
+| MiniMax | MiniMax M2 |
+| Xiaomi | MiMo V2 Flash |
 
-**Scale**: 19 models, 11 temperature settings (0.0–1.0), ~2.1M outputs across 1,006 tool-calling samples
+The NeurIPS 2025 workshop paper evaluated an earlier set of 19 models (Claude 3/3.5/3.7,
+Nova, Llama 3.1/3.3/4, GPT-4o, Gemini 2.5, DeepSeek V3, Qwen3) with the `legacy` profile.
 
 ## Contributing
 
