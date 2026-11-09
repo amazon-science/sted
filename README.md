@@ -318,8 +318,22 @@ epochs where one booking drifts to another date, Inspect's `mean` reducer report
 (two of three epochs correct) and `sted_agreement` 0.333 (one of three epoch pairs gives
 the same call). Install with `pip install "sted[inspect]"`.
 
-Other frameworks (Braintrust, Weave, Confident AI, Databricks, Arize) take custom code
-scorers; `sted.compare` and `sted.consistency` return plain dicts via `.to_dict()` for that.
+### Braintrust, Weave, DeepEval, Ragas, MLflow, promptfoo
+
+Copy-and-adapt examples, each a short runnable script that CI runs against the
+framework's current release, are in [examples/integrations](examples/integrations/):
+
+| Framework | Hook | Repeated runs |
+|---|---|---|
+| Braintrust | code scorer | `trial_count` + compare the trials' outputs |
+| W&B Weave | `Scorer` | `trials` + `summarize` compares the trials' outputs |
+| DeepEval / Confident AI | `BaseMetric` | `sted.consistency` on reruns |
+| Ragas 0.4 | `@numeric_metric` | — |
+| MLflow 3 / Databricks | `@scorer` returning `Feedback` | — |
+| promptfoo | Python assertion | `sted consistency` on `--repeat` outputs |
+
+The examples README also lists framework quirks found while writing them (for example,
+DeepEval rebuilds metrics from their `__init__` parameters).
 
 ## MCP Server
 

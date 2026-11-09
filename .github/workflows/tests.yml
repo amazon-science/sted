@@ -132,6 +132,39 @@ jobs:
         env:
           STED_EMBEDDING_MODEL: none
 
+  # examples/integrations, run against the frameworks' current releases.
+  examples:
+    name: examples (${{ matrix.group }}) / py3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: braintrust, weave
+            packages: braintrust weave
+          - group: deepeval, ragas, mlflow, promptfoo
+            packages: deepeval ragas mlflow "langchain-community<0.4"
+            promptfoo: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        if: matrix.promptfoo == '1'
+        with:
+          node-version: "22"
+      - name: Install
+        env:
+          PACKAGES: ${{ matrix.packages }}
+        run: pip install -e . pytest $PACKAGES
+      - name: Run examples
+        env:
+          STED_EMBEDDING_MODEL: none
+          STED_RUN_PROMPTFOO: ${{ matrix.promptfoo }}
+        run: python -m pytest -q -p no:cacheprovider -rs tests/test_integration_examples.py
+
   # The composite action in action.yml, used the way other repositories would use it.
   action:
     name: action / ${{ matrix.os }}

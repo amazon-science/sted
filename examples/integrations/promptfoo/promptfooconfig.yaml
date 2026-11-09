@@ -1,0 +1,22 @@
+# STED inside promptfoo. The `echo` provider returns the prompt, standing in for a model
+# that answers with a tool call; replace it with your provider.
+#   npx promptfoo@latest eval -c promptfooconfig.yaml
+description: STED field-level check of a tool call
+prompts:
+  - "{{call}}"
+providers:
+  - echo
+defaultTest:
+  vars:
+    expected: '{"name": "book_flight", "arguments": {"to": "JFK", "date": "2026-12-01", "passengers": 2, "request_id": "ref"}}'
+    sted_rules: '{"ignore": ["request_id"]}'
+  assert:
+    - type: python
+      value: file://sted_assert.py
+tests:
+  - description: same call, reordered keys and "2" for 2
+    vars:
+      call: '{"arguments": {"passengers": "2", "date": "2026-12-01", "to": "JFK", "request_id": "r-0"}, "name": "book_flight"}'
+  - description: drifted date (expected to fail)
+    vars:
+      call: '{"name": "book_flight", "arguments": {"to": "JFK", "date": "2026-12-02", "passengers": 2, "request_id": "r-1"}}'
