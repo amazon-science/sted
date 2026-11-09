@@ -103,6 +103,17 @@ mcp = [
     "mcp>=1.2.0,<3; python_version >= '3.10'",
 ]
 
+# Framework adapters (sted.integrations.*). Tested with langsmith 0.14 and inspect_ai
+# 0.3.288; inspect_ai 0.3.288 breaks with agent-client-protocol 1.x (acp.helpers was
+# removed), hence the pin until inspect_ai bounds it.
+langsmith = [
+    "langsmith>=0.2",
+]
+inspect = [
+    "inspect_ai>=0.3.100; python_version >= '3.10'",
+    "agent-client-protocol<1; python_version >= '3.10'",
+]
+
 # Convenience: install everything optional.
 all = [
     "sted[embeddings,bedrock,openai,bertscore,yaml,viz,async,mcp]",

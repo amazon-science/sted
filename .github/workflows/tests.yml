@@ -112,6 +112,22 @@ jobs:
           python -c "import importlib.metadata as m; print('mcp', m.version('mcp'))"
           python -m pytest -q -p no:cacheprovider tests/test_mcp_server.py
 
+  # LangSmith and Inspect AI adapters, end to end and offline (no API keys).
+  integrations:
+    name: integrations (langsmith, inspect_ai) / py3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[langsmith,inspect]" pytest
+      - run: python -c "import importlib.metadata as m; print({p: m.version(p) for p in ('langsmith', 'inspect_ai')})"
+      - run: python -m pytest -q -p no:cacheprovider tests/test_integrations.py
+        env:
+          STED_EMBEDDING_MODEL: none
+
   # The composite action in action.yml, used the way other repositories would use it.
   action:
     name: action / ${{ matrix.os }}

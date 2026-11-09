@@ -47,6 +47,8 @@ install has no torch.
 - **Test helpers**: `sted.testing.assert_same`, `assert_consistent` and `assert_snapshot`
   (snapshot regression tests for LLM outputs), see [In your tests](#in-your-tests).
 - **MCP server works with mcp 1.x and 2.x.**
+- **Integrations**: LangSmith evaluators (per run and across `num_repetitions`) and an
+  Inspect AI scorer and epoch reducer, see [Integrations](#integrations).
 - **Breaking: no torch by default.** The core install no longer pulls in
   sentence-transformers/torch and compares free-text fields by character similarity
   (with a one-time warning). To keep embedding-based scores, install
@@ -69,6 +71,7 @@ install has no torch.
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Command line](#command-line)
+- [Integrations](#integrations)
 - [MCP Server](#mcp-server)
 - [Agents and production logs](#agents-and-production-logs)
 - [How STED scores](#how-sted-scores)
@@ -274,6 +277,49 @@ same three keys. `--json` prints machine-readable results. Exit codes: 0 same, 1
 
 The step installs sted, runs the command, writes its output to the job summary, and fails
 when the outputs differ (output `exit-code`: 0 / 1 / 2). `args` is split on whitespace.
+
+## Integrations
+
+STED plugs into evaluation frameworks as a scorer; they keep the datasets, repetitions,
+dashboards and review UI. Most of them can already rerun each example N times but only
+average the per-run scores; these adapters compare the N outputs with each other.
+
+### LangSmith
+
+```python
+from langsmith import evaluate
+from sted.integrations.langsmith import sted_evaluator, sted_consistency_evaluator
+
+evaluate(my_agent, data="booking-dataset",
+         evaluators=[sted_evaluator(ignore=["request_id"])],                  # vs. reference
+         summary_evaluators=[sted_consistency_evaluator(ignore=["request_id"])],
+         num_repetitions=5)
+```
+
+`sted_evaluator` adds `sted_same`, `sted_min_readout` and `sted_mean_readout` to every run,
+with the differing fields in the comment. `sted_consistency_evaluator` groups the
+repetitions of each example and reports `sted_share_same`, `sted_agreement`,
+`sted_consistent_examples` and `sted_validity`, with a comment such as
+`arguments.date: unstable in 1 of 2`. Install with `pip install "sted[langsmith]"`.
+
+### Inspect AI
+
+```python
+from inspect_ai import Task, Epochs
+from sted.integrations.inspect_ai import sted_match, sted_agreement
+
+Task(dataset=..., solver=...,
+     scorer=sted_match(ignore=["request_id"]),          # output vs. target, JSON or tool calls
+     epochs=Epochs(3, [sted_agreement(ignore=["request_id"]), "mean"]))
+```
+
+`sted_agreement` is an epoch reducer over the epochs' outputs, not their scores. With three
+epochs where one booking drifts to another date, Inspect's `mean` reducer reports 0.667
+(two of three epochs correct) and `sted_agreement` 0.333 (one of three epoch pairs gives
+the same call). Install with `pip install "sted[inspect]"`.
+
+Other frameworks (Braintrust, Weave, Confident AI, Databricks, Arize) take custom code
+scorers; `sted.compare` and `sted.consistency` return plain dicts via `.to_dict()` for that.
 
 ## MCP Server
 
