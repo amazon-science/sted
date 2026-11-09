@@ -3,6 +3,7 @@ end over stdio through the official MCP client (the transport MCP hosts launch).
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import sys
 
@@ -82,7 +83,10 @@ def test_stdio_server_end_to_end():
     from mcp.client.stdio import stdio_client
 
     async def run():
-        params = StdioServerParameters(command=sys.executable, args=["-m", "sted.mcp_server"])
+        # The protocol path is what this test covers; embedding scoring is covered in-process
+        # above. Character mode keeps the server start independent of torch load time.
+        params = StdioServerParameters(command=sys.executable, args=["-m", "sted.mcp_server"],
+                                       env={**os.environ, "STED_EMBEDDING_MODEL": "none"})
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
