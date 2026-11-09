@@ -1,4 +1,6 @@
-"""Centralized model configuration for STED framework."""
+"""Centralized model configuration for STED framework.
+
+Research utility: not part of sted's stable API (see the README); may change or move."""
 
 # Invalid ShareGPT sample indices (ground_truth has "Invalid JSON" error)
 # These samples should be excluded from all experiments

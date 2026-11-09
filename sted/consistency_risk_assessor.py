@@ -1,6 +1,8 @@
 """
 Consistency Risk Assessor for Tool-Calling Prompts
 
+Research utility: not part of sted's stable API (see the README); may change or move.
+
 Pre-generation assessment tool that analyzes prompt + tool definitions
 to identify factors likely to cause inconsistent LLM outputs.
 
@@ -8,7 +10,7 @@ Risk factors and thresholds are derived from empirical analysis of
 225K+ samples across 19 LLMs (see docs/analysis/CONSISTENCY_FACTORS_ANALYSIS.md).
 
 Usage:
-    from sted import ConsistencyRiskAssessor
+    from sted.consistency_risk_assessor import ConsistencyRiskAssessor
 
     assessor = ConsistencyRiskAssessor()
     report = assessor.assess(prompt, tools)

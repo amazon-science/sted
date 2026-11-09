@@ -1,5 +1,7 @@
 """Information-weighted consistency: a similarity whose measure comes from the data, not the tree.
 
+Research utility: not part of sted's stable API (see the README); may change or move.
+
 Motivation (see docs/analysis/aggregation_axioms_and_pareto_ceiling.md for the measurements).
 Both published metrics are the same functional under two different measures on the leaf set::
 

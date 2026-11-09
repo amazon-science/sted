@@ -37,21 +37,26 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 
-# Core dependencies — required for the SemanticJsonTreeConsistencyEvaluator,
-# StructuralConsistencyAnalyzer, and AgentConsistencyEvaluator main APIs.
-# Sentence-Transformers (and its torch transitive) is included so that
-# `pip install sted` works out-of-the-box without extras.
+# Core dependencies: enough for sted.compare / sted.consistency with text fields
+# compared by character similarity. No torch. For semantic (embedding) comparison of
+# free-text fields install the `embeddings` extra.
 dependencies = [
     "numpy>=1.20.0",
     "scipy>=1.7.0",
     "deepdiff>=8.0.0",
     "zss>=1.2.0",
     "tqdm>=4.62.0",
+    "rapidfuzz>=3.0.0",
+]
+
+[project.optional-dependencies]
+# Semantic comparison of free-text fields with a local Sentence-Transformers model
+# (pulls in torch). Used automatically when installed.
+embeddings = [
     "sentence-transformers>=2.2.0",
     "langchain-text-splitters>=0.0.1",
 ]
 
-[project.optional-dependencies]
 # AWS Bedrock backend for LLM-as-Judge / tool-call generation.
 bedrock = [
     "boto3>=1.26.0",
@@ -92,15 +97,15 @@ dev = [
     "twine>=4.0.0",
 ]
 
-# MCP server (`sted-mcp`). The mcp SDK needs Python >= 3.10. mcp 2.x renamed
-# FastMCP and changed other APIs; the server is tested on 1.2.0 and 1.12.
+# MCP server (`sted-mcp`). The mcp SDK needs Python >= 3.10. Works with mcp 1.x
+# (FastMCP) and 2.x (MCPServer); CI runs the MCP tests on both.
 mcp = [
-    "mcp>=1.2.0,<2; python_version >= '3.10'",
+    "mcp>=1.2.0,<3; python_version >= '3.10'",
 ]
 
 # Convenience: install everything optional.
 all = [
-    "sted[bedrock,openai,bertscore,yaml,viz,async,mcp]",
+    "sted[embeddings,bedrock,openai,bertscore,yaml,viz,async,mcp]",
 ]
 
 [project.urls]
@@ -109,6 +114,7 @@ Repository = "https://github.com/amazon-science/sted"
 Issues = "https://github.com/amazon-science/sted/issues"
 
 [project.scripts]
+sted = "sted.command:main"
 sted-eval = "sted.cli:main"
 sted-mcp = "sted.mcp_server:main"
 

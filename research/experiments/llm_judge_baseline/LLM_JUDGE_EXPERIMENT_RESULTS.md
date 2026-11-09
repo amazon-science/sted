@@ -122,7 +122,7 @@ On complex synthetic dataset (nested JSON with many fields), LLM Judge fails:
 To reproduce these results:
 
 ```python
-from sted import create_llm_judge
+from sted.llm_judge import create_llm_judge
 
 judge = create_llm_judge(
     provider="bedrock",

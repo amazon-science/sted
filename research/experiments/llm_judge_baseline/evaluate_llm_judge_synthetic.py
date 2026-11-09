@@ -20,7 +20,8 @@ warnings.filterwarnings('ignore')
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from sted import STED, create_llm_judge
+from sted import STED
+from sted.llm_judge import create_llm_judge
 
 # Paths
 STED_PROJECT = Path("/Users/guanghu/Documents/genai/projects/sted")

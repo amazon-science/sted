@@ -1,6 +1,8 @@
 """
 LLM-as-Judge Baseline for JSON Consistency Evaluation
 
+Research utility: not part of sted's stable API (see the README); may change or move.
+
 This module implements an LLM-based evaluation approach where a language model
 (Claude or GPT-4) is used to assess the structural and semantic consistency
 between two JSON outputs.
