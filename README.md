@@ -257,9 +257,11 @@ so give the absolute path printed by `which sted-mcp`):
 | `evaluate_consistency` | `outputs` (2–50 generations of one prompt), `threshold` (0.95), optional `ignore` / `unordered` / `tolerance` | `validity`, `agreement_min`, `agreement_mean`, `share_same`, `unstable_fields` (which fields disagree, in what share of pairs, with the values seen), `least_agreeing_pair` with its `differences` |
 
 Outputs can be JSON values or JSON text; text that does not parse counts as invalid.
-Free-text fields are embedded locally with `all-MiniLM-L6-v2` (override with
-`STED_EMBEDDING_MODEL`), so no cloud credentials are needed. For example, four runs of a
-search tool call, one of which is a refusal:
+With the `embeddings` extra, free-text fields are embedded locally with `all-MiniLM-L6-v2`
+(override with `STED_EMBEDDING_MODEL`, or set it to `none` for character similarity), so
+no cloud credentials are needed. The server loads its scoring stack before it starts
+answering, about 8 s without and 20 s with embeddings on a laptop, after which calls take
+milliseconds. For example, four runs of a search tool call, one of which is a refusal:
 
 ```json
 {"n_outputs": 4, "n_valid": 3, "validity": 0.75,
