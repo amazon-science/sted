@@ -161,3 +161,57 @@ def test_evaluate_consistency_unstable_fields_sampled_share_is_scaled():
     r = ms.evaluate_consistency(outs)                              # 625 of 1,225 pairs disagree
     assert r["unstable_fields"][0]["share_of_pairs"] == pytest.approx(625 / 1225, abs=1e-6)
     assert "estimated" in r["note"]
+
+
+def test_stdio_server_raw_jsonrpc():
+    """The server speaks MCP over stdio, checked without the client library: newline-
+    delimited JSON-RPC written to stdin, responses read from stdout. This is what any
+    MCP host does, and it isolates the server from client-side transport issues."""
+    import queue
+    import subprocess
+    import threading
+
+    proc = subprocess.Popen([sys.executable, "-m", "sted.mcp_server"], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            env={**os.environ, "STED_EMBEDDING_MODEL": "none", "PYTHONUNBUFFERED": "1"})
+    lines: "queue.Queue[bytes]" = queue.Queue()
+    threading.Thread(target=lambda: [lines.put(l) for l in iter(proc.stdout.readline, b"")], daemon=True).start()
+
+    def send(msg):
+        proc.stdin.write((json.dumps(msg) + "\n").encode())
+        proc.stdin.flush()
+
+    def reply(msg_id, timeout=120):
+        while True:
+            try:
+                line = lines.get(timeout=timeout)
+            except queue.Empty:
+                proc.kill()
+                raise AssertionError(f"no reply to id {msg_id}; stderr:\n{proc.stderr.read().decode()[-3000:]}")
+            msg = json.loads(line)              # every stdout line must be a JSON-RPC message
+            if msg.get("id") == msg_id:
+                return msg
+
+    try:
+        send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2024-11-05", "capabilities": {},
+            "clientInfo": {"name": "raw-test", "version": "0"}}})
+        assert reply(1)["result"]["serverInfo"]["name"] == "sted"
+        send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        assert {t["name"] for t in reply(2)["result"]["tools"]} == {"compare_outputs", "evaluate_consistency"}
+        send({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+              "params": {"name": "compare_outputs", "arguments": {"output_a": REF, "output_b": CHANGED}}})
+        result = reply(3)["result"]
+        assert result.get("isError") is not True, result
+        payload = json.loads(result["content"][0]["text"])
+        assert payload["same"] is False and payload["differences"][0]["path"] == "arguments.days"
+        send({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+              "params": {"name": "evaluate_consistency", "arguments": {"outputs": [REF, REORDERED, CHANGED]}}})
+        assert json.loads(reply(4)["result"]["content"][0]["text"])["n_valid"] == 3
+    finally:
+        proc.stdin.close()
+        try:
+            proc.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            proc.kill()
