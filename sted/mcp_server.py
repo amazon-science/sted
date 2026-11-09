@@ -24,7 +24,8 @@ Field rules use path patterns: ``request_id`` (that key at any depth),
 Outputs may be JSON values or JSON text. Text that does not parse as JSON counts as
 invalid. Embeddings for free-text fields use a local Sentence-Transformers model
 (``STED_EMBEDDING_MODEL``, default ``all-MiniLM-L6-v2``); no cloud credentials are
-needed. Models load on the first tool call, not at server start.
+needed. The scoring stack and the default evaluators load before the server starts
+reading stdin (see ``_warm_up``), so the first tool call is fast.
 """
 # No `from __future__ import annotations`: FastMCP inspects real annotation
 # objects when it builds the tool schemas.
@@ -111,9 +112,24 @@ def build_server(name: str = "sted"):
     return server
 
 
+def _warm_up() -> None:
+    """Import the scoring stack and build the default evaluators before serving.
+
+    `import sted` is lazy, so without this the first tool call would import scipy,
+    transformers and (with the embeddings extra) torch while the stdio transport's
+    reader thread is blocked reading stdin. On Windows that can deadlock: imports that
+    spawn a subprocess (platform probes) wait on the stdin pipe handle the reader holds.
+    Loading everything first also keeps the first call well inside client timeouts."""
+    from .rules import FieldRules
+    with contextlib.redirect_stdout(sys.stderr):
+        api._evaluators(FieldRules(), api._embedding_model(None))
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     """Console entry point `sted-mcp`: serve over stdio."""
-    build_server().run(transport="stdio")
+    server = build_server()
+    _warm_up()
+    server.run(transport="stdio")
 
 
 if __name__ == "__main__":
