@@ -78,34 +78,54 @@ def test_evaluate_consistency_input_limits():
         ms.evaluate_consistency([REF] * (ms.MAX_OUTPUTS + 1))
 
 
-def test_stdio_server_end_to_end():
+def test_stdio_server_end_to_end(tmp_path):
+    """Launch `python -m sted.mcp_server` over stdio and call both tools through the
+    official client. Results are collected inside the session and asserted after it
+    closes, so a failing check is reported as itself rather than as the client's
+    BrokenResourceError on teardown; the server's stderr is attached on failure."""
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
-    async def run():
+    calls = [
+        ("compare_outputs", {"output_a": REF, "output_b": CHANGED}),
+        ("evaluate_consistency", {"outputs": [REF, REORDERED, CHANGED]}),
+        ("compare_outputs", {"output_a": {**REF, "request_id": "a", "tags": [1, 2]},
+                             "output_b": {**REORDERED, "request_id": "b", "tags": [2, 1]},
+                             "ignore": ["request_id"], "unordered": ["tags"]}),
+    ]
+    got = {}
+
+    async def run(errlog):
         # The protocol path is what this test covers; embedding scoring is covered in-process
         # above. Character mode keeps the server start independent of torch load time.
         params = StdioServerParameters(command=sys.executable, args=["-m", "sted.mcp_server"],
                                        env={**os.environ, "STED_EMBEDDING_MODEL": "none"})
-        async with stdio_client(params) as (read, write):
+        async with stdio_client(params, errlog=errlog) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                tools = {t.name for t in (await session.list_tools()).tools}
-                assert tools == {"compare_outputs", "evaluate_consistency"}
-                res = await session.call_tool("compare_outputs", {"output_a": REF, "output_b": CHANGED})
-                assert not res.isError
-                payload = json.loads(res.content[0].text)
-                assert payload["same"] is False and payload["min_readout"] == 0.0
-                res = await session.call_tool("evaluate_consistency", {"outputs": [REF, REORDERED, CHANGED]})
-                assert not res.isError
-                assert json.loads(res.content[0].text)["validity"] == 1.0
-                res = await session.call_tool("compare_outputs", {
-                    "output_a": {**REF, "request_id": "a", "tags": [1, 2]},
-                    "output_b": {**REORDERED, "request_id": "b", "tags": [2, 1]},
-                    "ignore": ["request_id"], "unordered": ["tags"]})
-                assert not res.isError and json.loads(res.content[0].text)["same"] is True
+                got["tools"] = {t.name for t in (await session.list_tools()).tools}
+                for k, (name, args) in enumerate(calls):
+                    res = await session.call_tool(name, args)
+                    got[k] = (res.isError, res.content[0].text if res.content else None)
 
-    asyncio.run(asyncio.wait_for(run(), timeout=240))
+    log_path = tmp_path / "server_stderr.log"
+    error = None
+    with open(log_path, "w") as errlog:
+        try:
+            asyncio.run(asyncio.wait_for(run(errlog), timeout=240))
+        except BaseException as e:  # noqa: BLE001 - reported below with the server log
+            error = e
+    server_log = log_path.read_text()
+    context = f"collected={got!r}\nserver stderr:\n{server_log[-4000:]}"
+    if error is not None and len(got) < len(calls) + 1:
+        raise AssertionError(f"MCP session failed: {error!r}\n{context}") from error
+    assert got["tools"] == {"compare_outputs", "evaluate_consistency"}, context
+    for k in range(len(calls)):
+        assert got[k][0] is False, context
+    first = json.loads(got[0][1])
+    assert first["same"] is False and first["min_readout"] == 0.0, context
+    assert json.loads(got[1][1])["validity"] == 1.0, context
+    assert json.loads(got[2][1])["same"] is True, context
 
 
 def test_compare_lists_field_differences():
