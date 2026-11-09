@@ -1,0 +1,7 @@
+{
+  "arguments": {
+    "days": 3,
+    "city": "Seattle"
+  },
+  "name": "get_weather"
+}

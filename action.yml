@@ -1,0 +1,77 @@
+name: "STED structured-output check"
+description: "Compare structured LLM outputs field by field (sted compare / consistency / diff) and fail the step on differences."
+author: "AWS Generative AI Innovation Center"
+branding:
+  icon: "check-square"
+  color: "blue"
+
+inputs:
+  command:
+    description: "sted subcommand: diff, compare or consistency"
+    required: true
+  args:
+    description: "Arguments for the subcommand, e.g. 'expected/ actual/ --rules sted-rules.json'. Split on whitespace (no quoting)."
+    required: true
+  extras:
+    description: "Optional extras to install, e.g. 'embeddings' for semantic comparison of free-text fields (pulls in torch)."
+    required: false
+    default: ""
+  python-version:
+    description: "Python version to run sted with."
+    required: false
+    default: "3.12"
+
+outputs:
+  exit-code:
+    description: "0 same / consistent, 1 different / inconsistent, 2 usage or input error"
+    value: ${{ steps.run.outputs.exit-code }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install sted
+      shell: bash
+      env:
+        STED_EXTRAS: ${{ inputs.extras }}
+        STED_SRC: ${{ github.action_path }}
+      run: |
+        if [ -n "$STED_EXTRAS" ]; then
+          python -m pip install --quiet "${STED_SRC}[${STED_EXTRAS}]"
+        else
+          python -m pip install --quiet "${STED_SRC}"
+        fi
+
+    - name: Run sted
+      id: run
+      shell: bash
+      env:
+        STED_COMMAND: ${{ inputs.command }}
+        STED_ARGS: ${{ inputs.args }}
+        PYTHONWARNINGS: "ignore::UserWarning"
+      run: |
+        case "$STED_COMMAND" in
+          diff|compare|consistency) ;;
+          *) echo "::error::command must be diff, compare or consistency, got '$STED_COMMAND'"; exit 2 ;;
+        esac
+        out="$(mktemp)"
+        set +e
+        # shellcheck disable=SC2086  # STED_ARGS is intentionally split into words
+        sted "$STED_COMMAND" $STED_ARGS > "$out" 2>&1
+        code=$?
+        set -e
+        cat "$out"
+        {
+          echo "### sted $STED_COMMAND"
+          echo '```'
+          cat "$out"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        if [ "$code" -ne 0 ]; then
+          echo "::error::sted $STED_COMMAND exited with $code"
+        fi
+        exit "$code"

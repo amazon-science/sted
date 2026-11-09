@@ -3,7 +3,7 @@
 Run it over stdio (the transport MCP clients such as Claude Code and Claude Desktop
 launch)::
 
-    pip install "sted[mcp] @ git+https://github.com/amazon-science/sted.git"
+    pip install "sted[mcp] @ git+https://github.com/amazon-science/sted.git"   # mcp 1.x or 2.x
     sted-mcp
 
 Tools (thin wrappers over ``sted.compare`` / ``sted.consistency``)
@@ -98,15 +98,18 @@ def evaluate_consistency(outputs: List[Any], threshold: float = 0.95,
 
 
 def build_server(name: str = "sted"):
-    """The FastMCP server with both tools registered."""
+    """The MCP server with both tools registered (mcp 1.x FastMCP or 2.x MCPServer)."""
     try:
-        from mcp.server.fastmcp import FastMCP
-    except ImportError as e:  # pragma: no cover - exercised only without the extra
-        raise ImportError(
-            "The STED MCP server needs mcp>=1.2,<2 (mcp 2.x renamed FastMCP). "
-            'Install with: pip install "mcp>=1.2,<2"'
-        ) from e
-    server = FastMCP(name)
+        from mcp.server.fastmcp import FastMCP as Server           # mcp 1.x
+    except ImportError:
+        try:
+            from mcp.server.mcpserver import MCPServer as Server   # mcp 2.x
+        except ImportError as e:  # pragma: no cover - exercised only without the extra
+            raise ImportError(
+                'The STED MCP server needs the mcp package (1.2+ or 2.x). '
+                'Install with: pip install "sted[mcp]"'
+            ) from e
+    server = Server(name)
     server.tool()(compare_outputs)
     server.tool()(evaluate_consistency)
     return server

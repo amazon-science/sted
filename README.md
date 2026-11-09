@@ -43,7 +43,10 @@ install has no torch.
 - **Field rules**: `ignore`, `unordered` (arrays as sets) and numeric `tolerance` by path
   pattern, in the library, the CLI and the MCP tools.
 - **`sted` command**: `compare`, `consistency` and `diff` subcommands with CI exit codes,
-  see [Command line](#command-line).
+  see [Command line](#command-line), and a GitHub Action that runs them.
+- **Test helpers**: `sted.testing.assert_same`, `assert_consistent` and `assert_snapshot`
+  (snapshot regression tests for LLM outputs), see [In your tests](#in-your-tests).
+- **MCP server works with mcp 1.x and 2.x.**
 - **Breaking: no torch by default.** The core install no longer pulls in
   sentence-transformers/torch and compares free-text fields by character similarity
   (with a one-time warning). To keep embedding-based scores, install
@@ -207,6 +210,34 @@ the call); `tolerance` maps a pattern to an absolute tolerance, or to
 `{"abs": a, "rel": r}`. The same rules are accepted by the MCP tools. For reuse, build them
 once: `rules = sted.FieldRules(ignore=[...])`, then `sted.compare(a, b, rules=rules)`.
 
+### In your tests
+
+```python
+from sted.testing import assert_same, assert_consistent, assert_snapshot
+
+def test_booking_call():
+    assert_snapshot(agent("Book SEA to JFK on Dec 1 for 2"), "snapshots/booking.json",
+                    ignore=["request_id"])
+
+def test_booking_is_stable():
+    runs = [agent("Book SEA to JFK on Dec 1 for 2") for _ in range(5)]
+    assert_consistent(runs, ignore=["request_id"], min_same=1.0)
+```
+
+The first run of `assert_snapshot` writes the snapshot; later runs compare against it and
+fail with the fields that changed:
+
+```
+E   AssertionError: output differs from snapshot snapshots/booking.json (snapshot -> actual)
+E   DIFFERENT  min 0.000  mean 0.875  (threshold 0.95)
+E     arguments.date                 "2026-12-01" -> "2026-12-02"   [changed, 0.000]
+E
+E   If the change is intended, rerun with STED_UPDATE_SNAPSHOTS=1 to update snapshots/booking.json.
+```
+
+`assert_same(actual, expected)` compares two outputs directly. All three take the field
+rules and `threshold`, and work under pytest, unittest or plain `assert`-style scripts.
+
 ## Command line
 
 ```bash
@@ -231,11 +262,24 @@ invalid output), or rows of `{"prompt": ..., "outputs": [...]}` and rates each p
 same three keys. `--json` prints machine-readable results. Exit codes: 0 same, 1 different,
 2 usage or input error, so each command can gate a CI step.
 
+### GitHub Action
+
+```yaml
+- uses: amazon-science/sted@main          # pin a tag or commit once released
+  with:
+    command: diff                         # or compare / consistency
+    args: expected/ actual/ --rules sted-rules.json
+    # extras: embeddings                  # semantic comparison of free-text fields
+```
+
+The step installs sted, runs the command, writes its output to the job summary, and fails
+when the outputs differ (output `exit-code`: 0 / 1 / 2). `args` is split on whitespace.
+
 ## MCP Server
 
 `sted-mcp` serves STED over the [Model Context Protocol](https://modelcontextprotocol.io)
-(stdio), so an agent can check its own outputs or compare runs. Requires Python ≥ 3.10
-and `mcp` 1.x (`sted[mcp]` pins `mcp>=1.2,<2`; mcp 2.x is not supported yet).
+(stdio), so an agent can check its own outputs or compare runs. Requires Python ≥ 3.10;
+works with `mcp` 1.x and 2.x.
 
 ```bash
 pip install "sted[mcp] @ git+https://github.com/amazon-science/sted.git"

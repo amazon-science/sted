@@ -307,3 +307,6 @@ human_validation_interface/samples/
 sted/gnn.py
 sted/pdc_metric.py
 sted/probabilistic_consistency.py
+
+# Test fixtures are data the tests need, despite the *.json rule above
+!tests/fixtures/**/*.json

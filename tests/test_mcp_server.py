@@ -106,7 +106,10 @@ def test_stdio_server_end_to_end(tmp_path):
                 got["tools"] = {t.name for t in (await session.list_tools()).tools}
                 for k, (name, args) in enumerate(calls):
                     res = await session.call_tool(name, args)
-                    got[k] = (res.isError, res.content[0].text if res.content else None)
+                    is_error = getattr(res, "isError", None)              # mcp 1.x
+                    if is_error is None:
+                        is_error = getattr(res, "is_error", False)        # mcp 2.x
+                    got[k] = (bool(is_error), res.content[0].text if res.content else None)
 
     log_path = tmp_path / "server_stderr.log"
     error = None

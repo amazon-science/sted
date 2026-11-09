@@ -1,0 +1,10 @@
+{
+  "name": "book_flight",
+  "arguments": {
+    "from": "SEA",
+    "to": "JFK",
+    "date": "2026-12-01",
+    "passengers": 2,
+    "request_id": "r-1"
+  }
+}
