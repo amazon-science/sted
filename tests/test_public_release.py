@@ -10,22 +10,18 @@ import warnings
 def test_imports():
     """Test that all public imports work"""
     print("Testing imports...")
-    from sted import (
-        STED,
-        SemanticJsonTreeConsistencyEvaluator,
-        StructuralConsistencyAnalyzer,
-        JsonNode,
-        StringSimilarityCache,
-        collect_all_values,
-        count_json_elements
-    )
+    from sted import STED, SemanticJsonTreeConsistencyEvaluator, compare, consistency  # noqa: F401
+    from sted.structural_consistency_analyzer import StructuralConsistencyAnalyzer  # noqa: F401
+    from sted.json_tree_node import JsonNode  # noqa: F401
+    from sted.similarity_cache import StringSimilarityCache  # noqa: F401
+    from sted.utils import collect_all_values, count_json_elements  # noqa: F401
     print("✓ All imports successful")
     return True
 
 def test_json_node():
     """Test JsonNode tree construction"""
     print("Testing JsonNode...")
-    from sted import JsonNode
+    from sted.json_tree_node import JsonNode
     
     data = {'name': 'John', 'items': [1, 2, 3]}
     node = JsonNode.from_dict(data)
@@ -38,7 +34,7 @@ def test_json_node():
 def test_similarity_cache():
     """Test similarity cache"""
     print("Testing StringSimilarityCache...")
-    from sted import StringSimilarityCache
+    from sted.similarity_cache import StringSimilarityCache
     
     cache = StringSimilarityCache()
     cache.set("hello", "world", 0.5)
@@ -51,7 +47,7 @@ def test_similarity_cache():
 def test_utils():
     """Test utility functions"""
     print("Testing utils...")
-    from sted import collect_all_values, count_json_elements
+    from sted.utils import collect_all_values, count_json_elements
     
     data = {'a': 1, 'b': {'c': 'hello'}, 'd': [1, 2]}
     
@@ -156,7 +152,8 @@ def test_deepdiff_methods():
 def test_batch_consistency():
     """Test batch consistency evaluation"""
     print("Testing batch consistency...")
-    from sted import SemanticJsonTreeConsistencyEvaluator, StructuralConsistencyAnalyzer
+    from sted import SemanticJsonTreeConsistencyEvaluator
+    from sted.structural_consistency_analyzer import StructuralConsistencyAnalyzer
     
     evaluator = SemanticJsonTreeConsistencyEvaluator(model_id='all-MiniLM-L6-v2')
     analyzer = StructuralConsistencyAnalyzer(evaluator)
@@ -177,7 +174,8 @@ def test_batch_consistency():
 def test_analyzer_with_ground_truth():
     """Test consistency evaluation with ground truth"""
     print("Testing analyzer with ground truth...")
-    from sted import SemanticJsonTreeConsistencyEvaluator, StructuralConsistencyAnalyzer
+    from sted import SemanticJsonTreeConsistencyEvaluator
+    from sted.structural_consistency_analyzer import StructuralConsistencyAnalyzer
     
     evaluator = SemanticJsonTreeConsistencyEvaluator(model_id='all-MiniLM-L6-v2')
     analyzer = StructuralConsistencyAnalyzer(evaluator)
@@ -198,7 +196,8 @@ def test_analyzer_with_ground_truth():
 def test_field_level_consistency():
     """Test field-level consistency evaluation"""
     print("Testing field-level consistency...")
-    from sted import SemanticJsonTreeConsistencyEvaluator, StructuralConsistencyAnalyzer
+    from sted import SemanticJsonTreeConsistencyEvaluator
+    from sted.structural_consistency_analyzer import StructuralConsistencyAnalyzer
     
     evaluator = SemanticJsonTreeConsistencyEvaluator(model_id='all-MiniLM-L6-v2')
     analyzer = StructuralConsistencyAnalyzer(evaluator)
@@ -219,7 +218,8 @@ def test_field_level_consistency():
 def test_collect_string_pairs():
     """Test string pair collection"""
     print("Testing collect_all_string_pairs...")
-    from sted import SemanticJsonTreeConsistencyEvaluator, StructuralConsistencyAnalyzer
+    from sted import SemanticJsonTreeConsistencyEvaluator
+    from sted.structural_consistency_analyzer import StructuralConsistencyAnalyzer
     
     evaluator = SemanticJsonTreeConsistencyEvaluator(model_id='all-MiniLM-L6-v2')
     analyzer = StructuralConsistencyAnalyzer(evaluator)

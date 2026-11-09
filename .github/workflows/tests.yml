@@ -105,7 +105,7 @@ jobs:
               assert importlib.util.find_spec(m) is None, f"{m} should not be installed"
           print("no torch, no sentence-transformers")
       - name: Run character-mode tests
-        run: python -m pytest -q -p no:cacheprovider tests/test_lite.py tests/test_rules.py tests/test_command.py tests/test_mcp_server.py
+        run: python -m pytest -q -p no:cacheprovider tests/test_lite.py tests/test_rules.py tests/test_command.py tests/test_api_surface.py tests/test_mcp_server.py
 
   build:
     runs-on: ubuntu-latest

@@ -1,6 +1,8 @@
 """
 Trained Consistency Predictor for Tool-Calling Prompts
 
+Research utility: not part of sted's stable API (see the README); may change or move.
+
 ML-based predictor (GBM) that estimates the probability of inconsistent
 LLM outputs from prompt + tool definitions alone — no generation needed.
 
@@ -8,7 +10,7 @@ Trained on 225K+ consistency measurements across 21 LLMs using 120 raw features
 (linguistic, schema, schema-interaction, and task-schema mismatch).
 
 Usage:
-    from sted import ConsistencyPredictor
+    from sted.consistency_predictor import ConsistencyPredictor
 
     # Load pre-trained model
     predictor = ConsistencyPredictor.load("models/consistency_predictor.joblib")

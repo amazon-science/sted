@@ -25,7 +25,8 @@ from tqdm import tqdm
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from sted import SemanticJsonTreeConsistencyEvaluator, StructuralConsistencyAnalyzer
+from sted import SemanticJsonTreeConsistencyEvaluator
+from sted.structural_consistency_analyzer import StructuralConsistencyAnalyzer
 
 
 def load_generation_results(results_dir: Path, temperature: float = 0.0, dataset_name: str = "") -> dict:

@@ -1,66 +1,77 @@
-"""
-Semantic JSON Tree Consistency Evaluation Framework
+"""STED: compare structured LLM outputs field by field and rate their consistency.
 
-This package provides tools for evaluating structural consistency of JSON outputs
-using tree edit distance algorithms enhanced with semantic similarity.
-"""
+Stable API::
 
-# Logging utilities (always available)
+    sted.compare(a, b, ignore=..., unordered=..., tolerance=...)   -> Comparison
+    sted.consistency(outputs, ...)                                 -> Consistency
+    sted.FieldRules(ignore=..., unordered=..., tolerance=...)
+    sted.AgentConsistencyEvaluator          batch evaluation of agents / production logs
+    sted.SemanticJsonTreeConsistencyEvaluator (alias sted.STED)   low-level evaluator, profiles
+    sted.parse_structured_string, sted.detect_format              JSON / YAML / XML / HTML text
+
+Everything else is importable from its submodule (``sted.otel_adapter``,
+``sted.format_converters``, ...). Research utilities that used to be re-exported here
+(LLM judge, consistency predictor / risk assessor, JSON helpers) still resolve with a
+DeprecationWarning; import them from their submodules instead.
+"""
+import importlib
+import warnings
+
 from ._logging import get_logger, set_log_level
-
-# The main entry points: sted.compare(a, b) and sted.consistency(outputs).
-# Heavy dependencies load on first call, not at import.
 from .rules import FieldRules
 from .api import compare, consistency, Comparison, Consistency, FieldDifference, UnstableField
-
-# Core lightweight imports (no bert_score dependency)
-from .json_tree_node import JsonNode
-from .similarity_cache import StringSimilarityCache
-from .utils import collect_all_values, count_json_elements, parse_structured_outputs
-from .format_converters import (
-    detect_format,
-    xml_to_dict,
-    yaml_to_dict,
-    html_to_dict,
-    parse_structured_string,
-)
-
-# Optional imports - these require bert_score and torch
-# Use lazy imports to allow package to work without these heavy dependencies
-try:
-    from .semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
-    from .structural_consistency_analyzer import StructuralConsistencyAnalyzer
-    # Short alias for main class (STED = Semantic Tree Edit Distance)
-    STED = SemanticJsonTreeConsistencyEvaluator
-except ImportError:
-    SemanticJsonTreeConsistencyEvaluator = None
-    StructuralConsistencyAnalyzer = None
-    STED = None
-
-try:
-    from .llm_judge import LLMJudge, create_llm_judge
-except ImportError:
-    LLMJudge = None
-    create_llm_judge = None
-
-from .consistency_risk_assessor import ConsistencyRiskAssessor, RiskReport
-from .consistency_predictor import ConsistencyPredictor, PredictionResult
-
-# High-level agent consistency wrapper. Lazy-imports the heavier deps via
-# the structural analyzer; safe to import at module load.
-try:
-    from .agent_consistency_evaluator import (
-        AgentConsistencyEvaluator,
-        ConsistencyReport,
-        PromptResult,
-    )
-except ImportError:
-    AgentConsistencyEvaluator = None
-    ConsistencyReport = None
-    PromptResult = None
+from .format_converters import detect_format, parse_structured_string
 
 __version__ = "0.2.0"
 __author__ = "AWS Generative AI Innovation Center"
+
+# Stable names whose modules pull in scipy and friends: loaded on first access.
+_LAZY = {
+    "SemanticJsonTreeConsistencyEvaluator": ("semantic_json_tree_consistency", "SemanticJsonTreeConsistencyEvaluator"),
+    "STED": ("semantic_json_tree_consistency", "SemanticJsonTreeConsistencyEvaluator"),
+    "AgentConsistencyEvaluator": ("agent_consistency_evaluator", "AgentConsistencyEvaluator"),
+    "ConsistencyReport": ("agent_consistency_evaluator", "ConsistencyReport"),
+    "PromptResult": ("agent_consistency_evaluator", "PromptResult"),
+}
+
+# No longer part of the top-level API: still resolvable, with a DeprecationWarning.
+_DEPRECATED = {
+    "StructuralConsistencyAnalyzer": ("structural_consistency_analyzer", "StructuralConsistencyAnalyzer"),
+    "JsonNode": ("json_tree_node", "JsonNode"),
+    "StringSimilarityCache": ("similarity_cache", "StringSimilarityCache"),
+    "collect_all_values": ("utils", "collect_all_values"),
+    "count_json_elements": ("utils", "count_json_elements"),
+    "parse_structured_outputs": ("utils", "parse_structured_outputs"),
+    "xml_to_dict": ("format_converters", "xml_to_dict"),
+    "yaml_to_dict": ("format_converters", "yaml_to_dict"),
+    "html_to_dict": ("format_converters", "html_to_dict"),
+    "LLMJudge": ("llm_judge", "LLMJudge"),
+    "create_llm_judge": ("llm_judge", "create_llm_judge"),
+    "ConsistencyRiskAssessor": ("consistency_risk_assessor", "ConsistencyRiskAssessor"),
+    "RiskReport": ("consistency_risk_assessor", "RiskReport"),
+    "ConsistencyPredictor": ("consistency_predictor", "ConsistencyPredictor"),
+    "PredictionResult": ("consistency_predictor", "PredictionResult"),
+}
+
+
+def __getattr__(name):
+    if name in _LAZY:
+        module, attr = _LAZY[name]
+    elif name in _DEPRECATED:
+        module, attr = _DEPRECATED[name]
+        warnings.warn(f"sted.{name} is no longer part of the top-level API; "
+                      f"use `from sted.{module} import {attr}`", DeprecationWarning, stacklevel=2)
+    else:
+        raise AttributeError(f"module 'sted' has no attribute {name!r}")
+    value = getattr(importlib.import_module(f".{module}", __name__), attr)
+    if name in _LAZY:
+        globals()[name] = value          # cache: later lookups skip __getattr__
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_LAZY))
+
 
 __all__ = [
     "compare",
@@ -70,28 +81,13 @@ __all__ = [
     "Consistency",
     "FieldDifference",
     "UnstableField",
-    "STED",
-    "SemanticJsonTreeConsistencyEvaluator",
-    "StructuralConsistencyAnalyzer",
-    "JsonNode",
-    "StringSimilarityCache",
-    "collect_all_values",
-    "count_json_elements",
-    "parse_structured_outputs",
-    "detect_format",
-    "xml_to_dict",
-    "yaml_to_dict",
-    "html_to_dict",
-    "parse_structured_string",
-    "LLMJudge",
-    "create_llm_judge",
-    "ConsistencyRiskAssessor",
-    "RiskReport",
-    "ConsistencyPredictor",
-    "PredictionResult",
     "AgentConsistencyEvaluator",
     "ConsistencyReport",
     "PromptResult",
+    "SemanticJsonTreeConsistencyEvaluator",
+    "STED",
+    "parse_structured_string",
+    "detect_format",
     "get_logger",
     "set_log_level",
 ]

@@ -1,3 +1,7 @@
+"""AWS Bedrock / OpenAI-compatible generation helpers used by the experiment scripts.
+
+Research utility: not part of sted's stable API (see the README); may change or move.
+"""
 import json
 import logging
 import os
