@@ -265,7 +265,7 @@ same three keys. `--json` prints machine-readable results. Exit codes: 0 same, 1
 ### GitHub Action
 
 ```yaml
-- uses: amazon-science/sted@main          # pin a tag or commit once released
+- uses: amazon-science/sted@v0.2.0
   with:
     command: diff                         # or compare / consistency
     args: expected/ actual/ --rules sted-rules.json
