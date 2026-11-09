@@ -123,7 +123,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[langsmith,inspect]" pytest
-      - run: python -c "import importlib.metadata as m; print({p: m.version(p) for p in ('langsmith', 'inspect_ai')})"
+      - name: framework versions
+        shell: python
+        run: |
+          import importlib.metadata as m
+          print({p: m.version(p) for p in ("langsmith", "inspect_ai")})
       - run: python -m pytest -q -p no:cacheprovider tests/test_integrations.py
         env:
           STED_EMBEDDING_MODEL: none
