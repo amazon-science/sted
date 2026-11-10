@@ -25,6 +25,17 @@ install has no torch.
 
 ## What's New
 
+**November 2026 — v0.3.0**
+- **Integrations**: LangSmith evaluators (per run and across `num_repetitions`) and an
+  Inspect AI scorer and epoch reducer in the package, see [Integrations](#integrations).
+- **Examples for Braintrust, W&B Weave, DeepEval, Ragas, MLflow and promptfoo** in
+  [examples/integrations](examples/integrations/), run by CI against the frameworks'
+  current releases, with a switch to run them against a real model.
+- **Real-model checks** (`scripts/integration_checks/`): the adapters against Claude on
+  Bedrock, and a throughput benchmark (300 examples × 5 runs in about 6 s).
+- Fixed: Inspect `sted_match(answer_from="tool_calls")` missed tool calls under
+  `generate()`'s default tool loop.
+
 **November 2026 — v0.2.0**
 - **Breaking: new default scoring.** `SemanticJsonTreeConsistencyEvaluator()` now uses
   `profile="typed"` (the *min readout*): a score of θ means every matched field scores at
@@ -47,8 +58,6 @@ install has no torch.
 - **Test helpers**: `sted.testing.assert_same`, `assert_consistent` and `assert_snapshot`
   (snapshot regression tests for LLM outputs), see [In your tests](#in-your-tests).
 - **MCP server works with mcp 1.x and 2.x.**
-- **Integrations**: LangSmith evaluators (per run and across `num_repetitions`) and an
-  Inspect AI scorer and epoch reducer, see [Integrations](#integrations).
 - **Breaking: no torch by default.** The core install no longer pulls in
   sentence-transformers/torch and compares free-text fields by character similarity
   (with a one-time warning). To keep embedding-based scores, install
@@ -268,7 +277,7 @@ same three keys. `--json` prints machine-readable results. Exit codes: 0 same, 1
 ### GitHub Action
 
 ```yaml
-- uses: amazon-science/sted@v0.2.0
+- uses: amazon-science/sted@v0.3.0
   with:
     command: diff                         # or compare / consistency
     args: expected/ actual/ --rules sted-rules.json
