@@ -146,20 +146,20 @@ jobs:
 
   # The released action referenced the way another repository would use it.
   action-remote:
-    name: action from amazon-science/sted@v0.2.0
+    name: action from amazon-science/sted@v0.3.0
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: same outputs pass
-        uses: amazon-science/sted@v0.2.0
+        uses: amazon-science/sted@v0.3.0
         with:
           command: diff
           args: tests/fixtures/action/expected tests/fixtures/action/same --rules tests/fixtures/action/rules.json
       - name: a changed field fails
         id: changed
         continue-on-error: true
-        uses: amazon-science/sted@v0.2.0
+        uses: amazon-science/sted@v0.3.0
         with:
           command: diff
           args: tests/fixtures/action/expected tests/fixtures/action/changed --rules tests/fixtures/action/rules.json
