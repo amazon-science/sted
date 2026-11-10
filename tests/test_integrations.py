@@ -123,3 +123,55 @@ def test_inspect_completion_parsing():
     assert _from_completion('```json\n{"a": 1}\n```') == {"a": 1}
     assert _from_completion('{"a": [1, 2]}') == {"a": [1, 2]}
     assert _from_completion("Sorry, no.") is None
+
+
+def test_inspect_tool_calls_with_default_tool_loop(tmp_path):
+    """answer_from="tool_calls" under generate()'s default loop: the model calls a real tool,
+    gets the result, then answers in text, so the call is not in state.output."""
+    pytest.importorskip("inspect_ai")
+    try:
+        from inspect_ai import Epochs, Task, eval as inspect_eval
+        from inspect_ai.agent._acp import server  # noqa: F401
+        from inspect_ai.dataset import Sample
+        from inspect_ai.model import ModelOutput, get_model
+        from inspect_ai.solver import generate, use_tools
+        from inspect_ai.tool import tool
+    except ImportError as e:
+        pytest.skip(f"inspect_ai not importable in this environment: {e}")
+    from sted.integrations.inspect_ai import sted_agreement, sted_match
+
+    @tool
+    def book_flight():
+        async def execute(to: str, date: str, request_id: str):
+            """Book a flight.
+
+            Args:
+                to: destination airport
+                date: travel date
+                request_id: idempotency key
+            """
+            return "booked"
+        return execute
+
+    n = collections.Counter()
+
+    def outputs(messages, tools, tool_choice, config):
+        if messages[-1].role == "tool":                      # after the tool ran: final reply
+            return ModelOutput.from_content(model="mockllm", content="Booked.")
+        n["calls"] += 1
+        date = "2026-12-02" if n["calls"] == 2 else "2026-12-01"
+        return ModelOutput.for_tool_call(model="mockllm", tool_name="book_flight",
+                                         tool_arguments={"to": "JFK", "date": date, "request_id": f"r{n['calls']}"})
+
+    target = json.dumps([{"name": "book_flight", "arguments": {"to": "JFK", "date": "2026-12-01", "request_id": "x"}}])
+    task = Task(dataset=[Sample(input="book SEA-JFK dec 1", target=target)],
+                solver=[use_tools(book_flight()), generate()],               # default tool_calls="loop"
+                scorer=sted_match(answer_from="tool_calls", ignore=["request_id"]),
+                epochs=Epochs(3, [sted_agreement(ignore=["request_id"]), "mean"]))
+    log = inspect_eval(task, model=get_model("mockllm/model", custom_outputs=outputs),
+                       display="none", log_dir=str(tmp_path))[0]
+    assert log.status == "success"
+    assert all(s.output.completion == "Booked." for s in log.samples)        # final text, no tool call
+    by_reducer = {r.reducer: [float(x.value) for x in r.samples] for r in log.reductions}
+    assert by_reducer["mean"] == [pytest.approx(2 / 3)]
+    assert by_reducer["sted_agreement"] == [pytest.approx(1 / 3)]

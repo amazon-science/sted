@@ -15,7 +15,8 @@ the same under STED's min readout, with the differing fields in the explanation 
 ``min_readout`` / ``mean_readout`` / ``differences`` in the metadata. The structured
 output is read from the completion text (``answer_from="completion"``, JSON, optionally
 inside a ```json fence) or from the model's tool calls (``answer_from="tool_calls"``:
-``[{"name": ..., "arguments": ...}]``). The parsed output is stored in ``Score.answer``.
+``[{"name": ..., "arguments": ...}]``, every call in the sample's conversation, so it works
+with generate()'s default tool loop). The parsed output is stored in ``Score.answer``.
 
 ``sted_agreement`` is an epoch reducer. Inspect's built-in reducers aggregate the epochs'
 *scores*; this compares the epochs' *outputs* (``Score.answer``) with each other and
@@ -45,7 +46,17 @@ def _from_completion(text: str) -> Any:
 
 
 def _from_tool_calls(state) -> Any:
-    calls = getattr(getattr(state.output, "message", None), "tool_calls", None) or []
+    """Every tool call the model made in the sample, in order.
+
+    With generate()'s default tool loop the calls sit in earlier assistant messages and
+    state.output is the final text reply, so read the whole conversation; fall back to
+    state.output for solvers that do not record messages."""
+    calls = []
+    for m in getattr(state, "messages", None) or []:
+        if getattr(m, "role", None) == "assistant":
+            calls.extend(getattr(m, "tool_calls", None) or [])
+    if not calls:
+        calls = getattr(getattr(state.output, "message", None), "tool_calls", None) or []
     return [{"name": c.function, "arguments": c.arguments} for c in calls] or None
 
 
