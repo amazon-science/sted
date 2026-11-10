@@ -11,14 +11,17 @@ import json
 from braintrust import Eval
 
 import sted
-from _fake_agent import REFERENCE, book_flight
+from _fake_agent import REAL, REFERENCE, book_flight
 
 RULES = {"ignore": ["request_id"]}
 
 
 def sted_same(input, output, expected):
     """Braintrust scorer: 1 if output and expected are the same, differences in metadata."""
-    r = sted.compare(expected, output, **RULES)
+    try:
+        r = sted.compare(expected, output, **RULES)
+    except ValueError as e:              # the output is not JSON, e.g. a text reply
+        return {"name": "sted_same", "score": 0.0, "metadata": {"error": str(e)}}
     return {"name": "sted_same", "score": float(r.same),
             "metadata": {"min_readout": r.min_readout, "differences": r.to_dict()["differences"]}}
 
@@ -38,6 +41,10 @@ if __name__ == "__main__":
                   trial_count=3, no_send_logs=True)
     for inp, c in trial_consistency(result).items():
         print(inp, "\n", c)
-        assert abs(c.share_same - 1 / 3) < 1e-6 and [u.path for u in c.unstable_fields] == ["arguments.date"]
-    assert sorted(r.scores["sted_same"] for r in result.results) == [0.0, 1.0, 1.0]
+        if not REAL:
+            assert abs(c.share_same - 1 / 3) < 1e-6 and [u.path for u in c.unstable_fields] == ["arguments.date"]
+    print("sted_same per trial:", [r.scores["sted_same"] for r in result.results])
+    if not REAL:
+        assert sorted(r.scores["sted_same"] for r in result.results) == [0.0, 1.0, 1.0]
+    assert len(result.results) == 3 and all(r.scores["sted_same"] in (0.0, 1.0) for r in result.results)
     print("ok")

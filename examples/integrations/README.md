@@ -19,6 +19,18 @@ LangSmith and Inspect AI have adapters in the package itself
 
 Run one: `cd examples/integrations && python braintrust_example.py` (prints `ok`).
 
+With a real model: `STED_EXAMPLE_AGENT=bedrock python braintrust_example.py` calls Claude
+Haiku 4.5 on AWS Bedrock (`STED_EXAMPLE_MODEL`, `STED_EXAMPLE_PROMPT` to change); for
+promptfoo, `npx promptfoo@latest eval -c promptfooconfig.real.yaml --repeat 3`. The
+examples then print their results instead of checking exact numbers.
+
+Every scorer treats an output that is not JSON as a failed comparison (score 0, the error
+as the reason) and `sted.consistency` counts it as invalid. That matters with real models:
+on the 2026-11-10 run, a clear prompt ("the first Tuesday of December") gave the same
+correct call every time in all six frameworks, while an ambiguous one ("next Friday or the
+one after, whichever is cheaper") made the model answer in text instead of calling the
+tool, which shows up as validity 0, not as a consistent run.
+
 Framework quirks found while writing these (versions of Nov 2026):
 
 - **DeepEval** copies a metric by calling `__init__` with the attributes that share a

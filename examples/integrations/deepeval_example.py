@@ -17,7 +17,7 @@ from deepeval.metrics import BaseMetric  # noqa: E402
 from deepeval.test_case import LLMTestCase  # noqa: E402
 
 import sted  # noqa: E402
-from _fake_agent import REFERENCE, book_flight  # noqa: E402
+from _fake_agent import REAL, REFERENCE, book_flight  # noqa: E402
 
 
 class StedMatch(BaseMetric):
@@ -25,8 +25,12 @@ class StedMatch(BaseMetric):
         self.threshold, self.ignore, self.unordered, self.tolerance = threshold, ignore, unordered, tolerance
 
     def measure(self, test_case: LLMTestCase, *args, **kwargs) -> float:
-        r = sted.compare(test_case.expected_output, test_case.actual_output, threshold=self.threshold,
-                         ignore=self.ignore, unordered=self.unordered, tolerance=self.tolerance)
+        try:
+            r = sted.compare(test_case.expected_output, test_case.actual_output, threshold=self.threshold,
+                             ignore=self.ignore, unordered=self.unordered, tolerance=self.tolerance)
+        except ValueError as e:          # the output is not JSON, e.g. a text reply
+            self.score, self.success, self.reason = 0.0, False, str(e)
+            return self.score
         self.score, self.success, self.reason = r.min_readout, r.same, str(r)
         return self.score
 
@@ -42,12 +46,16 @@ class StedMatch(BaseMetric):
 
 
 if __name__ == "__main__":
-    cases = [LLMTestCase(input="Book SEA to JFK on Dec 1 for 2", actual_output=json.dumps(book_flight(run)),
+    as_text = lambda v: v if isinstance(v, str) else json.dumps(v)  # noqa: E731
+    cases = [LLMTestCase(input="Book SEA to JFK on Dec 1 for 2", actual_output=as_text(book_flight(run)),
                          expected_output=json.dumps(REFERENCE)) for run in (0, 1)]
     result = evaluate(test_cases=cases, metrics=[StedMatch(ignore=["request_id"])])
     verdicts = [t.success for t in result.test_results]
-    print(verdicts, result.test_results[1].metrics_data[0].reason)
-    assert sorted(verdicts) == [False, True]
+    for t in result.test_results:
+        print(t.success, t.metrics_data[0].reason.splitlines()[:2])
+    if not REAL:
+        assert sorted(verdicts) == [False, True]
+    assert len(verdicts) == 2
     # DeepEval reruns tests (`deepeval test run -r N`) but has no cross-run metric:
     print(sted.consistency([book_flight(run) for run in range(3)], ignore=["request_id"]))
     print("ok")
