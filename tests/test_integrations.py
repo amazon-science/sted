@@ -78,6 +78,45 @@ def test_langsmith_consistency_needs_repetitions():
 
 # ------------------------------------------------------------------ Inspect AI
 
+def _mock_model(outputs):
+    """mockllm with callable outputs (inspect_ai >= ~0.3.110); skip on older releases."""
+    from inspect_ai.model import get_model
+    try:
+        return get_model("mockllm/model", custom_outputs=outputs)
+    except ValueError as e:
+        pytest.skip(f"this inspect_ai's mockllm does not take callable outputs: {e}")
+
+
+def test_inspect_adapter_api_on_any_supported_version(tmp_path):
+    """Scorer + reducer against the Inspect API itself, with generator outputs that every
+    supported inspect_ai (>= 0.3.100) accepts."""
+    pytest.importorskip("inspect_ai")
+    try:
+        _check_acp()
+        from inspect_ai import Epochs, Task, eval as inspect_eval
+        from inspect_ai.dataset import Sample
+        from inspect_ai.model import ModelOutput, get_model
+        from inspect_ai.solver import generate
+    except ImportError as e:
+        pytest.skip(f"inspect_ai not importable in this environment: {e}")
+    from sted.integrations.inspect_ai import sted_agreement, sted_match
+    gen = (ModelOutput.from_content(model="mockllm", content=json.dumps(WEATHER)) for _ in itertools.count())
+    task = Task(dataset=[Sample(input="w", target=json.dumps(WEATHER))], solver=generate(), scorer=sted_match(),
+                epochs=Epochs(3, [sted_agreement(), "mean"]))
+    log = inspect_eval(task, model=get_model("mockllm/model", custom_outputs=gen), display="none",
+                       log_dir=str(tmp_path))[0]
+    assert log.status == "success"
+    assert {r.reducer: [float(x.value) for x in r.samples] for r in log.reductions} == \
+        {"sted_agreement": [1.0], "mean": [1.0]}
+
+
+def _check_acp():
+    """Recent inspect_ai imports agent-client-protocol at eval time and breaks on its 1.x;
+    older inspect_ai has no ACP module at all, which is fine."""
+    import importlib.util
+    if importlib.util.find_spec("inspect_ai.agent._acp") is not None:
+        from inspect_ai.agent._acp import server  # noqa: F401
+
 def _inspect_task(epochs=3):
     from inspect_ai import Epochs, Task
     from inspect_ai.dataset import Sample
@@ -94,8 +133,7 @@ def test_inspect_eval_with_epoch_reducer(tmp_path):
     try:
         from inspect_ai import eval as inspect_eval
         from inspect_ai.model import ModelOutput, get_model
-        import inspect_ai._eval.eval  # noqa: F401
-        from inspect_ai.agent._acp import server  # noqa: F401  (fails on agent-client-protocol 1.x)
+        _check_acp()
     except ImportError as e:
         pytest.skip(f"inspect_ai not importable in this environment: {e}")
 
@@ -107,7 +145,7 @@ def test_inspect_eval_with_epoch_reducer(tmp_path):
         body = WEATHER if "weather" in text else call("2026-12-02" if seen[text] == 2 else "2026-12-01", f"r-{seen[text]}")
         return ModelOutput.from_content(model="mockllm", content="```json\n" + json.dumps(body) + "\n```")
 
-    log = inspect_eval(_inspect_task(), model=get_model("mockllm/model", custom_outputs=outputs),
+    log = inspect_eval(_inspect_task(), model=_mock_model(outputs),
                        display="none", log_dir=str(tmp_path))[0]
     assert log.status == "success"
     by_reducer = {r.reducer: {s.sample_id: float(s.value) for s in r.samples} for r in log.reductions}
@@ -131,7 +169,7 @@ def test_inspect_tool_calls_with_default_tool_loop(tmp_path):
     pytest.importorskip("inspect_ai")
     try:
         from inspect_ai import Epochs, Task, eval as inspect_eval
-        from inspect_ai.agent._acp import server  # noqa: F401
+        _check_acp()
         from inspect_ai.dataset import Sample
         from inspect_ai.model import ModelOutput, get_model
         from inspect_ai.solver import generate, use_tools
@@ -168,7 +206,7 @@ def test_inspect_tool_calls_with_default_tool_loop(tmp_path):
                 solver=[use_tools(book_flight()), generate()],               # default tool_calls="loop"
                 scorer=sted_match(answer_from="tool_calls", ignore=["request_id"]),
                 epochs=Epochs(3, [sted_agreement(ignore=["request_id"]), "mean"]))
-    log = inspect_eval(task, model=get_model("mockllm/model", custom_outputs=outputs),
+    log = inspect_eval(task, model=_mock_model(outputs),
                        display="none", log_dir=str(tmp_path))[0]
     assert log.status == "success"
     assert all(s.output.completion == "Booked." for s in log.samples)        # final text, no tool call
