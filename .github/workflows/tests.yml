@@ -112,6 +112,97 @@ jobs:
           python -c "import importlib.metadata as m; print('mcp', m.version('mcp'))"
           python -m pytest -q -p no:cacheprovider tests/test_mcp_server.py
 
+  # LangSmith and Inspect AI adapters, end to end and offline (no API keys), on the
+  # current releases and on the lowest versions the extras allow.
+  integrations:
+    name: integrations (${{ matrix.versions }}) / py3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - versions: latest
+            install: ".[langsmith,inspect]"
+          - versions: minimum
+            install: ". langsmith==0.2.0 inspect_ai==0.3.100"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        env:
+          INSTALL: ${{ matrix.install }}
+        run: pip install -e $INSTALL pytest
+      - name: framework versions
+        shell: python
+        run: |
+          import importlib.metadata as m
+          print({p: m.version(p) for p in ("langsmith", "inspect_ai")})
+      - run: python -m pytest -q -p no:cacheprovider -rs tests/test_integrations.py
+        env:
+          STED_EMBEDDING_MODEL: none
+
+  # The released action referenced the way another repository would use it.
+  action-remote:
+    name: action from amazon-science/sted@v0.2.0
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: same outputs pass
+        uses: amazon-science/sted@v0.2.0
+        with:
+          command: diff
+          args: tests/fixtures/action/expected tests/fixtures/action/same --rules tests/fixtures/action/rules.json
+      - name: a changed field fails
+        id: changed
+        continue-on-error: true
+        uses: amazon-science/sted@v0.2.0
+        with:
+          command: diff
+          args: tests/fixtures/action/expected tests/fixtures/action/changed --rules tests/fixtures/action/rules.json
+      - name: the changed run must have failed with exit code 1
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.changed.outcome }}
+          CODE: ${{ steps.changed.outputs.exit-code }}
+        run: test "$OUTCOME" = "failure" && test "$CODE" = "1"
+
+  # examples/integrations, run against the frameworks' current releases.
+  examples:
+    name: examples (${{ matrix.group }}) / py3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: braintrust, weave
+            packages: braintrust weave
+          - group: deepeval, ragas, mlflow, promptfoo
+            packages: deepeval ragas mlflow langchain-community<0.4
+            promptfoo: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        if: matrix.promptfoo == '1'
+        with:
+          node-version: "22"
+      - name: Install
+        env:
+          PACKAGES: ${{ matrix.packages }}
+        run: pip install -e . pytest $PACKAGES
+      - name: Run examples
+        env:
+          STED_EMBEDDING_MODEL: none
+          STED_RUN_PROMPTFOO: ${{ matrix.promptfoo }}
+        run: python -m pytest -q -p no:cacheprovider -rs tests/test_integration_examples.py
+
   # The composite action in action.yml, used the way other repositories would use it.
   action:
     name: action / ${{ matrix.os }}

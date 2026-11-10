@@ -1,0 +1,16 @@
+# The same STED assertion against a real model on Bedrock (needs AWS credentials):
+#   npx promptfoo@latest eval -c promptfooconfig.real.yaml --repeat 3
+description: STED field-level check of a real model's tool call
+prompts:
+  - "Book a flight to New York JFK for two people on the first Tuesday of December 2026."
+providers:
+  - id: file://bedrock_provider.py
+    label: claude-haiku-4.5 on bedrock
+defaultTest:
+  vars:
+    expected: '{"name": "book_flight", "arguments": {"to": "JFK", "date": "2026-12-01", "passengers": 2}}'
+  assert:
+    - type: python
+      value: file://sted_assert.py
+tests:
+  - description: booking on the first Tuesday of December
