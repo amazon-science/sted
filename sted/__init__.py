@@ -22,7 +22,7 @@ from .rules import FieldRules
 from .api import compare, consistency, Comparison, Consistency, FieldDifference, UnstableField
 from .format_converters import detect_format, parse_structured_string
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __author__ = "AWS Generative AI Innovation Center"
 
 # Stable names whose modules pull in scipy and friends: loaded on first access.

@@ -25,7 +25,7 @@ install has no torch.
 
 ## What's New
 
-**Unreleased**
+**November 2026 — v0.4.0**
 - **Breaking: `AgentConsistencyEvaluator` reads text outputs like `sted.consistency`.**
   JSON text is parsed before comparison (`'{"a": 1}'` now equals `{"a": 1}`; before, it was
   compared as a string, so a changed value could still score 0.935), and text that is not
@@ -106,7 +106,7 @@ Install it from GitHub instead:
 
 ```bash
 # Core: no torch (~170 MB environment); text fields compared by character similarity
-pip install "git+https://github.com/amazon-science/sted.git@v0.3.0"     # pin a release tag
+pip install "git+https://github.com/amazon-science/sted.git@v0.4.0"     # pin a release tag
 
 # + semantic comparison of free-text fields with a local embedding model (pulls in torch)
 pip install "sted[embeddings] @ git+https://github.com/amazon-science/sted.git"
@@ -288,7 +288,7 @@ same three keys. `--json` prints machine-readable results. Exit codes: 0 same, 1
 ### GitHub Action
 
 ```yaml
-- uses: amazon-science/sted@v0.3.0
+- uses: amazon-science/sted@v0.4.0
   with:
     command: diff                         # or compare / consistency
     args: expected/ actual/ --rules sted-rules.json
