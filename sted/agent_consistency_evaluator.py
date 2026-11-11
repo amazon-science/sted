@@ -196,22 +196,31 @@ class AgentConsistencyEvaluator:
         n_workers: int = 1,
         timeout_seconds: Optional[float] = None,
         mode: str = "json",
+        *,
+        strict_json: bool = True,
+        parse_json: bool = True,
+        ignore=None,
+        unordered=None,
+        tolerance=None,
+        rules=None,
     ):
         """
         Args:
             evaluator: Optional pre-built SemanticJsonTreeConsistencyEvaluator.
                 If None, a default evaluator is created lazily.
             structural_weight: w in [0,1]; default 0.5 (hybrid).
-            embedding_model: Sentence-Transformers model name (default
-                'all-MiniLM-L6-v2'). Ignored if evaluator is provided.
+            embedding_model: Sentence-Transformers model name, or "none" for
+                character similarity on text fields. Default: as sted.compare
+                (STED_EMBEDDING_MODEL, else all-MiniLM-L6-v2 when the embeddings
+                extra is installed, else character similarity). Ignored if
+                evaluator is provided.
             max_parallel_runs: Max concurrent agent invocations per prompt.
             n_workers: Number of threads to use for prompt-level
                 parallelism in `evaluate` and `evaluate_outputs`. Default 1
-                (sequential). Set to a value > 1 (e.g. 4-8) to evaluate
-                multiple prompts concurrently. Threads share the same
-                evaluator instance — its caches benefit from cross-prompt
-                hits, and batch-encoding is also shared. STED is thread-safe
-                under this access pattern.
+                (sequential). Threads share the evaluator and its caches. Scoring
+                is CPU-bound Python, so for pre-collected outputs more threads do
+                not speed it up (measured: 11.5 s with 1 worker, 13.9 s with 4, for
+                200 prompts x 10 runs); they help `evaluate` overlap agent calls.
             timeout_seconds: Optional per-pair timeout for STED similarity
                 calculation. If a single calculate_tree_edit_distance_fast call
                 exceeds this many seconds, the pair's similarity is marked None
@@ -224,6 +233,14 @@ class AgentConsistencyEvaluator:
                 ({"trace", "steps", "tool_calls", "messages", "actions",
                 "history"}) are matched positionally instead of via Hungarian.
                 Ignored if `evaluator` is provided (configure that explicitly).
+            strict_json: Text that is not JSON counts as an invalid output (default),
+                as in sted.consistency. False keeps the behaviour before 0.4.0: any
+                non-empty string is a valid output compared as one text leaf.
+            parse_json: Parse JSON text outputs before comparing (default). An output
+                '{"a": 1}' then equals {"a": 1}. False compares strings as they are.
+            ignore, unordered, tolerance, rules: Field rules as in sted.compare.
+                Not combinable with a pre-built ``evaluator`` (give it
+                ``field_rules`` instead).
         """
         from .structural_consistency_analyzer import StructuralConsistencyAnalyzer
 
@@ -232,11 +249,17 @@ class AgentConsistencyEvaluator:
                 f"mode must be 'json' or 'trajectory', got {mode!r}"
             )
 
+        from .rules import FieldRules
+        field_rules = FieldRules.coerce(rules, ignore=ignore, unordered=unordered, tolerance=tolerance)
+        if evaluator is not None and field_rules:
+            raise ValueError("field rules cannot be combined with a pre-built evaluator; "
+                             "construct it with field_rules=FieldRules(...) instead")
         if evaluator is None:
+            from .api import _embedding_model
             from .semantic_json_tree_consistency import SemanticJsonTreeConsistencyEvaluator
-            kwargs: dict = {"structural_weight": structural_weight}
-            if embedding_model is not None:
-                kwargs["model_id"] = embedding_model
+            embedding_model = _embedding_model(embedding_model)
+            kwargs: dict = {"structural_weight": structural_weight, "model_id": embedding_model,
+                            "field_rules": field_rules}
             if mode == "trajectory":
                 kwargs["exact_match_all_keys"] = True
                 kwargs["exact_match_fields"] = set(_TRAJECTORY_EXACT_MATCH_FIELDS)
@@ -244,6 +267,8 @@ class AgentConsistencyEvaluator:
             evaluator = SemanticJsonTreeConsistencyEvaluator(**kwargs)
 
         self._evaluator = evaluator
+        self.strict_json = bool(strict_json)
+        self.parse_json = bool(parse_json)
         self._analyzer = StructuralConsistencyAnalyzer(evaluator)
         self.max_parallel_runs = max_parallel_runs
         self.n_workers = max(1, int(n_workers))
@@ -252,7 +277,9 @@ class AgentConsistencyEvaluator:
         )
         self._metric_config = {
             "structural_weight": structural_weight,
-            "embedding_model": embedding_model or "all-MiniLM-L6-v2",
+            "embedding_model": getattr(evaluator, "model_id", embedding_model) or "none (character similarity)",
+            "strict_json": self.strict_json,
+            "field_rules": repr(field_rules) if field_rules else None,
             "n_workers": self.n_workers,
             "timeout_seconds": self.timeout_seconds,
             "mode": mode,
@@ -495,7 +522,7 @@ class AgentConsistencyEvaluator:
 
             all_strings = set()
             for _, outputs in items:
-                for output in outputs:
+                for output in map(self._prepare, outputs):
                     if output is not None and not (
                         isinstance(output, (dict, list)) and len(output) == 0
                     ):
@@ -516,9 +543,19 @@ class AgentConsistencyEvaluator:
         finally:
             ev._skip_auto_precompute = False
 
+    def _prepare(self, output: JsonLike) -> JsonLike:
+        """JSON text -> parsed value (when parse_json); anything else unchanged."""
+        if self.parse_json and isinstance(output, str):
+            try:
+                return json.loads(output)
+            except (json.JSONDecodeError, ValueError):
+                return output
+        return output
+
     def evaluate_pair(self, output1: JsonLike, output2: JsonLike) -> float:
         """Score similarity between exactly two outputs (returns STED in [0,1])."""
-        if not _is_valid(output1) or not _is_valid(output2):
+        output1, output2 = self._prepare(output1), self._prepare(output2)
+        if not _is_valid(output1, self.strict_json) or not _is_valid(output2, self.strict_json):
             return 0.0
         return self._evaluator.calculate_tree_edit_distance_fast(output1, output2)
 
@@ -615,7 +652,8 @@ class AgentConsistencyEvaluator:
                 error="no outputs",
             )
 
-        valid = [o for o in outputs if _is_valid(o)]
+        prepared = [self._prepare(o) for o in outputs]
+        valid = [o for o in prepared if _is_valid(o, self.strict_json)]
         n_valid = len(valid)
         r_v = n_valid / n_runs
 

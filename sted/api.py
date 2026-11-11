@@ -165,7 +165,9 @@ def _evaluators(rules: FieldRules, model: Optional[str]):
             pair = []
             for profile in ("typed", "typed_mean"):
                 sted = SemanticJsonTreeConsistencyEvaluator(profile=profile, model_id=model, field_rules=rules)
-                pair.append(AgentConsistencyEvaluator(evaluator=sted, timeout_seconds=PAIR_TIMEOUT_SECONDS))
+                # Outputs arrive parsed (_parse); do not parse JSON scalars a second time.
+                pair.append(AgentConsistencyEvaluator(evaluator=sted, timeout_seconds=PAIR_TIMEOUT_SECONDS,
+                                                      parse_json=False, strict_json=False))
             _cache[key] = tuple(pair)
         return _cache[key]
 
