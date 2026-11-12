@@ -567,15 +567,24 @@ See [STED Complexity Analysis](./docs/api/sted_complexity_analysis.md) for detai
 
 **20 LLMs** on Toucan tool calling: 1,006 prompts, 10 generations per prompt at each of
 11 temperatures (0.0–1.0), scored with STED's min readout (`profile="typed"`).
-Agreement $c_{mean}$ is the mean pairwise STED among a prompt's *valid* outputs; validity
-$r_v$ is the share of outputs that parse. They are reported separately.
+Agreement $c_{mean}$ is the mean pairwise STED among a prompt's *valid* outputs, averaged
+over the prompts with at least two valid outputs (prompts with fewer are left out, not
+scored 0; the right panel gives their count where validity is low). Validity $r_v$ is the
+share of outputs that parse. They are reported separately.
 
-- **No model is fully consistent at T = 0.** Agreement ranges from 0.26 (Mistral-Large-3)
-  to 0.98 (Claude-3.5-Haiku).
-- **Temperature effects are model-specific.** Claude-Haiku-4.5 drops from 0.94 to 0.71
-  between T = 0 and T = 1; GPT-4.1-Mini is unchanged (0.60); Llama-3.3-70B rises slightly.
-- **Validity and agreement are different axes.** Llama-3.3-70B parses only 33% of the
-  time; Grok-4.1-Fast parses 95% but agrees at 0.68.
+- **No model is fully consistent at T = 0.** Among models that parse in at least 95% of
+  runs, agreement ranges from 0.81 (Qwen3-32B) to 0.998 (Claude-3.5-Haiku); Mistral-Large-3
+  is lowest overall (0.29).
+- **Temperature lowers agreement, by a model-specific amount.** Claude-Haiku-4.5 drops from
+  0.98 to 0.74 between T = 0 and T = 1, Llama-3.3-70B from 0.95 to 0.87; GPT-4.1-Mini is
+  unchanged (0.77).
+- **Validity and agreement are different axes.** Llama-3.3-70B parses only 32% of the time
+  but agrees at 0.95 when it does; Gemini-2.5-Flash-Lite parses 54% and agrees at 0.999;
+  Grok-4.1-Fast parses 95% but agrees at 0.70. Scoring prompts without two valid outputs as
+  0 would mix the two (Llama-3.3-70B would drop to 0.38).
+
+*Correction (November 2026): an earlier version of this section and figure counted prompts
+with fewer than two valid outputs as agreement 0, which mixed validity into agreement.*
 
 The model list, how the outputs were generated, and the earlier benchmark in the
 NeurIPS 2025 workshop paper are in [docs/research](docs/research/README.md).
